@@ -58,6 +58,15 @@ def run_tokscale_json(period_args: list[str]) -> Dict[str, Any]:
 
 
 def _date_range_from_args(period_args: list[str]) -> tuple[Optional[datetime], Optional[datetime]]:
+    """Convert CLI date arguments into a local, half-open time range.
+
+    Args:
+        period_args: Arguments containing ``--today``, ``--since``, and/or ``--until``.
+
+    Returns:
+        The local start and exclusive end datetimes. Returns ``(None, None)``
+        when a supplied date cannot be parsed; omitted boundaries remain ``None``.
+    """
     if "--today" in period_args:
         # Both ends are resolved from their own date: adding a day to an aware
         # midnight would keep today's offset, which is an hour out whenever
@@ -87,6 +96,14 @@ def _date_range_from_args(period_args: list[str]) -> tuple[Optional[datetime], O
 
 
 def _usage_store_sources(tracker: CodingToolsUsageTracker) -> list[str]:
+    """Return tracker sources whose usage is stored in the persistent database.
+
+    Args:
+        tracker: Tracker whose parsers advertise their synchronization modes.
+
+    Returns:
+        Source names for parsers that do not use a source-native database.
+    """
     return [
         name
         for name, parser in tracker.parsers.items()
@@ -95,6 +112,14 @@ def _usage_store_sources(tracker: CodingToolsUsageTracker) -> list[str]:
 
 
 def _usage_store_live_sources(tracker: CodingToolsUsageTracker) -> list[str]:
+    """Return tracker sources read live instead of through the usage store.
+
+    Args:
+        tracker: Tracker whose parsers advertise their synchronization modes.
+
+    Returns:
+        Source names for parsers using ``source_native_db`` mode.
+    """
     return [
         name
         for name, parser in tracker.parsers.items()
@@ -105,6 +130,20 @@ def _usage_store_live_sources(tracker: CodingToolsUsageTracker) -> list[str]:
 def _collect_parser_file(
     parser: Any, file_sig: tuple[str, int, int], *, file_context: Optional[dict] = None,
 ) -> list[dict[str, Any]]:
+    """Parse one signed file while preserving the parser's existing state.
+
+    Args:
+        parser: Parser exposing file-signature and parsing hooks.
+        file_sig: File path, modification time in nanoseconds, and size.
+        file_context: Optional context associated with this file.
+
+    Returns:
+        Parsed usage entries for the file.
+
+    Raises:
+        Any exception raised by the strict parser; parser hooks are restored
+        before the exception propagates.
+    """
     # Parsers that expose the strict single-file entry point (``_parse_file_strict``)
     # are parsed through it, so a UsageFileVanished raised on the path the store
     # handed in reaches sync_files untouched and can be isolated there. The
@@ -126,6 +165,16 @@ def _collect_parser_file(
 
 
 def _complete_jsonl_tail(path: str, start_offset: int) -> tuple[str, int]:
+    """Read complete newline-terminated JSONL records from a byte offset.
+
+    Args:
+        path: JSONL file to read.
+        start_offset: Byte offset from which to read, clamped to zero.
+
+    Returns:
+        Decoded complete lines and the byte offset immediately after them.
+        An incomplete trailing record is excluded.
+    """
     with open(path, "rb") as handle:
         handle.seek(max(0, int(start_offset)))
         data = handle.read()
@@ -139,6 +188,19 @@ def _complete_jsonl_tail(path: str, start_offset: int) -> tuple[str, int]:
 
 
 def _collect_parser_tail(parser: Any, file_sig: tuple[str, int, int], start_offset: int) -> tuple[list[dict[str, Any]], int]:
+    """Parse complete appended JSONL records through a temporary file.
+
+    Args:
+        parser: Parser whose file-signature hook selects files to parse.
+        file_sig: Signature tuple whose first element is the source path.
+        start_offset: Byte offset at which the appended tail begins.
+
+    Returns:
+        Parsed entries and the safe offset after the last complete record.
+
+    Raises:
+        ValueError: If the source path does not end in ``.jsonl``.
+    """
     path = file_sig[0]
     if not str(path).endswith(".jsonl"):
         raise ValueError("tail append is only enabled for JSONL files")
@@ -247,6 +309,17 @@ def _collect_live_coding_entries(
     until: Optional[datetime],
     sources: list[str],
 ) -> list[dict[str, Any]]:
+    """Collect live-source entries and remove private billing metadata.
+
+    Args:
+        tracker: Coding-tool tracker to collect from.
+        since: Inclusive lower time bound, or ``None`` for no lower bound.
+        until: Exclusive upper time bound, or ``None`` for no upper bound.
+        sources: Live source names to collect.
+
+    Returns:
+        Public-shaped usage entries; returns an empty list when no sources are given.
+    """
     if not sources:
         return []
     tracker.collect(since, until, sources)
@@ -256,6 +329,15 @@ def _collect_live_coding_entries(
 
 
 def _merge_parsed_usage(parts: list[Dict[str, Any]]) -> Dict[str, Any]:
+    """Combine parsed usage summaries and recalculate aggregate cache rates.
+
+    Args:
+        parts: Usage summaries with ``all_models`` rows from separate sources.
+
+    Returns:
+        A summary containing totals, per-source apps, and ranked model rows.
+        Rows with zero total tokens are ignored.
+    """
     apps: Dict[str, Any] = {}
     all_models_dict: Dict[tuple[str, str], Any] = {}
 
@@ -363,6 +445,15 @@ def _merge_parsed_usage(parts: list[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def _merge_contribution_days(parts: list[list[dict]]) -> list[dict]:
+    """Merge contribution summaries for matching local calendar dates.
+
+    Args:
+        parts: Contribution-day lists from separate usage sources.
+
+    Returns:
+        Date-sorted days with additive totals and token breakdowns, maximum
+        intensity, and concatenated source details. Entries without dates are skipped.
+    """
     by_date: Dict[str, dict] = {}
     for contributions in parts:
         for src_day in contributions:
@@ -616,6 +707,14 @@ def _alias_period_days(token: str) -> Optional[int]:
 
 
 def period_to_days(period: str) -> int:
+    """Resolve a period token to its day count.
+
+    Args:
+        period: Integer day count, named period, or supported duration alias.
+
+    Returns:
+        At least one day; unrecognized tokens resolve to ``ALL_TIME_DAYS``.
+    """
     try:
         return max(1, int(period))
     except (TypeError, ValueError):
@@ -713,6 +812,15 @@ def resolve_period(
 
 
 def period_to_range_args(period: str) -> list[str]:
+    """Build CLI date arguments for a period ending today.
+
+    Args:
+        period: Period token interpreted by :func:`period_to_days`, or ``month``.
+
+    Returns:
+        ``--today`` for one-day windows, otherwise inclusive ``--since`` and
+        ``--until`` date arguments. Month uses the current calendar month.
+    """
     if period == "month":
         now_local = datetime.now().astimezone()
         start_date = now_local.replace(day=1).date()
@@ -728,6 +836,14 @@ def period_to_range_args(period: str) -> list[str]:
 
 
 def get_session_data(period: str) -> Dict[str, Any]:
+    """Get local session usage for a named period or day-count window.
+
+    Args:
+        period: Period token; ``month`` selects the calendar-month query.
+
+    Returns:
+        Session usage summary from the matching local session query.
+    """
     if period == "month":
         return get_session_usage_month()
     days = period_to_days(period)
@@ -766,6 +882,16 @@ def _normalize_model_name(name: str) -> str:
 
 
 def _contributions_from_entries(entries: list[dict]) -> list[dict]:
+    """Aggregate usage entries into local-day contribution records.
+
+    Args:
+        entries: Usage records with millisecond timestamps and token dimensions.
+
+    Returns:
+        Date-sorted contribution days with totals, token breakdowns, and source
+        details. Entries with nonpositive timestamps are skipped; cache-write
+        tokens are included in input totals per reporting semantics.
+    """
     by_date: Dict[str, dict] = {}
 
     for e in entries:
@@ -829,6 +955,14 @@ def _contributions_from_entries(entries: list[dict]) -> list[dict]:
 
 
 def get_tools_data(period: str) -> Dict[str, Any]:
+    """Get coding-tool usage for a period using the configured backend.
+
+    Args:
+        period: Period token converted to date arguments.
+
+    Returns:
+        Parsed coding-tool usage summary for the period.
+    """
     period_args = period_to_range_args(period)
     if USE_LOCAL_CODING_TOOLS_BACKEND:
         since, until = _date_range_from_args(period_args)
@@ -897,6 +1031,18 @@ def get_tools_data_for_range_str(date_from: str, date_to: str) -> Dict[str, Any]
 
 
 def get_tools_contributions_for_range(since: Optional[datetime], until: Optional[datetime]) -> list[dict]:
+    """Get coding-tool contribution days within a half-open time range.
+
+    Args:
+        since: Inclusive lower datetime bound, or ``None``.
+        until: Exclusive upper datetime bound, or ``None``.
+
+    Returns:
+        Contribution-day records from the configured local or Tokscale backend.
+
+    Raises:
+        RuntimeError: If the Tokscale graph command fails.
+    """
     if USE_LOCAL_CODING_TOOLS_BACKEND:
         tracker = CodingToolsUsageTracker()
         if persistent_usage_db_enabled():
@@ -937,6 +1083,18 @@ def get_tools_contributions_for_range(since: Optional[datetime], until: Optional
 
 
 def compute_usage(period: str, date_from: Optional[str] = None, date_to: Optional[str] = None) -> Dict[str, Any]:
+    """Build the combined OpenClaw and coding-tool usage response.
+
+    Args:
+        period: Period token used when explicit dates are not both supplied.
+        date_from: Optional inclusive start date in ``YYYY-MM-DD`` format.
+        date_to: Optional inclusive end date in ``YYYY-MM-DD`` format.
+
+    Returns:
+        Combined totals, tool and model breakdowns, resolved range, source
+        errors, and a generation timestamp. Explicit dates are used only when
+        both are present.
+    """
     # If specific dates are provided, use them instead of period
     if date_from and date_to:
         openclaw_data = get_openclaw_data_for_range(date_from, date_to)
@@ -1062,6 +1220,14 @@ def compute_usage(period: str, date_from: Optional[str] = None, date_to: Optiona
 
 
 def _current_period_range(period: str) -> tuple[datetime, datetime]:
+    """Return the current period from local midnight through the current instant.
+
+    Args:
+        period: Period token; ``month`` starts on the first local day.
+
+    Returns:
+        Start and end datetimes converted to UTC; the start is local midnight.
+    """
     now_local = datetime.now().astimezone()
 
     if period == "month":
@@ -1075,6 +1241,15 @@ def _current_period_range(period: str) -> tuple[datetime, datetime]:
 
 
 def previous_period_range(period: str) -> tuple[datetime, datetime]:
+    """Return the immediately preceding window matching a current period.
+
+    Args:
+        period: Period token used to determine the current window's length.
+
+    Returns:
+        Previous window start and exclusive end in UTC, with local calendar
+        boundaries preserved across daylight-saving transitions.
+    """
     current_since, current_until = _current_period_range(period)
     if period == "month":
         prev_until = current_since
@@ -1107,6 +1282,18 @@ def _compute_previous_usage(
     *,
     sync: bool = True,
 ) -> Dict[str, Any]:
+    """Compute aggregate usage for the window immediately before the current one.
+
+    Args:
+        period: Period token used when explicit dates are absent.
+        date_from: Optional inclusive custom start date.
+        date_to: Optional inclusive custom end date.
+        sync: Whether the coding-tool store should synchronize before reading.
+
+    Returns:
+        Previous-window token, cost, and message totals. When both custom dates
+        are supplied, the preceding window has the same duration.
+    """
     # If specific dates are provided, calculate previous period based on date range
     if date_from and date_to:
         current_since, current_until = parse_date_range(date_from, date_to)
@@ -1135,12 +1322,33 @@ def _compute_previous_usage(
 
 
 def pct_change(current: float, previous: float) -> Optional[float]:
+    """Calculate percentage change from a previous value, rounded to one decimal.
+
+    Args:
+        current: Value for the current window.
+        previous: Value for the comparison window.
+
+    Returns:
+        Percentage change relative to ``previous``, or ``None`` when it is zero.
+    """
     if previous == 0:
         return None
     return round(((current - previous) / previous) * 100, 1)
 
 
 def compute_usage_with_comparison(period: str, date_from: Optional[str] = None, date_to: Optional[str] = None) -> Dict[str, Any]:
+    """Compute usage and attach totals and percentage changes for the prior window.
+
+    Args:
+        period: Period token used unless both custom dates are supplied.
+        date_from: Optional inclusive custom start date.
+        date_to: Optional inclusive custom end date.
+
+    Returns:
+        The current usage response with a ``comparison`` block containing the
+        previous totals and percentage changes; percentages are ``None`` when
+        a previous total is zero.
+    """
     current = compute_usage(period, date_from, date_to)
     # The current window just synced every source; the previous window reads
     # what that sync stored rather than paying for a second one.

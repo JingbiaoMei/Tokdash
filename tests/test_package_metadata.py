@@ -31,3 +31,21 @@ def test_pyproject_version_configuration_matches_runtime_version():
     attr_match = re.search(r'^\s*version\s*=\s*\{\s*attr\s*=\s*"([^"]+)"\s*\}\s*$', dynamic_body, flags=re.M)
     assert attr_match, "Could not find tool.setuptools.dynamic.version attr"
     assert attr_match.group(1) == "tokdash.__version__"
+
+
+def test_all_test_files_have_module_docstrings() -> None:
+    """Every test file must have a module-level docstring."""
+    import ast
+    from pathlib import Path
+
+    test_dir = Path(__file__).parent
+    missing = []
+    for test_file in sorted(test_dir.glob("test_*.py")):
+        if test_file.name == "conftest.py":
+            continue
+        tree = ast.parse(test_file.read_text(encoding="utf-8"))
+        docstring = ast.get_docstring(tree)
+        if not docstring or not docstring.strip():
+            missing.append(test_file.name)
+
+    assert not missing, f"Test files missing module docstrings: {', '.join(missing)}"

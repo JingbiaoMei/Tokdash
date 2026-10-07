@@ -1,6 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50" viewBox="0 0 50 50" fill="none">
-  <!-- Freebuff mark: a stylised "F" cut from a rounded badge. Simple and
-       legible at 20px, in Freebuff's own accent green. -->
-  <rect x="4" y="4" width="42" height="42" rx="12" fill="#00C26E"/>
-  <path d="M18 14h15a2 2 0 0 1 0 4h-11v6h9a2 2 0 0 1 0 4h-9v8a2 2 0 0 1-4 0V14z" fill="#FFFFFF"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 96.81 96.81"><rect width="96.81" height="96.81" rx="18"/><g fill="#fff"><rect x="24.67" y="24.67" width="47.47" height="11.87"/><rect x="24.67" y="36.54" width="11.87" height="35.61"/><rect x="40.06" y="39.98" width="23.74" height="11.87"/><rect x="40.06" y="51.85" width="11.87" height="20.3"/></g></svg>

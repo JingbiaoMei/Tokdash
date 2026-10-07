@@ -27,7 +27,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 AGENTS_DIR = Path("docs/assets/agents")
 OUT_DIR = AGENTS_DIR / "pills"
-FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+FONT_PATH = r"C:\Windows\Fonts\arialbd.ttf"
 
 # (output key, display label, source logo filename) — order matches the README list.
 # A ``None`` label makes a logo-only pill: use it for sources that are already a

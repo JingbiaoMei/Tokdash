@@ -695,8 +695,8 @@ run('statsProvenance', () => {
   olderUsage.rows[0].stats.timestamp = '2026-09-27T21:00:00';
   const olderUsageCutoff = scenario(olderUsage.rows, olderUsage.usage).curves.recordedOn;
 
-  // The combined response carries the first host's timestamp. A second host's
-  // older successful Usage response must still qualify the combined curve.
+  // A newer combined timestamp must not hide an older per-server response.
+  // This defensive fixture deliberately gives the combined stamp a newer time.
   const hostA = weekFixture({ timestamp: '2026-09-27T21:00:00' });
   const hostB = weekFixture({ timestamp: '2026-09-27T07:30:00' });
   hostA.rows[0].stats.timestamp = '2026-09-27T21:00:00';

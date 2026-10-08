@@ -2497,6 +2497,32 @@
       color: var(--color-text);
     }
 
+    /* Harness mark + name, from the shared tool-identity system. The identity
+       defaults are sized for table rows and the chart legend, so the pill row
+       restates the square mark size rather than borrowing the table's compact
+       variant. Wordmarks (Mimo) keep their own 34x15 box: squeezed to icon size
+       the lettering turns to mush, and it is already the widest thing in the row. */
+    .modern-tool-pill .tool-identity { gap: 6px; }
+    .modern-tool-pill .tool-brand-icon { width: 18px; height: 18px; }
+    .modern-tool-pill .tool-brand-icon img { width: 16px; height: 16px; }
+    .modern-tool-pill:hover .tool-brand-icon { transform: translateY(-1px); opacity: .82; }
+
+    /* The pill row splits its toolbar with the search box. updateSessionPillDensity()
+       adds is-icon-only when the names no longer fit: the mark is the half a user
+       recognises, and every pill keeps title + aria-label so the name is still
+       there on hover and for screen readers. The all-pill glyph exists only in
+       that mode, which is why it stays display:none until the row collapses. */
+    .modern-tool-pill-icon { display: none; }
+    #sessionsQuickFilterBar.is-icon-only .modern-tool-pill { padding-inline: 9px; }
+    #sessionsQuickFilterBar.is-icon-only .tool-brand-label { display: none; }
+    #sessionsQuickFilterBar.is-icon-only .modern-tool-pill-icon {
+      display: inline-grid;
+      place-items: center;
+      flex: 0 0 auto;
+      width: 18px;
+      height: 18px;
+    }
+
     /* Slide-Over Drawer Styles */
     .session-drawer-backdrop {
       position: fixed;
@@ -3428,7 +3454,7 @@
     <div id="sessions-content" class="tab-content">
       <div id="sessionsPanelToolbar" class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
         <div class="flex items-center gap-2 overflow-x-auto py-1" id="sessionsQuickFilterBar">
-          <button class="modern-tool-pill active" type="button" data-tool="all" onclick="filterSessionPanels('all', this)" data-i18n="allTools">All Tools</button>
+          <button class="modern-tool-pill active" type="button" data-tool="all" onclick="filterSessionPanels('all', this)" title="All Tools" data-i18n-title="allTools" aria-label="All Tools" data-i18n-aria="allTools"><svg class="modern-tool-pill-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg><span class="tool-brand-label" data-i18n="allTools">All Tools</span></button>
         </div>
         <div class="flex items-center gap-2 flex-shrink-0">
           <input type="text" id="sessionSearchInput" class="ui-input text-xs py-1.5 px-3 rounded-lg" data-i18n-placeholder="searchSessions" placeholder="Search sessions/projects..." oninput="filterSessionsBySearch(this.value)" />
@@ -20983,11 +21009,17 @@
       const withData = SESSION_TOOL_KEYS.filter((tool) => (lastSessionsResponses?.[tool]?.sessions?.length || 0) > 0);
       const frag = document.createDocumentFragment();
       withData.forEach((tool) => {
+        const name = formatToolName(tool);
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'modern-tool-pill';
         btn.dataset.tool = tool;
-        btn.textContent = formatToolName(tool);
+        // Harness mark + name, the same identity the Overview and the panel
+        // headers wear. A collapsed pill shows the mark alone, so the name rides
+        // along as the pill's accessible name and tooltip.
+        btn.title = name;
+        btn.setAttribute('aria-label', name);
+        btn.appendChild(createToolIdentity(tool));
         btn.addEventListener('click', () => filterSessionPanels(tool, btn));
         frag.appendChild(btn);
       });
@@ -21007,6 +21039,48 @@
         allBtn?.classList.add('active');
         if (previous !== 'all') filterSessionPanels('all', allBtn);
       }
+      scheduleSessionPillDensity();
+    }
+
+    // The pill row and the search box share one toolbar, so a wide range with a
+    // dozen harnesses in it pushes the row into a sideways scroll. Measure the row
+    // with its names visible; when they cannot all fit, keep the marks and drop the
+    // names. is-icon-only never removes a pill, and every pill keeps its title and
+    // aria-label, so a collapsed row is still hoverable, focusable and readable.
+    function updateSessionPillDensity() {
+      const bar = document.getElementById('sessionsQuickFilterBar');
+      if (!bar) return;
+      // Measure the labelled layout first: the decision then depends only on the
+      // width available, never on the state the previous measurement left behind.
+      bar.classList.remove('is-icon-only');
+      if (bar.scrollWidth - bar.clientWidth > 1) bar.classList.add('is-icon-only');
+    }
+
+    let sessionPillDensityFrame = 0;
+    function scheduleSessionPillDensity() {
+      if (sessionPillDensityFrame) cancelAnimationFrame(sessionPillDensityFrame);
+      sessionPillDensityFrame = requestAnimationFrame(() => {
+        sessionPillDensityFrame = 0;
+        updateSessionPillDensity();
+      });
+    }
+
+    function initSessionPillDensity() {
+      const bar = document.getElementById('sessionsQuickFilterBar');
+      if (!bar) return;
+      // Watch the toolbar, not the pill row: collapsing re-sizes the row itself, and
+      // a ResizeObserver on the element its own edit resized fires once per edit,
+      // forever. The toolbar's width does not depend on how wide the row is.
+      const watched = document.getElementById('sessionsPanelToolbar') || bar.parentElement;
+      updateSessionPillDensity();
+      if (watched && typeof ResizeObserver !== 'undefined') {
+        new ResizeObserver(scheduleSessionPillDensity).observe(watched);
+      } else {
+        window.addEventListener('resize', scheduleSessionPillDensity);
+      }
+      // Webfonts land after first paint, and a face that turns out wider than the
+      // fallback is exactly what makes the names stop fitting.
+      if (document.fonts?.ready) document.fonts.ready.then(() => scheduleSessionPillDensity());
     }
 
     function filterSessionPanels(toolName, btn) {
@@ -21153,6 +21227,7 @@
       if (event.key === 'Escape') closeSessionModal();
     });
     initSessionPanels();
+    initSessionPillDensity();
 
     // Stats
     const statsCache = {

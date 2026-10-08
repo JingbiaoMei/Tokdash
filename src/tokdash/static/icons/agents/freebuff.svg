@@ -1,6 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50" viewBox="0 0 50 50" fill="none">
-  <!-- Freebuff mark: a stylised "F" cut from a rounded badge. Simple and
-       legible at 20px, in Freebuff's own accent green. -->
-  <rect x="4" y="4" width="42" height="42" rx="12" fill="#00C26E"/>
-  <path d="M18 14h15a2 2 0 0 1 0 4h-11v6h9a2 2 0 0 1 0 4h-9v8a2 2 0 0 1-4 0V14z" fill="#FFFFFF"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="78" height="78" viewBox="0 0 77.18 77.19">
+  <!-- Freebuff mark: the official "F" from the freebuff.com site header, redrawn
+       from its published polygon geometry. Monochrome, so it wears no badge and
+       rides the dashboard's dark-mode inversion like the other black marks. -->
+  <polygon points="77.18 0 77.18 19.3 19.3 19.3 19.3 77.19 0 77.19 0 0 77.18 0" fill="#111111"/>
+  <polygon points="63.62 24.89 63.62 44.19 44.32 44.19 44.32 77.19 25.03 77.19 25.03 24.89 63.62 24.89" fill="#111111"/>
 </svg>

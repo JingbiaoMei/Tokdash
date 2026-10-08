@@ -1,4 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="12" fill="#5b45e0"/>
+  <!-- Muse Code has no product mark of its own: its docs site wears the Meta
+       symbol, so this letter mark borrows that symbol's blue rather than an
+       invented hue. Keep it in step with the `muse` accent in TOOL_BRAND_META. -->
+  <rect width="64" height="64" rx="12" fill="#0064E0"/>
   <path d="M14 46V18h8l10 15 10-15h8v28h-8V31L32 46 22 31v15z" fill="white"/>
 </svg>

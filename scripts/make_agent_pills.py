@@ -62,6 +62,10 @@ TOOLS = [
     ("freebuff", "Freebuff", "freebuff.svg"),
 ]
 
+# Not in the list above: the README strips also carry `pills/devin.png`, which has no
+# source mark in ``docs/assets/agents/``, so this script cannot rebuild it. Add the
+# source file and a ``("devin", "Devin CLI", "devin.<ext>")`` entry together.
+
 # Rendered at ~2.4x the README display height (40px) for crispness.
 H = 96
 LOGO_H = 52

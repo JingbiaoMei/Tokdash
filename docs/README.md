@@ -23,6 +23,7 @@
 
 ## development/ — maintainer workflows, release history, and design notes
 
+- [Architecture](development/ARCHITECTURE.md) — system architecture and data flow diagrams.
 - [Changelog](development/CHANGELOG.md) — notable changes to the project, release by release.
 - [更新日志](development/CHANGELOG_CN.md) — 简体中文更新日志，由 `scripts/changelog_cn.py` 从应用内条目生成。
 - [Releasing](development/RELEASING.md) — checklist for manual PyPI/Git tag/GitHub Releases publishing.

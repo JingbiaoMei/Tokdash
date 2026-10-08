@@ -17,8 +17,10 @@ flowchart LR
     OpenClaw["OpenClaw<br/>sources/openclaw.py"]
 
     Logs --> Parsers --> Store --> Compute
+    Parsers -.->|source-native / DB off| Compute
     Compute --> API
-    Compute --> TUI
+    API --> TUI
+    Compute -.->|fallback| TUI
     API --> Statusline
     Pricing --> Compute
     OpenClaw --> Compute
@@ -30,7 +32,7 @@ flowchart LR
 
 **Persistent usage store.** `usage_store.py` maintains Tokdash's local SQLite database, including normalized usage entries and source metadata. It synchronizes changed source files and provides indexed queries and aggregation primitives to downstream consumers.
 
-**Pricing.** `pricing.py` and `PricingDatabase` resolve model IDs to per-token rates. Costs are a core output of every view, and the pricing database is the single source of truth for all cost calculations.
+**Pricing.** `pricing.py` and `PricingDatabase` resolve model IDs to per-token rates. Costs are a core output of every view; most costs are priced from the pricing database; a few sources keep the cost their client recorded.
 
 **Aggregation.** `compute.py` coordinates parser synchronization, combines stored and source-native data where needed, and calculates date-range usage, costs, and summaries. Its results are the shared data layer used by the presentation surfaces.
 
@@ -38,4 +40,4 @@ flowchart LR
 
 ## Quota polling subsystem
 
-Quota tracking runs alongside usage aggregation and stores time-stamped quota snapshots in the same local SQLite usage database. The poller gathers Codex session-derived quota locally and, when enabled by the master switch, credential-scan consent, and provider-specific network consent, reads disclosed local CLI credentials and requests quota from supported providers. The daemon schedules ordinary polls with jitter and can add provider-scoped samples before and after fixed reset boundaries. The WebUI and TUI can trigger manual refreshes via `/api/quota/refresh` and the TUI's `u` key. See [`QUOTA.md`](../reference/QUOTA.md) for the full quota polling design.
+Quota tracking runs alongside usage aggregation and stores time-stamped quota snapshots in the same local SQLite usage database. When enabled by the master switch, the poller gathers Codex session-derived quota locally and, with credential-scan consent and provider-specific network consent, reads disclosed local CLI credentials and requests quota from supported providers. The daemon schedules ordinary polls with jitter and can add provider-scoped samples before and after fixed reset boundaries. The WebUI and TUI can trigger manual refreshes via `/api/quota/refresh` and the TUI's `u` key. See [`QUOTA.md`](../reference/QUOTA.md) for the full quota polling design.

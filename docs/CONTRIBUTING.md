@@ -22,12 +22,12 @@ python3 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate.bat (cmd) or .venv\Scripts\Activate.ps1 (PowerShell)
 pip install -U pip
 pip install -e .
-pip install -r requirements-dev.txt pytest
+pip install -r requirements-dev.txt
 ```
 
-`requirements-dev.txt` adds what the tests need beyond the runtime: `httpx` for FastAPI's
-test client and `build` for the packaging tests. Some frontend tests also run `node` and
-are skipped when it is not installed.
+`requirements-dev.txt` adds what the tests need beyond the runtime: `pytest`, `httpx` for
+FastAPI's test client and `build` for the packaging tests. Some frontend tests also run
+`node` and are skipped when it is not installed.
 
 Run from source with its own data directory. A source checkout can be ahead of the Tokdash
 you have installed, and opening the usage database migrates it to the newer schema, which

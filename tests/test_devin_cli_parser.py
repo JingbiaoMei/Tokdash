@@ -282,6 +282,46 @@ def test_model_prefers_the_node_and_falls_back_to_the_session(tmp_path, monkeypa
     assert models == {"devin:s1:m1": "swe-1-6-fast", "devin:s1:m2": "sonnet"}
 
 
+def test_metadata_generation_model_wins_over_the_session(tmp_path, monkeypatch):
+    """Layout observed in a live sessions.db: the node's own model sits at
+    ``metadata.generation_model`` while ``sessions.model`` names the session.
+    Helper calls (``summarizer``, ``compactor``) share the session, so the
+    per-node value must win where it exists."""
+    usage = {"input_tokens": 10, "output_tokens": 5}
+    parser = _parser(
+        tmp_path,
+        monkeypatch,
+        [
+            (
+                "s1",
+                1,
+                {
+                    "message_id": "m1",
+                    "role": "assistant",
+                    "metadata": {
+                        "generation_model": "summarizer",
+                        "metrics": usage,
+                    },
+                },
+                T0_MS,
+            ),
+            (
+                "s1",
+                2,
+                {
+                    "message_id": "m2",
+                    "role": "assistant",
+                    "metadata": {"metrics": usage},
+                },
+                T0_MS + 1,
+            ),
+        ],
+        sessions=(("s1", "swe-2-high", 0),),
+    )
+    models = {e["entry_id"]: e["model"] for e in parser.collect()}
+    assert models == {"devin:s1:m1": "summarizer", "devin:s1:m2": "swe-2-high"}
+
+
 def test_zero_usage_records_are_skipped(tmp_path, monkeypatch):
     parser = _parser(
         tmp_path,
@@ -362,6 +402,16 @@ def test_usage_may_sit_at_the_root_of_the_record(tmp_path, monkeypatch):
         (
             "performanceMetrics",
             {"id": "m1", "performanceMetrics": {"input_tokens": 41, "output_tokens": 5}},
+        ),
+        (
+            "metadata.metrics",
+            {
+                "message_id": "m1",
+                "metadata": {
+                    "num_tokens": 5,
+                    "metrics": {"input_tokens": 41, "output_tokens": 5, "ttft_ms": 625},
+                },
+            },
         ),
     ],
 )

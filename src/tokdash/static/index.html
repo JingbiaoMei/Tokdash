@@ -2481,7 +2481,10 @@
       background: transparent;
       color: var(--color-muted);
       cursor: pointer;
-      transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+      /* Density checks need the final padding immediately when labels return. */
+      transition: color 0.15s cubic-bezier(0.16, 1, 0.3, 1),
+                  background-color 0.15s cubic-bezier(0.16, 1, 0.3, 1),
+                  border-color 0.15s cubic-bezier(0.16, 1, 0.3, 1);
       display: inline-flex;
       align-items: center;
       gap: 5px;
@@ -2506,6 +2509,7 @@
     .modern-tool-pill .tool-brand-icon { width: 18px; height: 18px; }
     .modern-tool-pill .tool-brand-icon img { width: 16px; height: 16px; }
     .modern-tool-pill:hover .tool-brand-icon { transform: translateY(-1px); opacity: .82; }
+    html.dark .modern-tool-pill[data-tool="mimo"] .tool-brand-icon img { filter: invert(.88); }
 
     /* The pill row splits its toolbar with the search box. updateSessionPillDensity()
        adds is-icon-only when the names no longer fit: the mark is the half a user

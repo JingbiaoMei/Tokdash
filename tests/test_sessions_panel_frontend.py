@@ -16,7 +16,7 @@ def _extract_js_function(src: str, signature: str) -> str:
     start = src.find(signature)
     assert start != -1, f"{signature} not found in index.html"
     depth = 0
-    for j in range(src.find("{", start), len(src)):
+    for j in range(start + len(signature) - 1, len(src)):
         if src[j] == "{":
             depth += 1
         elif src[j] == "}":
@@ -257,3 +257,143 @@ def test_pill_density_runs_on_load_and_on_resize():
     pills = _extract_js_function(source, "function buildSessionQuickFilterPills() {")
     assert "scheduleSessionPillDensity();" in pills
     assert "initSessionPillDensity();" in source
+
+
+@pytest.fixture
+def pill_browser_page():
+    """Exercise the real CSS and identity builder without starting an API server.
+
+    Playwright and Chromium are optional developer tools; the default suite
+    still runs without adding a browser dependency to the package.
+    """
+    import base64
+    import json
+    import os
+
+    playwright = pytest.importorskip("playwright.sync_api")
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    css = re.search(r"<style>(.*?)</style>", source, re.S).group(1)
+    brands = re.search(
+        r"const TOOL_BRAND_META = Object\.freeze\(\{.*?\n    \}\);", source, re.S
+    ).group(0)
+    icons = {}
+    for path in re.findall(r"icon: '([^']+)'", brands):
+        asset = INDEX_HTML.parent / path.removeprefix("/static/")
+        mime = "image/svg+xml" if asset.suffix == ".svg" else "image/png"
+        icons[path] = f"data:{mime};base64," + base64.b64encode(asset.read_bytes()).decode()
+    functions = "\n".join(_extract_js_function(source, signature) for signature in (
+        "function normalizeToolBrandKey(tool) {",
+        "function toolBrandMeta(tool) {",
+        "function createToolBrandIcon(tool, meta) {",
+        "function createToolIdentity(tool, options = {}) {",
+        "function formatToolName(tool) {",
+        "function buildSessionQuickFilterPills() {",
+        "function updateSessionPillDensity() {",
+        "function scheduleSessionPillDensity() {",
+    ))
+    bootstrap = f"""
+      {brands}
+      const icons = {json.dumps(icons)};
+      const loadToolBrandIcon = path => Promise.resolve(icons[path]);
+      const SESSION_TOOL_KEYS = ['codex', 'claude', 'opencode', 'mimo', 'dsh'];
+      const lastSessionsResponses = Object.fromEntries(SESSION_TOOL_KEYS.map(tool =>
+        [tool, {{ sessions: [{{ session_id: 'example' }}] }}]));
+      let sessionToolFilter = 'all';
+      let sessionPillDensityFrame = 0;
+      const filterSessionPanels = () => {{}};
+      {functions}
+      buildSessionQuickFilterPills();
+    """
+    with playwright.sync_playwright() as pw:
+        try:
+            browser = pw.chromium.launch(
+                headless=True,
+                executable_path=os.environ.get("TOKDASH_TEST_CHROMIUM"),
+                args=["--disable-gpu", "--disable-features=Vulkan,VizDisplayCompositor"],
+            )
+        except playwright.Error as error:
+            if "Executable doesn't exist" in str(error):
+                pytest.skip("Playwright Chromium is not installed")
+            raise
+        try:
+            page = browser.new_page(viewport={"width": 1400, "height": 300})
+            page.set_content(f"""<!doctype html><style>{css}
+              #sessionsQuickFilterBar {{ display: flex; align-items: center;
+                gap: 8px; overflow-x: auto; width: 1000px; padding-block: 4px; }}
+              body {{ background: var(--color-bg); }}
+              html.dark {{ --color-bg: #0f172a; --color-text: #e2e8f0; }}
+            </style><div id="sessionsPanelToolbar"><div id="sessionsQuickFilterBar">
+              {_all_pill_button(source)}
+            </div></div><script>{bootstrap}</script>""")
+            page.wait_for_function("""() => [...document.querySelectorAll(
+              '#sessionsQuickFilterBar .tool-brand-icon img')].length === 5 &&
+              [...document.querySelectorAll('#sessionsQuickFilterBar img')].every(img => img.complete)
+            """)
+            yield page
+        finally:
+            browser.close()
+
+
+def test_pill_density_stays_collapsed_near_the_fit_boundary(pill_browser_page):
+    page = pill_browser_page
+    natural_width = page.evaluate("""() => {
+      const pills = document.querySelectorAll('#sessionsQuickFilterBar button');
+      return pills[pills.length - 1].getBoundingClientRect().right -
+        pills[0].getBoundingClientRect().left;
+    }""")
+
+    def measure(width):
+        page.evaluate("""width => {
+          document.getElementById('sessionsQuickFilterBar').style.width = `${width}px`;
+          updateSessionPillDensity();
+        }""", width)
+        # Let a padding transition finish: measuring before this missed the bug.
+        page.wait_for_timeout(200)
+        return page.evaluate("""() => {
+          const bar = document.getElementById('sessionsQuickFilterBar');
+          return { collapsed: bar.classList.contains('is-icon-only'),
+            overflow: bar.scrollWidth - bar.clientWidth };
+        }""")
+
+    assert measure(natural_width - 80)["collapsed"]
+    for _ in range(3):
+        # Six pills used to retain 36px of narrower padding while the names
+        # returned. A 12px deficit must never count as enough room for labels.
+        assert measure(natural_width - 12)["collapsed"]
+    roomy = measure(natural_width + 24)
+    assert not roomy["collapsed"] and roomy["overflow"] <= 1
+    assert measure(natural_width - 12)["collapsed"]
+
+
+def test_collapsed_mimo_logo_has_contrast_in_both_themes(pill_browser_page):
+    page = pill_browser_page
+    page.evaluate("""() => {
+      const bar = document.getElementById('sessionsQuickFilterBar');
+      bar.style.width = '300px';
+      updateSessionPillDensity();
+    }""")
+    for dark in (False, True):
+        page.evaluate("dark => document.documentElement.classList.toggle('dark', dark)", dark)
+        contrast = page.evaluate("""() => {
+          const img = document.querySelector('button[data-tool="mimo"] img');
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext('2d');
+          ctx.filter = getComputedStyle(img).filter;
+          ctx.drawImage(img, 0, 0);
+          const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+          let ink;
+          for (let i = 0; i < pixels.length; i += 4) {
+            if (pixels[i + 3] === 255) { ink = [...pixels.slice(i, i + 3)]; break; }
+          }
+          if (!ink) throw new Error('Mimo logo contains no opaque pixels');
+          const bg = getComputedStyle(document.body).backgroundColor.match(/\\d+/g).slice(0, 3).map(Number);
+          const luminance = rgb => rgb.map(v => {
+            const c = v / 255;
+            return c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4;
+          }).reduce((sum, c, i) => sum + c * [.2126, .7152, .0722][i], 0);
+          const a = luminance(ink), b = luminance(bg);
+          return (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
+        }""")
+        assert contrast >= 3, f"Mimo logo contrast is {contrast:.2f} in dark={dark}"

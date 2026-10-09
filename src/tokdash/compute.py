@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional
 from .dateutil import local_midnight, parse_date_range
 from .model_normalization import normalize_model_name
 from .pricing import PricingDatabase
-from .usage_buckets import add_bucket, bucket_granularity, bucket_key, local_hour_keys, merge_buckets
+from .usage_buckets import add_bucket, bucket_granularity, bucket_key_resolver, local_hour_keys, merge_buckets
 from .sources.openclaw import get_usage_for_days as get_session_usage_days
 from .sources.openclaw import get_usage_for_month as get_session_usage_month
 from .sources.openclaw import get_usage_for_range as get_session_usage_range
@@ -460,8 +460,10 @@ def parse_entries_json(data: Dict[str, Any], *, granularity: Optional[str] = Non
     pricing_db: Optional[PricingDatabase] = None
 
     buckets: dict[str, dict] = {}
+    resolve_bucket = bucket_key_resolver(granularity) if granularity else None
+    canonical_models = {}
     apps: Dict[str, Any] = {}
-    all_models_dict: Dict[tuple[str, str], Any] = {}
+    all_model_refs = {}
 
     for entry in entries:
         source = entry.get("source", "unknown")
@@ -507,9 +509,12 @@ def parse_entries_json(data: Dict[str, Any], *, granularity: Optional[str] = Non
         if granularity and source.lower() != "openclaw":
             stamp = int(entry.get("timestamp", 0) or 0)
             if stamp > 0:
-                add_bucket(buckets, bucket_key(stamp, granularity), tokens=total_tokens, cost=cost,
+                canonical = canonical_models.get(full_model_name)
+                if canonical is None:
+                    canonical = canonical_models[full_model_name] = normalize_model_name(full_model_name)
+                add_bucket(buckets, resolve_bucket(stamp), tokens=total_tokens, cost=cost,
                            messages=messages, tokens_in=tokens_in, tokens_cache=tokens_cache,
-                           model=full_model_name)
+                           model=full_model_name, canonical_model=canonical)
 
         if source not in apps:
             apps[source] = {
@@ -533,9 +538,9 @@ def parse_entries_json(data: Dict[str, Any], *, granularity: Optional[str] = Non
         app_ref["cost"] += cost
         app_ref["messages"] += messages
 
-        model_ref = app_ref["models_dict"].setdefault(
-            full_model_name,
-            {
+        model_ref = app_ref["models_dict"].get(full_model_name)
+        if model_ref is None:
+            model_ref = app_ref["models_dict"][full_model_name] = {
                 "name": full_model_name,
                 "tokens": 0,
                 "tokens_in": 0,
@@ -543,35 +548,14 @@ def parse_entries_json(data: Dict[str, Any], *, granularity: Optional[str] = Non
                 "tokens_cache": 0,
                 "cost": 0.0,
                 "messages": 0,
-            },
-        )
+            }
+            all_model_refs[(source, full_model_name)] = model_ref
         model_ref["tokens"] += total_tokens
         model_ref["tokens_in"] += tokens_in
         model_ref["tokens_out"] += tokens_out
         model_ref["tokens_cache"] += tokens_cache
         model_ref["cost"] += cost
         model_ref["messages"] += messages
-
-        global_key = (source, full_model_name)
-        g = all_models_dict.setdefault(
-            global_key,
-            {
-                "source": source,
-                "name": full_model_name,
-                "tokens": 0,
-                "tokens_in": 0,
-                "tokens_out": 0,
-                "tokens_cache": 0,
-                "cost": 0.0,
-                "messages": 0,
-            },
-        )
-        g["tokens"] += total_tokens
-        g["tokens_in"] += tokens_in
-        g["tokens_out"] += tokens_out
-        g["tokens_cache"] += tokens_cache
-        g["cost"] += cost
-        g["messages"] += messages
 
     for app_data in apps.values():
         app_data["models"] = sorted(app_data["models_dict"].values(), key=model_rank_key)
@@ -580,7 +564,10 @@ def parse_entries_json(data: Dict[str, Any], *, granularity: Optional[str] = Non
             model_ref["cache_hit_rate"] = cache_hit_rate(model_ref["tokens_in"], model_ref["tokens_cache"])
         app_data["cache_hit_rate"] = cache_hit_rate(app_data["tokens_in"], app_data["tokens_cache"])
 
-    all_models = sorted(all_models_dict.values(), key=model_rank_key)
+    # The global model rows contain the same per-source counts. Copy those
+    # completed rows instead of allocating and updating a second set per event.
+    all_models = sorted(({**model, "source": source} for (source, _), model in all_model_refs.items()),
+                        key=model_rank_key)
     for m in all_models:
         m["cache_hit_rate"] = cache_hit_rate(m["tokens_in"], m["tokens_cache"])
 

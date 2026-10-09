@@ -172,20 +172,30 @@ def _dense_sparkline(range_info: Mapping[str, Any], models: list[dict], agent_ms
         days = (date.fromisoformat(str(range_info["to"])) - date.fromisoformat(str(range_info["from"]))).days + 1
     except (KeyError, TypeError, ValueError):
         days = _days_in_range(range_info)
-    if days > 31:
+    if days > 366:
         return None
     start, end = _effective_span(range_info)
     now = datetime.now().astimezone()
     if days == 1:
+        granularity = "hour"
         clock_keys = local_hour_keys(datetime.combine(start, datetime.min.time()).astimezone())
         through = f"{end.isoformat()}T{now.hour:02d}" if end == now.date() else f"{end.isoformat()}T23"
         keys = [key for key in clock_keys if key <= through]
-    else:
+    elif days <= 31:
+        granularity = "day"
         keys = [(start + timedelta(days=i)).isoformat() for i in range((end - start).days + 1)]
+    else:
+        granularity = "month"
+        cursor = start.replace(day=1)
+        keys = []
+        while cursor <= end:
+            keys.append(cursor.strftime("%Y-%m"))
+            year, month = divmod(cursor.year * 12 + cursor.month, 12)
+            cursor = date(year, month + 1, 1)
     weights = [1 + math.sin(i * 1.3) ** 2 * 4 for i in range(len(keys))]
     metadata = {"keys": clock_keys} if days == 1 else {}
     if agent_ms is not None:
-        return {"granularity": "hour" if days == 1 else "day", **metadata,
+        return {"granularity": granularity, **metadata,
                 "buckets": [{"key": key, "agent_ms": value} for key, value in zip(keys, _split_int(agent_ms, weights))]}
     weight_total = sum(weights)
     rows = [{"key": key, "tokens": 0, "cost": 0.0, "messages": 0, "input": 0, "cache": 0, "models": {}} for key in keys]
@@ -200,7 +210,7 @@ def _dense_sparkline(range_info: Mapping[str, Any], models: list[dict], agent_ms
             row["input"] += amounts["tokens_in"][i]
             row["cache"] += amounts["tokens_cache"][i]
             row["cost"] += float(model["cost"]) * weights[i] / weight_total
-    return {"granularity": "hour" if days == 1 else "day", "buckets": rows, **metadata}
+    return {"granularity": granularity, "buckets": rows, **metadata}
 
 
 def dense_usage(range_info: Mapping[str, Any], seed: int = 0) -> dict[str, Any]:

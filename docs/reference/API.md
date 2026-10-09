@@ -434,7 +434,7 @@ Aggregated token usage and cost across all configured tools.
 | `total_tokens` | int | Total tokens across all tools |
 | `total_cost` | float | Total cost in USD |
 | `total_messages` | int | Total assistant/user message count |
-| `sparkline` | object\|null | Matching local-time buckets from the same aggregation as the totals; hourly for one calendar day, daily for 2–31 days, `null` for longer or unsupported windows |
+| `sparkline` | object\|null | Matching local-time buckets from the same aggregation as the totals; hourly for one calendar day, daily for 2–31 days, monthly for 32–366 days, `null` for longer or unsupported windows |
 | `by_tool` | object | Per-tool aggregates: `{ tool_name: { tokens, cost } }` |
 | `apps` | object | Per-app detailed breakdown (includes `tokens_in`, `tokens_out`, `tokens_cache`, `cost`, `messages`, `models[]`) |
 | `coding_apps` | object | Same shape as `apps`, filtered to coding tools (excludes browser/research tools) |
@@ -466,15 +466,18 @@ which is why the mismatch was easy to miss; over a year, where a cheaper model
 can out-work a pricier one, they diverge. For the spend ranking beyond the top
 five, sort `combined_models` client-side.
 
-`sparkline` has `{granularity: "hour"|"day", buckets: [...]}`. Each sparse bucket
-contains `key` (`YYYY-MM-DDTHH` or `YYYY-MM-DD`), `tokens`, unrounded `cost`,
+`sparkline` has `{granularity: "hour"|"day"|"month", buckets: [...]}`. Each sparse bucket
+contains `key` (`YYYY-MM-DDTHH`, `YYYY-MM-DD`, or `YYYY-MM`), `tokens`, unrounded `cost`,
 `messages`, `input` (including cache writes), `cache` (cache reads), and `models`
 (canonical model name to tokens). It uses the headline's pricing and message
 counting rules. A missing bucket at or before `timestamp` means zero recorded
 usage; a future bucket is unknown. Hourly responses also provide `keys` listing
 the clock hours that exist on that date. Repeated hours are combined; an hour
 skipped by a clock change is unavailable. Cache rate is `cache / (input + cache)`;
-no prompt input is unavailable.
+no prompt input is unavailable. Monthly buckets contain only the selected portion
+of each local calendar month; a 366-day window has at most 13 buckets. The
+current month is partial, and leap days and clock changes retain real elapsed
+time for agent durations.
 The Overview fixes the Top Model for the whole range and plots that model's
 bucket tokens. These buckets do not depend on the annual Stats snapshot, and
 travel in the existing cached response without another API call or source scan.
@@ -676,7 +679,7 @@ separate from `/api/usage` because it reads every supported session source.
 | `period` | string | Echo of the period param |
 | `active_ms` | int | Clock time any agent was working: overlapping sessions *and tools* count once |
 | `active_ms_sum` | int | Agent time: per-stream intervals added up, so concurrent agents count separately |
-| `sparkline` | object\|null | Same bounded hourly/daily bucket contract as `/api/usage`, with `{key, agent_ms}` rows whose sum equals `active_ms_sum`; intervals crossing a bucket boundary are split |
+| `sparkline` | object\|null | Same bounded hourly/daily/monthly bucket contract as `/api/usage`, with `{key, agent_ms}` rows whose sum equals `active_ms_sum`; intervals crossing a bucket boundary are split |
 | `comparison` | object\|null | The same two figures for the previous window and the percentage change: `{active_ms_prev, active_ms_sum_prev, active_ms_pct, active_ms_sum_pct}`. A percentage is `null` when the previous window is empty, and the whole object is `null` if that window could not be read |
 | `by_tool` | object | Per-tool `{tool_label, session_count, active_ms, active_ms_sum}` |
 | `unavailable_tools` | array | Tools that could not be read or summarized for this window (excluded from the totals, so the rest still answer) |

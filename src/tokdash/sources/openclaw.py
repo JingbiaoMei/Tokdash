@@ -16,6 +16,7 @@ try:
     from ..clientpaths import openclaw_agent_sessions_glob
     from ..dateutil import local_midnight
     from ..pricing import PricingDatabase
+    from ..model_normalization import normalize_model_name
     from ..usage_buckets import add_bucket, bucket_granularity, bucket_key, sql_bucket_expression, sql_bucket_key
     from ..store_logging import log_store_failure
     from ..usage_store import (
@@ -33,6 +34,7 @@ except ImportError:  # pragma: no cover
     from clientpaths import openclaw_agent_sessions_glob
     from dateutil import local_midnight
     from pricing import PricingDatabase
+    from model_normalization import normalize_model_name
     from usage_buckets import add_bucket, bucket_granularity, bucket_key, sql_bucket_expression, sql_bucket_key
     USAGE_ENTRY_FORMAT_VERSION = 1  # type: ignore
 
@@ -762,6 +764,7 @@ def get_session_usage(
     buckets: dict[str, dict] = {}
     granularity = bucket_granularity(since_date, until_date)
     total_messages = 0
+    canonical_models = {}
 
     session_dirs = sessions_dir if isinstance(sessions_dir, list) else [sessions_dir]
     if persistent_usage_db_enabled() and UsageEntryStore is not None:
@@ -803,8 +806,13 @@ def get_session_usage(
 
         total_messages += 1
         if granularity:
-            add_bucket(buckets, bucket_key(ts_ms, granularity), tokens=tokens_total, cost=cost,
-                       messages=1, tokens_in=tokens_in, tokens_cache=tokens_cache, model=model)
+            canonical = canonical_models.get(model)
+            if canonical is None:
+                canonical = canonical_models[model] = normalize_model_name(model)
+            key = msg_date[:7] if granularity == "month" else msg_date if granularity == "day" else bucket_key(ts_ms, granularity)
+            add_bucket(buckets, key, tokens=tokens_total, cost=cost,
+                       messages=1, tokens_in=tokens_in, tokens_cache=tokens_cache, model=model,
+                       canonical_model=canonical)
 
         stats = model_stats[model]
         stats["tokens_in"] += tokens_in

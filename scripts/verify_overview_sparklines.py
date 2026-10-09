@@ -22,6 +22,7 @@ parser.add_argument('--repeats', type=int, default=24)
 parser.add_argument('--output', type=Path, default=Path('output/sparkline-validation'))
 parser.add_argument('--port', type=int, default=55791)
 parser.add_argument('--server-python', default='python3')
+parser.add_argument('--visual-only', action='store_true', help='Check every preset and responsive curves without repeated timings')
 parser.add_argument('--performance-only', action='store_true', help='Skip preset screenshots already checked by a previous run')
 args = parser.parse_args()
 if args.repeats < 1:
@@ -54,11 +55,27 @@ def start(repo, port, label):
         raise RuntimeError('Server did not become ready: ' + ''.join(startup))
     return 'http://127.0.0.1:'+str(port)
 
+PRESETS=['today','yesterday','last7days','lastWeek','last14days','last4weeks','thisMonth','lastMonth','thisYear','lastYear']
 METRICS=['sparklineTokens','sparklineCost','sparklineMessages','sparklineActiveTime','sparklineCacheRate','sparklineTopModel']
 SETTLED="""() => lastUsageResponse && overviewActiveTimeState.status === 'ready' && statsCache.default && !updateInFlight"""
 
 def capture(page):
     return page.evaluate("""ids => ({curves:ids.map(id=>({id,reason:document.getElementById(id).dataset.reason,points:document.getElementById(id).dataset.points,granularity:document.getElementById(id).dataset.granularity,path:document.getElementById(id+'Path').getAttribute('d'),label:document.getElementById(id).getAttribute('aria-label')})),totals:[lastUsageResponse.total_tokens,lastUsageResponse.total_cost,lastUsageResponse.total_messages,overviewActiveTimeState.data.active_ms_sum]})""",METRICS)
+
+def select(page, selection):
+    button = page.locator(f'#overviewQuickRanges [data-range="{selection}"]')
+    if not button.is_visible():
+        page.locator('#quickRangeMoreToggle').click()
+    button.click()
+    page.wait_for_function("""selection => activeQuickRange === selection && !updateInFlight &&
+      overviewActiveTimeState.status === 'ready' && overviewActiveTimeState.key ===
+      activeTimeRequestKey(null,formatDateKey(currentStartDate),formatDateKey(currentEndDate))""",
+      arg=selection, timeout=15000)
+
+
+def summary(values):
+    return {'median_ms':statistics.median(values), 'p95_ms':sorted(values)[math.ceil(len(values)*.95)-1]}
+
 
 try:
     urls={'baseline':start(BASELINE,args.port,'baseline'),'candidate':start(ROOT,args.port+1,'candidate')}
@@ -80,56 +97,93 @@ try:
         assert initial['candidate']['totals'][:3]==initial['baseline']['totals'][:3], initial
         # Agent fixture magnitudes scale with elapsed time today; servers answer at different instants.
         assert abs(initial['candidate']['totals'][3]-initial['baseline']['totals'][3]) < initial['baseline']['totals'][3]*.005, initial
-        presets = [] if args.performance_only else [('today','hour'),('yesterday','hour'),('last7days','day'),('lastWeek','day'),('thisMonth','day'),('lastMonth','day')]
-        for selection,granularity in presets:
-            page=pages['candidate']
-            page.locator(f'#overviewQuickRanges [data-range="{selection}"]').click()
-            page.wait_for_function("""() => !updateInFlight && overviewActiveTimeState.status === 'ready' && overviewActiveTimeState.key === activeTimeRequestKey(null,formatDateKey(currentStartDate),formatDateKey(currentEndDate))""",timeout=15000)
-            page.wait_for_function("""ids => ids.every(id=>document.getElementById(id).dataset.reason === 'drawn')""",arg=METRICS,timeout=8000)
-            snap=capture(page)
-            assert all(row['granularity']==granularity and row['path'] for row in snap['curves']),snap
-            path=OUT/(selection+'.png');page.screenshot(path=str(path),full_page=True,timeout=8000)
-            screens.append({'selection':selection,'screenshot':str(path.relative_to(ROOT)),'data':snap})
-        # Reset to Today before comparing reloads with identical endpoint selections.
-        pages['candidate'].locator('#overviewQuickRanges [data-range="today"]').click()
-        pages['candidate'].wait_for_function(SETTLED,timeout=15000)
-        samples={label:[] for label in pages}
-        requests={label:[] for label in pages}
-        for label,page in pages.items():
-            page.on('request',lambda request,key=label:requests[key].append(request.url.split('/api/',1)[1]) if '/api/' in request.url else None)
-        request_sets={label:[] for label in pages}
-        diagnostics={label:[] for label in pages}
-        for i in range(REPEATS):
-            for label in (['baseline','candidate'] if i%2==0 else ['candidate','baseline']):
-                page=pages[label]
-                # Both versions must paint as the foreground tab; background-tab
-                # throttling otherwise makes this an unequal rendering comparison.
+        present=pages['candidate'].locator('#overviewQuickRanges [data-range]').evaluate_all(
+            "buttons => buttons.map(button=>button.dataset.range)")
+        assert set(present)==set(PRESETS), {'uncovered_presets':set(present)-set(PRESETS)}
+        if not args.performance_only:
+            for width,height in [(1440,1050),(390,844)]:
+                page=pages['candidate'];page.set_viewport_size({'width':width,'height':height})
                 page.bring_to_front()
-                requests[label].clear();t=time.perf_counter()
-                page.reload(wait_until='domcontentloaded');page.wait_for_function(SETTLED,timeout=15000)
-                settled_ms=(time.perf_counter()-t)*1000
-                page.wait_for_load_state('networkidle')
-                samples[label].append((time.perf_counter()-t)*1000)
-                request_sets[label].append(dict(Counter(requests[label])))
-                diagnostics[label].append(page.evaluate("""settled => ({settled_ms:settled,
-                  long_tasks:window.__sparklineLongTasks,resources:performance.getEntriesByType('resource')
-                    .filter(entry=>entry.name.includes('/api/')).map(entry=>({path:entry.name.split('/api/')[1],
-                      start_ms:entry.startTime,duration_ms:entry.duration,bytes:entry.encodedBodySize}))})""",settled_ms))
-        summaries={key:{'median_ms':statistics.median(values),'p95_ms':sorted(values)[math.ceil(len(values)*.95)-1]} for key,values in samples.items()}
-        budget=max(10,summaries['baseline']['p95_ms']*.1)
-        report={'repeats':REPEATS,'samples':samples,'summary':summaries,'budget_ms':budget,
-                'latency_pass':summaries['candidate']['p95_ms']<=summaries['baseline']['p95_ms']+budget,
-                'requests_equal':request_sets['baseline']==request_sets['candidate'],'requests':request_sets,'diagnostics':diagnostics,'errors':errors,'screens':screens,'baseline':str(BASELINE),'candidate':str(ROOT),
-                'method':'alternating baseline/candidate reloads; both in foreground; same seed and endpoint selection',
+                for selection in PRESETS:
+                    select(page,selection)
+                    page.wait_for_function("""ids => ids.every(id=>document.getElementById(id).dataset.reason === 'drawn')""",
+                        arg=METRICS,timeout=8000)
+                    snap=capture(page)
+                    expected=page.evaluate("""() => {
+                      const days=Math.round((Date.UTC(currentEndDate.getFullYear(),currentEndDate.getMonth(),currentEndDate.getDate())-
+                        Date.UTC(currentStartDate.getFullYear(),currentStartDate.getMonth(),currentStartDate.getDate()))/86400000)+1;
+                      return days===1?'hour':days<=31?'day':'month';
+                    }""")
+                    assert all(row['granularity']==expected and row['path'] for row in snap['curves']),snap
+                    bounds=page.evaluate("""ids => { const rect=r=>({x:r.x,y:r.y,width:r.width,height:r.height});
+                      return ids.map(id=>({id,box:rect(document.getElementById(id+'Path').getBBox()),
+                      viewport:rect(document.getElementById(id).viewBox.baseVal)})); }""",METRICS)
+                    for row in bounds:
+                        box,view=row['box'],row['viewport']
+                        assert box['x']>=view['x']-1 and box['y']>=view['y']-1, row
+                        assert box['x']+box['width']<=view['x']+view['width']+1, row
+                        assert box['y']+box['height']<=view['y']+view['height']+1, row
+                    path=OUT/(selection+('-mobile' if width==390 else '')+'.png')
+                    page.screenshot(path=str(path),full_page=width==390,timeout=8000)
+                    screens.append({'selection':selection,'width':width,'screenshot':str(path.relative_to(ROOT)),'data':snap})
+            pages['candidate'].set_viewport_size({'width':1440,'height':1050})
+        (OUT/'browser-visual.json').write_text(json.dumps({'screens':screens,'errors':errors,'presets':present},indent=2)+'\n')
+        if not args.visual_only:
+            samples={selection:{label:[] for label in pages} for selection in PRESETS}
+            settled_samples={selection:{label:[] for label in pages} for selection in PRESETS}
+            requests={label:[] for label in pages}
+            for label,page in pages.items():
+                page.on('request',lambda request,key=label:requests[key].append(request.url.split('/api/',1)[1]) if '/api/' in request.url else None)
+            request_sets={selection:{label:[] for label in pages} for selection in PRESETS}
+            diagnostics={selection:{label:[] for label in pages} for selection in PRESETS}
+            for i in range(REPEATS):
+                for selection in PRESETS:
+                    for label in (['baseline','candidate'] if i%2==0 else ['candidate','baseline']):
+                        page=pages[label];page.bring_to_front()
+                        # Every range change starts from a freshly loaded Today page.
+                        # Today measures a full reload; other ranges measure actual
+                        # menu selection after the same initial page has settled.
+                        if selection!='today':
+                            page.reload(wait_until='domcontentloaded');page.wait_for_function(SETTLED,timeout=15000)
+                            page.wait_for_load_state('networkidle')
+                        page.evaluate("performance.clearResourceTimings();window.__sparklineLongTasks=[]")
+                        requests[label].clear();t=time.perf_counter()
+                        if selection=='today':
+                            page.reload(wait_until='domcontentloaded');page.wait_for_function(SETTLED,timeout=15000)
+                        else:
+                            select(page,selection)
+                        settled_ms=(time.perf_counter()-t)*1000
+                        page.wait_for_load_state('networkidle')
+                        samples[selection][label].append((time.perf_counter()-t)*1000)
+                        settled_samples[selection][label].append(settled_ms)
+                        request_sets[selection][label].append(dict(Counter(requests[label])))
+                        diagnostics[selection][label].append(page.evaluate("""settled => ({settled_ms:settled,
+                          long_tasks:window.__sparklineLongTasks,resources:performance.getEntriesByType('resource')
+                            .filter(entry=>entry.name.includes('/api/')).map(entry=>({path:entry.name.split('/api/')[1],
+                              start_ms:entry.startTime,duration_ms:entry.duration,bytes:entry.encodedBodySize}))})""",settled_ms))
+                print(f'Completed paired browser iteration {i+1}/{REPEATS}',flush=True)
+            cases={}
+            for selection in PRESETS:
+                before,after=summary(samples[selection]['baseline']),summary(samples[selection]['candidate'])
+                budget=max(10,before['p95_ms']*.1)
+                settled_before=summary(settled_samples[selection]['baseline'])
+                settled_after=summary(settled_samples[selection]['candidate'])
+                settled_budget=max(10,settled_before['p95_ms']*.1)
+                cases[selection]={'baseline':before,'candidate':after,'budget_ms':budget,
+                    'settled_baseline':settled_before,'settled_candidate':settled_after,
+                    'settled_budget_ms':settled_budget,
+                    'settled_pass':settled_after['p95_ms']<=settled_before['p95_ms']+settled_budget,
+                    'latency_pass':after['p95_ms']<=before['p95_ms']+budget,
+                    'requests_equal':request_sets[selection]['baseline']==request_sets[selection]['candidate']}
+            report={'repeats_per_range':REPEATS,'cases':cases,'samples':samples,'settled_samples':settled_samples,
+                'requests':request_sets,'diagnostics':diagnostics,'errors':errors,'screens':screens,
+                'baseline':str(BASELINE),'candidate':str(ROOT),
+                'method':'alternating foreground tabs; same seed; Today reload and all nine range selections from fresh Today; latency includes network-idle, settled timings recorded separately',
                 'gate':'candidate p95 <= baseline p95 + max(10 ms, 10% of baseline p95)'}
-        (OUT/'browser-performance.json').write_text(json.dumps(report,indent=2)+'\n')
-        print(json.dumps({key:value for key,value in report.items() if key not in ['samples','requests','screens','diagnostics']},indent=2))
-        assert not errors
-        assert report['requests_equal']
-        assert report['latency_pass']
-        # Responsive card paths must remain inside their SVG bounds.
-        page=pages['candidate'];page.set_viewport_size({'width':390,'height':844})
-        page.screenshot(path=str(OUT/'mobile.png'),full_page=True,timeout=8000)
+            (OUT/'browser-performance.json').write_text(json.dumps(report,indent=2)+'\n')
+            print(json.dumps({'cases':cases,'errors':errors},indent=2))
+            assert all(row['requests_equal'] and row['latency_pass'] and row['settled_pass'] for row in cases.values()),cases
+        assert not errors, errors
         browser.close()
 finally:
     for proc in servers:

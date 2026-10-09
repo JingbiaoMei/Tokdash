@@ -779,20 +779,19 @@ def _session_active_intervals(
 
 def _merged_interval_ms(intervals: Iterable[tuple[int, int]]) -> int:
     """Wall-clock covered by the intervals, counting overlap once."""
+    ordered = iter(sorted(intervals))
+    first = next(ordered, None)
+    if first is None:
+        return 0
+    start, end = first
     total = 0
-    start: Optional[int] = None
-    end = 0
-    for interval_start, interval_end in sorted(intervals):
-        if start is None:
-            start, end = interval_start, interval_end
-        elif interval_start > end:
+    for interval_start, interval_end in ordered:
+        if interval_start > end:
             total += end - start
             start, end = interval_start, interval_end
         elif interval_end > end:
             end = interval_end
-    if start is not None:
-        total += end - start
-    return total
+    return total + end - start
 
 
 # How each source's raw token counts map onto PricingDatabase.get_cost. Kept as
@@ -6749,7 +6748,7 @@ def get_active_time_data(
     )
     active_ms = _merged_interval_ms(all_intervals)
     active_ms_sum = sum(int(row["active_ms_sum"]) for row in by_tool.values())
-    sparkline = interval_buckets(all_intervals, granularity) if granularity else None
+    sparkline = interval_buckets(all_intervals, granularity, bounds=(since_ms, until_ms)) if granularity else None
     if granularity == "hour":
         sparkline["keys"] = local_hour_keys(datetime.fromtimestamp(since_ms / 1000).astimezone())
 

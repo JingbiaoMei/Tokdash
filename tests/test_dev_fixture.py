@@ -77,7 +77,10 @@ def test_dense_fixture_overview_is_crowded_and_consistent():
     ("2026-09-21", "2026-09-27", 7, "day"),
     ("2026-09-01", "2026-09-30", 30, "day"),
     # A spring clock change can make elapsed whole days shorter than calendar days.
-    ("2026-03-01", "2026-04-01", 31, None),
+    ("2026-03-01", "2026-04-01", 31, "month"),
+    ("2024-01-01", "2024-12-31", 366, "month"),
+    ("2025-01-01", "2025-12-31", 365, "month"),
+    ("2025-01-01", "2026-01-02", 367, None),
 ])
 def test_dense_sparkline_contract_matches_usage_and_agent_headlines(start, end, days, granularity):
     window = {"from": start, "to": end, "days": days}

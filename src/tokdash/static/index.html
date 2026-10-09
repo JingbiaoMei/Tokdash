@@ -7250,7 +7250,10 @@
         sparklineMeasuredHours: '{n} of {total} hours measured.',
         sparklineResolutionDaily: 'Daily recorded values, joined by a smoothed line.',
         sparklineMeasuredDays: '{n} of {total} days measured.',
-        sparklineRangeLimit: 'Curves are available for ranges of up to 31 days.',
+        sparklineResolutionMonthly: 'Monthly recorded values, joined by a smoothed line.',
+        sparklineMeasuredMonths: '{n} of {total} months measured.',
+        sparklineMonthPartial: 'This month is still in progress.',
+        sparklineRangeLimit: 'Curves are available for ranges of up to 366 days.',
         sparklineNeedsWeekRange: 'Daily curves need the seven-day range ending today.',
         sparklineNoDailyBreakdown: 'No daily breakdown available for this selection.',
         sparklineNoHourlyBreakdown: 'The data this page already loads has no hourly breakdown.',
@@ -7868,7 +7871,10 @@
         sparklineMeasuredHours: '已测量 {total} 小时中的 {n} 小时。',
         sparklineResolutionDaily: '每日记录值，测量点之间以平滑线连接。',
         sparklineMeasuredDays: '已测量 {total} 天中的 {n} 天。',
-        sparklineRangeLimit: '曲线支持最多 31 天的日期范围。',
+        sparklineResolutionMonthly: '每月记录值，以平滑曲线连接。',
+        sparklineMeasuredMonths: '已记录 {n}/{total} 个月。',
+        sparklineMonthPartial: '本月尚未结束。',
+        sparklineRangeLimit: '曲线支持最多 366 天的日期范围。',
         sparklineNeedsWeekRange: '每日曲线需要截至今日的七天范围。',
         sparklineNoDailyBreakdown: '当前选择没有可用的每日明细。',
         sparklineNoHourlyBreakdown: '此页面已加载的数据不含每小时明细。',
@@ -8487,7 +8493,10 @@
         sparklineMeasuredHours: '{total}時間のうち{n}時間を測定。',
         sparklineResolutionDaily: '日単位の記録値を補間線で結んでいます。',
         sparklineMeasuredDays: '{total}日のうち{n}日を測定。',
-        sparklineRangeLimit: '曲線は31日以内の範囲で表示できます。',
+        sparklineResolutionMonthly: '月別の記録値を滑らかな線でつなぎます。',
+        sparklineMeasuredMonths: '{total}か月中{n}か月を記録。',
+        sparklineMonthPartial: '今月はまだ途中です。',
+        sparklineRangeLimit: '曲線は366日以内の範囲で表示できます。',
         sparklineNeedsWeekRange: '日別曲線は本日までの7日間範囲が必要です。',
         sparklineNoDailyBreakdown: 'この選択では日別の内訳が利用できません。',
         sparklineNoHourlyBreakdown: 'このページが既に読み込むデータに時間別の内訳がありません。',
@@ -9106,7 +9115,10 @@
         sparklineMeasuredHours: '{total}시간 중 {n}시간 측정됨.',
         sparklineResolutionDaily: '일자별 기록 값이며 보간선으로 연결했습니다.',
         sparklineMeasuredDays: '{total}일 중 {n}일 측정됨.',
-        sparklineRangeLimit: '곡선은 최대 31일 범위에서 사용할 수 있습니다.',
+        sparklineResolutionMonthly: '월별 기록값을 부드러운 선으로 연결합니다.',
+        sparklineMeasuredMonths: '{total}개월 중 {n}개월 기록됨.',
+        sparklineMonthPartial: '이번 달은 아직 진행 중입니다.',
+        sparklineRangeLimit: '곡선은 최대 366일 범위에서 사용할 수 있습니다.',
         sparklineNeedsWeekRange: '일간 곡선은 오늘까지 7일 범위가 필요합니다.',
         sparklineNoDailyBreakdown: '이 선택에서는 일별 세부 정보를 사용할 수 없습니다.',
         sparklineNoHourlyBreakdown: '이 페이지가 이미 불러온 데이터에 시간별 세부 정보가 없습니다.',
@@ -9725,7 +9737,10 @@
         sparklineMeasuredHours: '{n} de {total} horas medidas.',
         sparklineResolutionDaily: 'Valores diarios registrados unidos con una línea suavizada.',
         sparklineMeasuredDays: '{n} de {total} días medidos.',
-        sparklineRangeLimit: 'Las curvas están disponibles para intervalos de hasta 31 días.',
+        sparklineResolutionMonthly: 'Valores mensuales registrados, unidos por una línea suavizada.',
+        sparklineMeasuredMonths: '{n} de {total} meses registrados.',
+        sparklineMonthPartial: 'Este mes sigue en curso.',
+        sparklineRangeLimit: 'Las curvas están disponibles para intervalos de hasta 366 días.',
         sparklineNeedsWeekRange: 'Las curvas diarias necesitan el rango de siete días hasta hoy.',
         sparklineNoDailyBreakdown: 'No hay desglose diario disponible para esta selección.',
         sparklineNoHourlyBreakdown: 'Los datos que esta página ya carga no incluyen desglose por hora.',
@@ -10344,7 +10359,10 @@
         sparklineMeasuredHours: '{n} de {total} horas medidas.',
         sparklineResolutionDaily: 'Valores diarios registrados unidos por uma linha suavizada.',
         sparklineMeasuredDays: '{n} de {total} dias medidos.',
-        sparklineRangeLimit: 'As curvas estão disponíveis para intervalos de até 31 dias.',
+        sparklineResolutionMonthly: 'Valores mensais registrados, unidos por uma linha suavizada.',
+        sparklineMeasuredMonths: '{n} de {total} meses registrados.',
+        sparklineMonthPartial: 'Este mês ainda está em andamento.',
+        sparklineRangeLimit: 'As curvas estão disponíveis para intervalos de até 366 dias.',
         sparklineNeedsWeekRange: 'As curvas diárias precisam do intervalo de sete dias até hoje.',
         sparklineNoDailyBreakdown: 'Não há detalhe diário disponível para esta seleção.',
         sparklineNoHourlyBreakdown: 'Os dados que esta página já carrega não incluem detalhe por hora.',
@@ -13932,22 +13950,37 @@
         || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
       const first = formatDateKey(start);
       const last = formatDateKey(end);
+      const rangeDates = [first, last];
+      const dayCount = Math.round((Date.UTC(end.getFullYear(), end.getMonth(), end.getDate())
+        - Date.UTC(start.getFullYear(), start.getMonth(), start.getDate())) / 86400000) + 1;
+      if (dayCount < 1 || dayCount > 366) return null;
       if (first === last) return {
         granularity: 'hour', dates: Array.from({ length: 24 }, (_, hour) => `${first}T${String(hour).padStart(2, '0')}`),
+        rangeDates,
       };
+      if (dayCount > 31) {
+        const dates = [];
+        const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+        while (formatDateKey(cursor).slice(0, 7) <= last.slice(0, 7)) {
+          dates.push(formatDateKey(cursor).slice(0, 7));
+          cursor.setMonth(cursor.getMonth() + 1);
+        }
+        return { granularity: 'month', dates, rangeDates };
+      }
       const dates = [];
       const cursor = parseDateKey(first);
       while (formatDateKey(cursor) <= last && dates.length < 32) {
         dates.push(formatDateKey(cursor));
         cursor.setDate(cursor.getDate() + 1);
       }
-      return dates.length > 1 && dates.length <= 31 ? { granularity: 'day', dates } : null;
+      return dates.length > 1 && dates.length <= 31 ? { granularity: 'day', dates, rangeDates } : null;
     }
 
     function sparklineCoverageKey(payload, granularity) {
       const stamp = new Date(payload && payload.timestamp);
       if (Number.isNaN(stamp.getTime())) return null;
       const date = formatDateKey(stamp);
+      if (granularity === 'month') return date.slice(0, 7);
       return granularity === 'hour' ? `${date}T${String(stamp.getHours()).padStart(2, '0')}` : date;
     }
 
@@ -14002,7 +14035,7 @@
         return result;
       };
       if (!window) return reject('rangeTooLong');
-      const rangeDates = [window.dates[0].slice(0, 10), window.dates[window.dates.length - 1].slice(0, 10)];
+      const rangeDates = window.rangeDates;
       if (!ref || ref.combined !== usage || !ref.complete) return reject('selection');
       if (sparklineHasFailedSource(usage) || ref.rows.some((row) => sparklineHasFailedSource(row.payload)
         || sparklineRangeMatches(row.payload.range, rangeDates) !== true)) return reject('selection');
@@ -14122,13 +14155,18 @@
         svg.setAttribute('data-reason', drawn ? 'drawn' : (series.reason || 'noDaily'));
         const lines = [];
         if (drawn) {
-          lines.push(t(curves.granularity === 'hour' ? 'sparklineResolutionHourly' : 'sparklineResolutionDaily'));
-          lines.push(t(curves.granularity === 'hour' ? 'sparklineMeasuredHours' : 'sparklineMeasuredDays', { n: series.points, total: series.total || SPARKLINE_WEEK_LENGTH }));
+          const resolutionKey = { hour: 'sparklineResolutionHourly', day: 'sparklineResolutionDaily', month: 'sparklineResolutionMonthly' }[curves.granularity];
+          const measuredKey = { hour: 'sparklineMeasuredHours', day: 'sparklineMeasuredDays', month: 'sparklineMeasuredMonths' }[curves.granularity];
+          lines.push(t(resolutionKey));
+          lines.push(t(measuredKey, { n: series.points, total: series.total || SPARKLINE_WEEK_LENGTH }));
           // Today's anchor is a real value over a day that has not finished yet.
-          if (curves.dates && curves.dates[curves.dates.length - 1].slice(0, 10) === formatDateKey(options.today || new Date())
+          const todayKey = formatDateKey(options.today || new Date());
+          if (curves.dates && (curves.granularity === 'month'
+            ? curves.dates[curves.dates.length - 1] === todayKey.slice(0, 7)
+            : curves.dates[curves.dates.length - 1].slice(0, 10) === todayKey)
             && (curves.granularity === 'hour' ? series.values.some((value) => value !== null)
               : series.values[series.values.length - 1] !== null)) {
-            lines.push(t('sparklineTodayPartial'));
+            lines.push(t(curves.granularity === 'month' ? 'sparklineMonthPartial' : 'sparklineTodayPartial'));
           }
           if (curves.recordedOn) lines.push(t('sparklineRecordedAt', { date: curves.recordedOn }));
         } else {

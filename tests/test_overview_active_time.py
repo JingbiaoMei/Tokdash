@@ -110,6 +110,17 @@ def test_daily_agent_buckets_follow_review_session_selection(fake_tools):
         assert sum(row["agent_ms"] for row in data["sparkline"]["buckets"]) == data["active_ms_sum"] == expected
 
 
+def test_yearly_agent_buckets_follow_review_session_selection(fake_tools):
+    fake_tools["codex"] = {
+        "main": _raw("codex", "main", [0, MINUTE]),
+        "review": _raw("codex", "review", [0, 2 * MINUTE], is_review_session=True),
+    }
+    for include, expected in ((True, 180_000), (False, 60_000)):
+        data = get_active_time_data("year", "2026-01-01", "2026-12-31", include_review_sessions=include)
+        assert data["sparkline"] == {"granularity": "month", "buckets": [{"key": "2026-01", "agent_ms": expected}]}
+        assert data["active_ms_sum"] == expected
+
+
 def test_each_tool_is_reported_separately(fake_tools):
     fake_tools["codex"] = {"c1": _raw("codex", "c1", [0, MINUTE])}
     fake_tools["kimi"] = {"k1": _raw("kimi", "k1", [0, 2 * MINUTE])}

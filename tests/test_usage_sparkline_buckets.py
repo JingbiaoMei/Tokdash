@@ -7,7 +7,7 @@ import pytest
 
 from tokdash.compute import parse_entries_json
 from tokdash.dateutil import parse_date_range
-from tokdash.usage_buckets import bucket_granularity, bucket_key, interval_buckets, local_hour_keys
+from tokdash.usage_buckets import bucket_granularity, bucket_key, bucket_key_resolver, interval_buckets, local_hour_keys
 from tokdash.usage_store import UsageEntryStore, build_source_signature
 from tokdash.sources.openclaw import _openclaw_usage_from_store
 
@@ -24,7 +24,7 @@ def entries():
     ]
 
 
-@pytest.mark.parametrize("granularity", ["hour", "day"])
+@pytest.mark.parametrize("granularity", ["hour", "day", "month"])
 def test_store_buckets_match_live_headlines_with_one_sql_scan(tmp_path, granularity):
     raw = entries()
     store = UsageEntryStore(tmp_path / "usage.sqlite3")
@@ -55,7 +55,8 @@ def test_store_buckets_match_live_headlines_with_one_sql_scan(tmp_path, granular
 
 def test_bucket_granularity_is_bounded_and_uses_calendar_days():
     for end, expected in (("2026-09-01", "hour"), ("2026-09-07", "day"),
-                          ("2026-10-01", "day"), ("2026-10-02", None)):
+                          ("2026-10-01", "day"), ("2026-10-02", "month"),
+                          ("2027-09-01", "month"), ("2027-09-02", None)):
         since, until = parse_date_range("2026-09-01", end)
         assert bucket_granularity(since, until) == expected
     assert bucket_granularity(None, None) is None
@@ -102,6 +103,18 @@ def test_empty_and_recorded_cost_usage_never_loads_pricing(monkeypatch, raw):
     assert data["total_messages"] == (11 if raw else 0)
     assert data["total_cost"] == (.2 if raw else 0)
     assert sum(row["messages"] for row in data["sparkline"]["buckets"]) == data["total_messages"]
+
+
+def test_native_bucket_optimization_preserves_model_order_and_independent_payloads():
+    raw = [{**entries()[0], "source": source, "model": model}
+           for source, model in (("codex", "model-z"), ("claude", "model-a"), ("codex", "model-a"))]
+    control = parse_entries_json({"entries": raw})
+    actual = parse_entries_json({"entries": raw}, granularity="month")
+    assert {key: value for key, value in actual.items() if key != "sparkline"} == control
+    assert [(row["source"], row["name"]) for row in actual["all_models"]] == [
+        ("claude", "openai/model-a"), ("codex", "openai/model-a"), ("codex", "openai/model-z")]
+    actual["apps"]["claude"]["models"][0]["tokens"] = 999
+    assert actual["all_models"][0]["tokens"] == 122
 
 
 def test_openclaw_buckets_preserve_models_costs_and_message_counts(tmp_path):
@@ -160,6 +173,10 @@ def test_interval_buckets_conserve_duration_across_dst_and_half_hour_zones(zone,
     ("Europe/London", "2026-03-27", "2026-04-02"),
     ("Europe/London", "2026-07-01", "2026-07-07"),
     ("Asia/Kolkata", "2026-09-21", "2026-09-21"),
+    ("Europe/London", "2024-01-01", "2024-12-31"),
+    ("Asia/Kolkata", "2026-01-15", "2026-12-15"),
+    ("America/New_York", "2026-01-01", "2026-12-31"),
+    ("Australia/Lord_Howe", "2026-10-04", "2026-10-04"),
 ])
 def test_sql_buckets_match_local_event_buckets_across_timezones(tmp_path, zone, first, last):
     prior = os.environ.get("TZ")
@@ -177,12 +194,37 @@ def test_sql_buckets_match_local_event_buckets_across_timezones(tmp_path, zone, 
         granularity = bucket_granularity(since, until)
         data = store.aggregate_entries(sources=["codex"], since=since, until=until, bucket_granularity=granularity)
         live = parse_entries_json({"entries": raw}, granularity=granularity)
+        resolve = bucket_key_resolver(granularity)
+        for event in raw[::2][::-1] + raw[1::2]:
+            assert resolve(event["timestamp"]) == bucket_key(event["timestamp"], granularity)
         assert data["sparkline"]["granularity"] == live["sparkline"]["granularity"]
         assert len(data["sparkline"]["buckets"]) == len(live["sparkline"]["buckets"])
         for actual, expected in zip(data["sparkline"]["buckets"], live["sparkline"]["buckets"]):
             assert actual == {**expected, "cost": pytest.approx(expected["cost"])}
         assert data["total_tokens"] == live["total_tokens"]
         assert data["total_messages"] == live["total_messages"]
+    finally:
+        if prior is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = prior
+        time.tzset()
+
+
+@pytest.mark.skipif(not hasattr(time, "tzset"), reason="tzset unavailable")
+def test_monthly_intervals_preserve_leap_days_dst_and_partial_months():
+    prior = os.environ.get("TZ")
+    try:
+        os.environ["TZ"] = "Europe/London"
+        time.tzset()
+        since, until = parse_date_range("2024-01-15", "2024-12-15")
+        first, last = int(since.timestamp() * 1000), int(until.timestamp() * 1000)
+        split = interval_buckets([(first, last)] * 2, "month")
+        assert len(split["buckets"]) == 12
+        assert sum(row["agent_ms"] for row in split["buckets"]) == 2 * (last - first)
+        assert split["buckets"][1] == {"key": "2024-02", "agent_ms": 2 * 29 * 86_400_000}
+        assert split["buckets"][2] == {"key": "2024-03", "agent_ms": 2 * (31 * 86_400_000 - 3_600_000)}
+        assert split["buckets"][9] == {"key": "2024-10", "agent_ms": 2 * (31 * 86_400_000 + 3_600_000)}
     finally:
         if prior is None:
             os.environ.pop("TZ", None)

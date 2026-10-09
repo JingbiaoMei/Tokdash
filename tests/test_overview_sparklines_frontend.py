@@ -1577,6 +1577,25 @@ b.usage.top_models = b.usage.combined_models = [{name:'model-a',tokens:28}];
 delete b.usage.sparkline;
 output.mixed = metricView(scenario([f.rows[0],{...b.rows[0],serverId:'remote'}],combined).curves);
 output.partial = metricView(scenario([{...f.rows[0],retained:true}],f.usage).curves);
+const annual = usagePayload({range:{from:'2026-01-15',to:'2026-09-27'}, tokens:100,
+  cost:1,messages:9,cache:.9,topModels:[{name:'model-a',tokens:100}],timestamp:'2026-09-27T02:45:00'});
+annual.sparkline = {granularity:'month',buckets:[
+  {key:'2026-01',tokens:10,cost:.1,messages:4,input:0,cache:10,models:{'model-a':10}},
+  {key:'2026-09',tokens:90,cost:.9,messages:5,input:10,cache:80,models:{'model-a':90}},
+]};
+overviewActiveTimeState = {key:'2026-01-15:2026-09-27',data:{active_ms_sum:180000,_sparklineServerKey:'local',
+  _sparklinePayloads:[{range:annual.range,timestamp:annual.timestamp,active_ms_sum:180000,unavailable_tools:[],
+    sparkline:{granularity:'month',buckets:[{key:'2026-01',agent_ms:60000},{key:'2026-09',agent_ms:120000}]}}]}};
+output.year = metricView(scenario([{serverId:'local',usage:annual,stats:{}}],annual,
+  {start:'2026-01-15',end:'2026-09-27'}).curves);
+renderOverviewSparklines(annual,{today:parseDateKey('2026-09-27')});
+output.monthlyAria = node('sparklineTokens').attrs['aria-label'];
+annual.range.to = '2026-12-31';
+output.futureMonths = metricView(scenario([{serverId:'local',usage:annual,stats:{}}],annual,
+  {start:'2026-01-15',end:'2026-12-31'}).curves);
+output.leapWindow = sparklineWindowKeys(parseDateKey('2024-01-01'),parseDateKey('2024-12-31'));
+output.rollingWindow = sparklineWindowKeys(parseDateKey('2025-09-27'),parseDateKey('2026-09-27'));
+output.overLimit = sparklineWindowKeys(parseDateKey('2025-09-27'),parseDateKey('2026-09-28'));
 output.fetchCalls = fetchCalls;
 process.stdout.write(JSON.stringify(output));
 """
@@ -1639,18 +1658,44 @@ def test_multiple_servers_allow_independent_cost_rounding_and_disjoint_models(bu
     assert bucket_results["disjoint"]["top_model"]["values"] == [10, 20, 30, 40, 50, 60, 70]
 
 
-def test_real_usage_response_draws_hourly_curves_without_stats(tmp_path, monkeypatch):
+def test_yearly_curves_use_months_and_preserve_partial_selected_months(bucket_results):
+    case = bucket_results["year"]
+    for metric in ("tokens", "cost", "messages", "cache_hit_rate", "top_model", "agent_time"):
+        assert case[metric]["reason"] == "", metric
+        assert case[metric]["line"], metric
+    assert case["tokens"]["values"] == [10] + [0] * 7 + [90]
+    assert case["agent_time"]["values"] == [60000] + [0] * 7 + [120000]
+    assert case["cache_hit_rate"]["values"] == [1] + [None] * 7 + [80 / 90]
+    assert "Monthly recorded values" in bucket_results["monthlyAria"]
+    assert "9 of 9 months measured" in bucket_results["monthlyAria"]
+    assert "This month is still in progress" in bucket_results["monthlyAria"]
+
+
+def test_monthly_curves_leave_future_months_unknown_and_bound_leap_years(bucket_results):
+    assert bucket_results["futureMonths"]["tokens"]["values"] == [10] + [0] * 7 + [90] + [None] * 3
+    assert len(bucket_results["leapWindow"]["dates"]) == 12
+    assert bucket_results["leapWindow"]["rangeDates"] == ["2024-01-01", "2024-12-31"]
+    assert len(bucket_results["rollingWindow"]["dates"]) == 13
+    assert bucket_results["overLimit"] is None
+
+
+@pytest.mark.parametrize("first,last,granularity,points", [
+    ("2026-09-21", "2026-09-21", "hour", 24),
+    ("2024-01-01", "2024-12-31", "month", 12),
+])
+def test_real_usage_response_draws_curves_without_stats(tmp_path, monkeypatch, first, last, granularity, points):
     """Exercise the actual SQL -> compute -> API -> JS contract, including batch messages."""
     from tokdash import api, compute
     from tokdash.dateutil import parse_date_range
     from tokdash.sources.openclaw import _openclaw_usage_from_store
     from tokdash.usage_store import UsageEntryStore, build_source_signature
 
-    since, until = parse_date_range("2026-09-21", "2026-09-21")
+    since, until = parse_date_range(first, last)
     store = UsageEntryStore(tmp_path / "usage.sqlite3")
-    rows = [{"source": "codex", "model": "model-a", "timestamp": int(since.timestamp() * 1000) + hour * 3_600_000,
+    offsets = ((3_600_000, 4), (7_200_000, 7)) if granularity == "hour" else ((3_600_000, 4), (60 * 86_400_000, 7))
+    rows = [{"source": "codex", "model": "model-a", "timestamp": int(since.timestamp() * 1000) + offset,
              "input": 10, "output": 5, "cacheRead": 20, "cost": .01, "messageCount": count}
-            for hour, count in ((1, 4), (2, 7))]
+            for offset, count in offsets]
     store.sync_source("codex", build_source_signature(files=[["synthetic", 1, 1]], parser={"v": 1}), lambda: rows)
 
     class Tracker:
@@ -1663,20 +1708,23 @@ def test_real_usage_response_draws_hourly_curves_without_stats(tmp_path, monkeyp
     monkeypatch.setattr(compute, "get_session_usage_range", lambda start, stop: _openclaw_usage_from_store(store, start, stop))
     api._clear_cache()
     try:
-        payload = api.get_usage("today", "2026-09-21", "2026-09-21", refresh=True)
+        payload = api.get_usage("today", first, last, refresh=True)
     finally:
         api._clear_cache()
     assert payload["total_messages"] == 11
-    assert payload["sparkline"]["granularity"] == "hour"
-    assert len(payload["sparkline"]["keys"]) == 24
-    tail = "const payload = " + json.dumps(payload) + ";\n" + r"""
+    assert payload["sparkline"]["granularity"] == granularity
+    if granularity == "hour":
+        assert len(payload["sparkline"]["keys"]) == 24
+    tail = "const context = " + json.dumps({"start": first, "end": last, "today": "2026-09-27"}) + ";\n"
+    tail += "const payload = " + json.dumps(payload) + ";\n" + r"""
 const result = scenario([{serverId:'local',usage:payload,stats:{}}], payload,
-  {start:'2026-09-21',end:'2026-09-21',today:'2026-09-27'});
+  context);
 process.stdout.write(JSON.stringify({metrics:metricView(result.curves),fetches:fetchCalls}));
 """
     result = _run_script(tmp_path, _harness_script(_source(), tail), "real-hourly-contract")
     for metric in ("tokens", "cost", "messages", "cache_hit_rate", "top_model"):
         assert result["metrics"][metric]["reason"] == "", metric
         assert result["metrics"][metric]["line"], metric
-    assert result["metrics"]["messages"]["values"] == [0, 4, 7] + [0] * 21
+    assert result["metrics"]["messages"]["points"] == points
+    assert result["metrics"]["messages"]["values"] == ([0, 4, 7] + [0] * 21 if granularity == "hour" else [4, 0, 7] + [0] * 9)
     assert result["fetches"] == 0

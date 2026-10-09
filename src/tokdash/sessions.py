@@ -7199,7 +7199,15 @@ def get_session_detail(tool: str, session_id: str) -> Dict[str, Any]:
     elif key in ("antigravity_cli", "antigravity"):
         res.update(_antigravity_rich_session_detail(str(session_id), raw, session))
     elif key == "opencode":
-        res.update(_opencode_rich_session_detail(str(session_id), raw, session))
+        # The session and turns above come from the cached loader; this is a fresh
+        # read of OpenCode's store on every open. If it fails, return the session
+        # without its message timeline instead of failing the whole detail, as the
+        # Hermes and Antigravity readers do.
+        try:
+            res.update(_opencode_rich_session_detail(str(session_id), raw, session))
+        except (OSError, sqlite3.Error, ValueError) as error:
+            logger.warning("OpenCode detail: message metadata unavailable for session %s: %s", session_id, error)
+            res.update({"messages": [], "tool_calls": [], "tool_executions": []})
     return res
 
 

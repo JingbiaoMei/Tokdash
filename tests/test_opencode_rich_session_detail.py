@@ -299,13 +299,18 @@ def test_success_attempts_close_even_when_rollback_fails(tmp_path, monkeypatch):
     assert calls==["rollback","close"]
 
 
-def test_public_detail_integration_and_errors(tmp_path, monkeypatch):
+def public_db(tmp_path, monkeypatch):
+    """A store the session list can read: one v2 session with one assistant message."""
     root=tmp_path/"xdg"; monkeypatch.setenv("XDG_DATA_HOME",str(root)); path=root/"opencode"/"opencode.db"; path.parent.mkdir(parents=True)
     c=sqlite3.connect(path)
     c.executescript("CREATE TABLE project(id TEXT PRIMARY KEY,worktree TEXT); CREATE TABLE session_v2(id TEXT PRIMARY KEY,project_id TEXT,workspace_id TEXT,parent_id TEXT,slug TEXT,directory TEXT,title TEXT,version TEXT,time_created INTEGER,time_updated INTEGER);"+V2)
     c.execute("INSERT INTO project VALUES('p','/synthetic')");c.execute("INSERT INTO session_v2 VALUES('sess-1','p',NULL,NULL,'slug','/synthetic','title','1',?,?)",(BASE,BASE))
     v2row(c,"a","assistant",{"tokens":{"input":1,"output":1},"content":[{"type":"text","text":"hello"}]})
     c.commit();c.close()
+
+
+def test_public_detail_integration_and_errors(tmp_path, monkeypatch):
+    public_db(tmp_path, monkeypatch)
     raw=sessions._raw_sessions_for_tool("opencode")["sess-1"]
     expected_session=sessions._summarize_session(raw)
     expected_session.pop("_active_intervals",None)
@@ -317,6 +322,23 @@ def test_public_detail_integration_and_errors(tmp_path, monkeypatch):
     assert result["turns"]==expected_turns
     with pytest.raises(FileNotFoundError): sessions.get_session_detail("opencode","missing")
     with pytest.raises(ValueError): sessions.get_session_detail("unsupported","sess-1")
+
+
+def test_failed_rich_read_keeps_the_session_and_turns(tmp_path, monkeypatch, caplog):
+    # The dashboard shows only "Failed to load session detail" for any error, so a
+    # failure here must cost the message timeline, not the token summary and charts.
+    public_db(tmp_path, monkeypatch)
+    expected=sessions.get_session_detail("opencode","sess-1")
+
+    def locked(*_args):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(sessions,"_opencode_rich_session_detail",locked)
+    result=sessions.get_session_detail("opencode","sess-1")
+    assert result["session"]==expected["session"]
+    assert result["turns"]==expected["turns"] and result["turns"]
+    assert result["messages"]==[] and result["tool_calls"]==[] and result["tool_executions"]==[]
+    assert "database is locked" in caplog.text
 
 
 def test_indexed_filtered_queries_and_no_n_plus_one(tmp_path, monkeypatch):

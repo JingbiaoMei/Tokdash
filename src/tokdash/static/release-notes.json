@@ -1,6 +1,42 @@
 {
-  "current": "2.6.11",
+  "current": "2.6.12",
   "releases": [
+    {
+      "version": "2.6.12",
+      "date": "2026-10-09",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "Opening an OpenCode session now fills the transcript timeline and the details drawer instead of saying no transcript was stored. Tokdash reads OpenCode's database read-only for message metadata (role, time, model, token and character counts, whether a message carries reasoning or tool calls) and tool metadata (name, status, and whether it had arguments). It reads metadata only: your prompts, responses, reasoning and tool output never leave the database.",
+            "The Sessions tab's client filters show each tool's logo next to its name and drop to just the logo when the row gets tight, so a dozen tools stay in one readable row.",
+            "A new architecture page walks a usage event from local client logs through the parsers, the usage database and pricing, and out to the API, the terminal dashboard and the statusline. The quota guide gained a diagram of the background poll and its reset-boundary samples.",
+            "The configuration reference documents 23 Tokdash settings that previously existed only in the code, covering background warming, sessions and parsing, quota polling, the terminal dashboard and update checks.",
+            "All six READMEs now carry the CI status and the current PyPI version.",
+            "New pull requests start from a template with a testing section and a checklist, and pytest moved into the dev requirements so one install covers the whole suite.",
+            "The OpenAPI schema at /openapi.json describes itself with a version, licence and six tags; every route carries a tag and most carry a one-line summary.",
+            "Four more models are priced: gpt-6.1-sol-pro, claude-haiku-5.5, mistral-large-4-0 and gemini-nano-banana-2.1."
+          ]
+        },
+        {
+          "type": "changed",
+          "items": [
+            "The dashboard no longer serves the Swagger UI and ReDoc pages. They fetched their JavaScript from a public CDN with no integrity check, and a script loaded on the dashboard's own origin can ask for the same write token the dashboard does. The plain JSON schema at /openapi.json stays, so OpenAPI tools keep working, and API.md is still the human-readable reference.",
+            "Freebuff's logo is its real glyph rather than a placeholder letter, in the green the site itself uses. Muse Code keeps its letter tile but now uses one blue for both the dashboard icon and its README badge, and the supported-clients list no longer leaves it out.",
+            "The contributing guide installs the full dev requirements the way CI does, adds the Windows activation commands, and runs a source checkout against its own data directory so a development build cannot migrate your real usage database."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "The six Overview sparklines draw your recorded daily usage instead of a fixed decorative curve that looked identical for every user, every date range and every server. Curves are built only from data the page already loads, so they cost no extra requests; the cache-rate curve sums its counts rather than averaging daily percentages; the top-model curve follows the model the card names; days the data does not cover read as gaps rather than zeros; and where a curve cannot be drawn honestly the card says why, in all six languages, instead of showing a shape.",
+            "Devin CLI reports usage from a real sessions database. A populated store keeps its token counts, model and row id in fields the parser was not reading, so live installs showed no usage at all.",
+            "On very wide monitors the dashboard content sits centred in the space beside the sidebar instead of pushed up against it. Screens at 1920px and below are unchanged.",
+            "Three command-line errors now say what to do next: a failed db verify points at db resync, an unknown db action lists the valid ones, and a bad --port reports the problem it actually hit."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.6.11",
       "date": "2026-10-05",

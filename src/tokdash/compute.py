@@ -455,7 +455,9 @@ def cache_hit_rate(tokens_in: Any, tokens_cache: Any) -> Optional[float]:
 def parse_entries_json(data: Dict[str, Any], *, granularity: Optional[str] = None) -> Dict[str, Any]:
     """Parse tokscale-compatible entries JSON and aggregate by app/model."""
     entries = data.get("entries", [])
-    pricing_db = PricingDatabase()
+    # Stored-source requests usually have no live entries. Native/fixed costs
+    # also need no rate lookup; avoid loading pricing until a fallback needs it.
+    pricing_db: Optional[PricingDatabase] = None
 
     buckets: dict[str, dict] = {}
     apps: Dict[str, Any] = {}
@@ -498,6 +500,8 @@ def parse_entries_json(data: Dict[str, Any], *, granularity: Optional[str] = Non
         if entry_cost > 0 or entry.get("costAuthoritative") is True:
             cost = entry_cost
         else:
+            if pricing_db is None:
+                pricing_db = PricingDatabase()
             cost = pricing_db.get_cost(full_model_name, input_raw, tokens_out, cache_read, cache_write)
         messages = int(entry.get("messageCount", 0) or 1)
         if granularity and source.lower() != "openclaw":

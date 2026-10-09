@@ -90,6 +90,20 @@ def test_tokscale_backend_reuses_loaded_entries_for_hourly_buckets(monkeypatch):
     assert len(calls) == 2
 
 
+@pytest.mark.parametrize("raw", [[], entries()[:2]])
+def test_empty_and_recorded_cost_usage_never_loads_pricing(monkeypatch, raw):
+    from tokdash import compute
+
+    def unexpected_pricing_load():
+        raise AssertionError("recorded costs need no pricing file read")
+
+    monkeypatch.setattr(compute, "PricingDatabase", unexpected_pricing_load)
+    data = compute.parse_entries_json({"entries": raw}, granularity="hour")
+    assert data["total_messages"] == (11 if raw else 0)
+    assert data["total_cost"] == (.2 if raw else 0)
+    assert sum(row["messages"] for row in data["sparkline"]["buckets"]) == data["total_messages"]
+
+
 def test_openclaw_buckets_preserve_models_costs_and_message_counts(tmp_path):
     raw = [{**row, "source": "openclaw", "reasoning": 0, "cost": 0.01} for row in entries()]
     store = UsageEntryStore(tmp_path / "usage.sqlite3")

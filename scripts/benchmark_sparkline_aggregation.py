@@ -56,8 +56,11 @@ def worker(args):
         source_errors = []
     compute.CodingToolsUsageTracker = Tracker
     compute._sync_usage_store = lambda _tracker: (store, ["codex"])
+    compute.UsageEntryStore = lambda: store
+    compute._usage_store_sources = lambda _tracker: ["codex"]
     compute._collect_live_coding_entries = lambda *unused: []
     compute.get_openclaw_data_for_range = lambda f, t: openclaw._openclaw_usage_from_store(store, *parse_date_range(f, t))
+    compute.get_session_usage_range = lambda start, end: openclaw._openclaw_usage_from_store(store, start, end)
     cases = {"today": (today, today), "yesterday": (today-timedelta(days=1), today-timedelta(days=1)),
              "week": (today-timedelta(days=6), today), "year": (today-timedelta(days=364), today)}
     intervals = [(row["timestamp"], row["timestamp"] + 120_000) for row in rows]
@@ -81,8 +84,8 @@ def worker(args):
         t = time.perf_counter()
         cpu = time.process_time()
         if kind == "usage":
-            data = compute.compute_usage("today", start.isoformat(), end.isoformat())
-            fields = ("total_tokens", "total_cost", "total_messages", "cache_hit_rate")
+            data = compute.compute_usage_with_comparison("today", start.isoformat(), end.isoformat())
+            fields = ("total_tokens", "total_cost", "total_messages", "cache_hit_rate", "comparison")
         else:
             data = sessions.get_active_time_data("today", start.isoformat(), end.isoformat())
             fields = ("active_ms", "active_ms_sum")
@@ -164,7 +167,7 @@ def main():
             log.close()
         temporary.cleanup()
     report = {"rows": results["candidate"]["rows"], "repeats": args.repeats,
-              "method": "paired alternating processes; 24-hour events; 3 warmups; same corpus and headline semantics",
+              "method": "paired alternating processes; Usage including previous comparison; 24-hour events; 3 warmups; same corpus and headline semantics",
               "database_storage": str(database_dir),
               "gc_mode": args.gc_mode,
               "gate": "candidate p95 <= baseline p95 + max(10 ms, 10% of baseline p95)", "cases": {}, "raw": results}

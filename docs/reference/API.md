@@ -43,8 +43,11 @@ per-session token); see [`docs/SECURITY.md`](../SECURITY.md) and `PUT /api/prici
 | `GET` | `/api/openclaw` | OpenClaw model breakdown |
 | `GET` | `/api/stats` | Annual stats aggregation |
 | `GET` | `/api/insights` | Fine-grained analytics (hour-of-day, weekday, heatmap, projects, streaks) |
+| `GET` | `/api/activity-insights` | Codex activity insights (cached per day) |
 | `GET` | `/api/pricing-db` | Current pricing database snapshot |
 | `PUT` | `/api/pricing-db` | Update the pricing database (write-gated, requires token) |
+| `GET` | `/manifest.webmanifest` | PWA web manifest |
+| `GET` | `/sw.js` | Service worker JavaScript |
 | `GET` | `/` | Web dashboard (HTML) |
 
 ---
@@ -920,6 +923,56 @@ curl -s -X PUT http://127.0.0.1:55423/api/pricing-db \
 
 ---
 
+## PWA endpoints
+
+### `GET /manifest.webmanifest`
+
+Returns the PWA web manifest for installing Tokdash as a progressive web app.
+
+**Parameters:** None
+
+**Response:** `application/manifest+json`
+
+```json
+{
+  "name": "Tokdash",
+  "short_name": "Tokdash",
+  "description": "OpenClaw + coding tools usage, cost, and activity.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F8FAFC",
+  "theme_color": "#1E40AF",
+  "icons": [
+    {
+      "src": "/static/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
+```
+
+Note: `start_url` and `scope` are rewritten to the public base path (e.g. `/tokdash/`) when Tokdash is served behind a proxy that strips the prefix.
+
+### `GET /sw.js`
+
+Returns the service worker JavaScript for offline caching and PWA functionality.
+
+**Parameters:** None
+
+**Response:** `application/javascript`
+
+---
+
+
 ## Integration Example: Claude Code Status Line
 
 > **Ready-made templates:** [`docs/guides/statusline/`](../guides/statusline/) ships a minimal and a full statusline script plus install/config notes. The snippet below is the minimal one, reproduced here for reference.
@@ -983,6 +1036,180 @@ echo "[$MODEL] 📁 ${DIR##*/}${TOKDASH_STR}"
 - The `📊 ...` segment is omitted entirely when tokdash returns nothing — no error noise in the status bar.
 - For per-tool detail, swap in `.by_tool.claude.tokens` or similar from the same response.
 - For weekly/monthly totals, change `period=today` to `period=week` or `period=month`.
+
+---
+
+## Integration Example: Claude Code Status Line
+
+> **Ready-made templates:** [`docs/guides/statusline/`](../guides/statusline/) ships a minimal and a full statusline script plus install/config notes. The snippet below is the minimal one, reproduced here for reference.
+
+Tokdash's `/api/usage` endpoint is well suited for embedding daily totals into the Claude Code status line. The snippet below queries today's usage with a 1-second timeout, falls back silently if tokdash is unreachable, and renders a compact summary like `📊 69.9M ($55.64) today`.
+
+### Status line script (`~/.claude/scripts/statusline.sh`)
+
+```bash
+#!/bin/bash
+input=$(cat)
+
+MODEL=$(echo "$input" | jq -r '.model.display_name')
+DIR=$(echo "$input" | jq -r '.workspace.current_dir')
+
+# Fetch tokdash totals — fail silently if unreachable
+TOKDASH_STR=""
+TOKDASH_JSON=$(curl -s -m 1 "http://127.0.0.1:55423/api/usage?period=today" 2>/dev/null)
+if [ -n "$TOKDASH_JSON" ]; then
+  TODAY_TOKENS=$(echo "$TOKDASH_JSON" | jq -r '.total_tokens // 0' 2>/dev/null)
+  TODAY_COST=$(echo "$TOKDASH_JSON" | jq -r '.total_cost // 0' 2>/dev/null)
+  if [ -n "$TODAY_TOKENS" ] && [ "$TODAY_TOKENS" != "0" ]; then
+    if [ "$TODAY_TOKENS" -ge 1000000 ]; then
+      TOK_FMT=$(awk "BEGIN {printf \"%.1fM\", $TODAY_TOKENS/1000000}")
+    elif [ "$TODAY_TOKENS" -ge 1000 ]; then
+      TOK_FMT="$(( (TODAY_TOKENS + 500) / 1000 ))k"
+    else
+      TOK_FMT="$TODAY_TOKENS"
+    fi
+    COST_TODAY=$(printf '$%.2f' "$TODAY_COST")
+    TOKDASH_STR=" | 📊 ${TOK_FMT} (${COST_TODAY}) today"
+  fi
+fi
+
+echo "[$MODEL] 📁 ${DIR##*/}${TOKDASH_STR}"
+```
+
+### Claude Code settings (`~/.claude/settings.json`)
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "bash ~/.claude/scripts/statusline.sh",
+    "refreshInterval": 30
+  }
+}
+```
+
+`refreshInterval` (added in Claude Code 2.1.97) re-runs the script every N seconds so the totals stay live even while you're idle.
+
+### Output
+
+```
+[Claude Sonnet 4.6] 📁 myproject | 📊 69.9M ($55.64) today
+```
+
+### Notes
+
+- Keep the curl timeout small (`-m 1`) so the status line doesn't stall if tokdash is restarting.
+- The `📊 ...` segment is omitted entirely when tokdash returns nothing — no error noise in the status bar.
+- For per-tool detail, swap in `.by_tool.claude.tokens` or similar from the same response.
+- For weekly/monthly totals, change `period=today` to `period=week` or `period=month`.
+
+---
+
+## PWA endpoints
+
+### `GET /manifest.webmanifest`
+
+Returns the PWA web manifest for installing Tokdash as a progressive web app.
+
+**Parameters:** None
+
+**Response:** `application/manifest+json`
+
+```json
+{
+  "name": "Tokdash",
+  "short_name": "Tokdash",
+  "description": "OpenClaw + coding tools usage, cost, and activity.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F8FAFC",
+  "theme_color": "#1E40AF",
+  "icons": [
+    {
+      "src": "/static/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
+```
+
+Note: `start_url` and `scope` are rewritten to the public base path (e.g. `/tokdash/`) when Tokdash is served behind a proxy that strips the prefix.
+
+### `GET /sw.js`
+
+Returns the service worker JavaScript for offline caching and PWA functionality.
+
+**Parameters:** None
+
+**Response:** `application/javascript`
+
+---
+
+## Activity insights
+
+### `GET /api/activity-insights`
+
+Returns Codex activity insights derived from usage data. Results are cached per day (the cache key is scoped to the day, and entries expire on the normal `TOKDASH_CACHE_TTL`, 600 seconds by default).
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `refresh` | `bool` | `false` | Force a fresh computation, bypassing the cache |
+
+**Response:** `application/json`
+
+```json
+{
+  "scope": {"tool": "codex", "local": true, "primary_only": true},
+  "recorded_chats": {
+    "value": 42,
+    "coverage": {
+      "primary_files": 100,
+      "files_with_session_id": 95,
+      "legacy_unavailable_records": 5
+    }
+  },
+  "reasoning": {
+    "most_used": {"effort": "high", "count": 10, "share": 0.666667},
+    "distribution": [
+      {"effort": "high", "count": 10, "share": 0.666667},
+      {"effort": "medium", "count": 5, "share": 0.333333}
+    ],
+    "coverage": {
+      "identified_turns": 50,
+      "known_effort_turns": 15,
+      "ambiguous_turns": 3,
+      "excluded_records": 2
+    }
+  },
+  "tools": {
+    "total_calls": 200,
+    "most_used": {"name": "read_file", "count": 50, "share": 0.25},
+    "distribution": [
+      {"name": "read_file", "count": 50, "share": 0.25},
+      {"name": "write", "count": 30, "share": 0.15}
+    ],
+    "coverage": {
+      "named_calls": 180,
+      "ambiguous_name_calls": 10,
+      "excluded_records": 5
+    }
+  },
+  "timestamp": "2026-10-06T12:00:00+00:00"
+}
+```
+
+**Caching:** The cache key is scoped to the day. Entries expire on the normal `TOKDASH_CACHE_TTL` (600 seconds by default). Pass `refresh=true` to bypass.
 
 ---
 

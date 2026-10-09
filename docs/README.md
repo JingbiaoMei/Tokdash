@@ -11,6 +11,7 @@
 - [Remote access](guides/REMOTE_ACCESS.md) — reaching a Tokdash instance from another machine (SSH forwarding, Tailscale Serve, Cloudflare Tunnel, authenticated reverse proxy, wildcard binding).
 - [Statusline templates](guides/statusline/README.md) — ready-made Claude Code statusline scripts (bash + PowerShell) that read local Tokdash totals.
 - [Background service & agents](guides/agents/systemd/BACKGROUND_RUN.md) — run Tokdash as a systemd/launchd service, the health-probe auto-restart, and the OpenClaw reporting cron.
+- [OpenClaw reporting agent](guides/agents/openclaw_reporting/AGENTS.md) — how the OpenClaw reporting agent works and how to configure it.
 
 ## reference/ — lookup material
 
@@ -28,6 +29,7 @@
 - [更新日志](development/CHANGELOG_CN.md) — 简体中文更新日志，由 `scripts/changelog_cn.py` 从应用内条目生成。
 - [Releasing](development/RELEASING.md) — checklist for manual PyPI/Git tag/GitHub Releases publishing.
 - [Roadmap](development/ROADMAP.md) — notes on planned and deferred work.
+- [TUI specification](development/tui-spec.md) — the terminal dashboard specification (layout, components, interactions).
 - [Companion release guide](../companion/docs/RELEASE.md) — tagging the menu-bar/tray app, the unsigned GitHub binaries, and the Microsoft Store (MSIX) track.
 
 ### development/technical-notes/ — public technical notes and research

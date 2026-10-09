@@ -9,8 +9,10 @@ from __future__ import annotations
 import argparse
 from bisect import bisect_left, bisect_right
 from datetime import datetime, timedelta
+from decimal import Decimal, ROUND_HALF_EVEN
 import gc
 import json
+from itertools import accumulate
 import math
 import os
 from pathlib import Path
@@ -87,6 +89,16 @@ def worker(args):
     compute.get_session_usage_range = lambda start, end: openclaw._openclaw_usage_from_store(store, start, end)
     intervals = [(row["timestamp"], row["timestamp"] + 120_000) for row in rows]
     stamps = [row["timestamp"] for row in rows]
+    # The synthetic recorded fees are exact integer mills. This independent
+    # oracle exposes legacy binary half-cent rounding instead of silently
+    # allowing a one-cent drift between aggregation partitions.
+    cost_mills = [0, *accumulate(round(row["cost"]*1000) for row in rows)]
+
+    def cost_reference(first, last):
+        lo, hi = bisect_left(stamps, int(first.timestamp()*1000)), bisect_left(stamps, int(last.timestamp()*1000))
+        mills = cost_mills[hi] - cost_mills[lo]
+        cents = float((Decimal(mills) / 1000).quantize(Decimal(".01"), rounding=ROUND_HALF_EVEN))
+        return mills, cents
 
     def active_window(since_ms, until_ms, **unused):
         lo = bisect_right(stamps, since_ms-120_000)
@@ -131,7 +143,15 @@ def worker(args):
         cpu_elapsed = (time.process_time()-cpu)*1000
         if enabled:
             gc.enable()
-        print(json.dumps({"ms": elapsed, "cpu_ms": cpu_elapsed, "bytes": encoded_bytes,
+        oracle = None
+        if kind == "usage":
+            since, until = parse_date_range(str(start), str(end))
+            mills, current_cost = cost_reference(since, until)
+            previous_mills, previous_cost = cost_reference(since-(until-since), since)
+            oracle = {"current_mills": mills, "previous_mills": previous_mills,
+                      "total_cost": current_cost, "cost_prev": previous_cost,
+                      "cost_pct": compute.pct_change(current_cost, previous_cost)}
+        print(json.dumps({"ms": elapsed, "cpu_ms": cpu_elapsed, "bytes": encoded_bytes, "oracle": oracle,
                           "totals": {field: data[field] for field in fields}}), flush=True)
 
 
@@ -161,7 +181,7 @@ def main():
     if not args.baseline:
         parser.error("--baseline is required")
     cases = [f"{kind}/{window}" for kind in args.kinds for window in args.windows]
-    results = {label: {"samples": {key: [] for key in cases}, "cpu_samples": {key: [] for key in cases}, "bytes": {}, "totals": {}}
+    results = {label: {"samples": {key: [] for key in cases}, "cpu_samples": {key: [] for key in cases}, "bytes": {}, "totals": {}, "oracle": {}}
                for label in ("baseline", "candidate")}
     processes = {}
     logs = []
@@ -199,6 +219,7 @@ def main():
                         results[label]["samples"][key].append(result["ms"])
                         results[label]["cpu_samples"][key].append(result["cpu_ms"])
                         results[label]["bytes"][key] = result["bytes"]
+                        results[label]["oracle"][key] = result["oracle"]
                         results[label]["totals"][key] = result["totals"]
     finally:
         for proc in processes.values():
@@ -222,16 +243,38 @@ def main():
         before = summary(results["baseline"]["samples"][key])
         after = summary(results["candidate"]["samples"][key])
         budget = max(10, before["p95_ms"]*.1)
+        baseline_totals = results["baseline"]["totals"][key]
+        candidate_totals = results["candidate"]["totals"][key]
+        equal = baseline_totals == candidate_totals
+        oracle = results["candidate"]["oracle"][key]
+        correctness = equal
+        baseline_rounding_drift = False
+        if oracle is not None:
+            def monetary_fields_match(totals):
+                return (totals["total_cost"] == oracle["total_cost"]
+                        and totals["comparison"]["cost_prev"] == oracle["cost_prev"]
+                        and totals["comparison"]["cost_pct"] == oracle["cost_pct"])
+
+            def nonmonetary(totals):
+                copy = json.loads(json.dumps(totals))
+                copy.pop("total_cost")
+                copy["comparison"].pop("cost_prev")
+                copy["comparison"].pop("cost_pct")
+                return copy
+
+            baseline_rounding_drift = not monetary_fields_match(baseline_totals)
+            correctness = monetary_fields_match(candidate_totals) and nonmonetary(baseline_totals) == nonmonetary(candidate_totals)
         report["cases"][key] = {"baseline": before, "candidate": after, "budget_ms": budget,
             "cpu_baseline": summary(results["baseline"]["cpu_samples"][key]),
             "cpu_candidate": summary(results["candidate"]["cpu_samples"][key]),
             "bytes_baseline": results["baseline"]["bytes"][key], "bytes_candidate": results["candidate"]["bytes"][key],
             "pass": after["p95_ms"] <= before["p95_ms"]+budget,
-            "totals_equal": results["baseline"]["totals"][key] == results["candidate"]["totals"][key]}
+            "totals_equal": equal, "correctness_pass": correctness,
+            "cost_reference": oracle, "baseline_rounding_drift": baseline_rounding_drift}
     path = Path(args.output)/args.report_name
     path.write_text(json.dumps(report, indent=2)+"\n")
     print(json.dumps({"report": str(path), "cases": report["cases"]}, indent=2))
-    if not all(row["pass"] and row["totals_equal"] for row in report["cases"].values()):
+    if not all(row["pass"] and row["correctness_pass"] for row in report["cases"].values()):
         raise SystemExit(1)
 
 

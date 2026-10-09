@@ -481,6 +481,9 @@ time for agent durations.
 The Overview fixes the Top Model for the whole range and plots that model's
 bucket tokens. These buckets do not depend on the annual Stats snapshot, and
 travel in the existing cached response without another API call or source scan.
+Displayed range costs use decimal half-even cent rounding after an eight-decimal
+normalization of binary summation noise. Model and bucket costs stay unrounded;
+changing the grouping resolution cannot flip an exact half-cent total.
 
 **Per-app object shape**
 

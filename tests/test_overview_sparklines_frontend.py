@@ -1696,6 +1696,8 @@ def test_real_usage_response_draws_curves_without_stats(tmp_path, monkeypatch, f
     rows = [{"source": "codex", "model": "model-a", "timestamp": int(since.timestamp() * 1000) + offset,
              "input": 10, "output": 5, "cacheRead": 20, "cost": .01, "messageCount": count}
             for offset, count in offsets]
+    if granularity == "month":
+        rows[0]["cost"], rows[1]["cost"] = 436.904, .001
     store.sync_source("codex", build_source_signature(files=[["synthetic", 1, 1]], parser={"v": 1}), lambda: rows)
 
     class Tracker:
@@ -1713,6 +1715,8 @@ def test_real_usage_response_draws_curves_without_stats(tmp_path, monkeypatch, f
         api._clear_cache()
     assert payload["total_messages"] == 11
     assert payload["sparkline"]["granularity"] == granularity
+    if granularity == "month":
+        assert payload["total_cost"] == 436.90
     if granularity == "hour":
         assert len(payload["sparkline"]["keys"]) == 24
     tail = "const context = " + json.dumps({"start": first, "end": last, "today": "2026-09-27"}) + ";\n"

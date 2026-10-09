@@ -117,6 +117,13 @@ def test_native_bucket_optimization_preserves_model_order_and_independent_payloa
     assert actual["all_models"][0]["tokens"] == 122
 
 
+@pytest.mark.parametrize("amount,expected", [(436.905, 436.90), (2188.175, 2188.18), (2.675, 2.68)])
+def test_usage_cent_rounding_is_independent_of_binary_partition_noise(amount, expected):
+    from tokdash.compute import _round_usage_cost
+    for noise in (-1e-10, 0, 1e-10):
+        assert _round_usage_cost(amount + noise) == expected
+
+
 def test_openclaw_buckets_preserve_models_costs_and_message_counts(tmp_path):
     raw = [{**row, "source": "openclaw", "reasoning": 0, "cost": 0.01} for row in entries()]
     store = UsageEntryStore(tmp_path / "usage.sqlite3")

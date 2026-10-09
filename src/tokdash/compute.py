@@ -8,6 +8,7 @@ import os
 import subprocess
 import tempfile
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, ROUND_HALF_EVEN
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -33,6 +34,17 @@ from .usage_store import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _round_usage_cost(value: float) -> float:
+    """Round displayed dollars consistently across SQL aggregation partitions.
+
+    Binary sums can land on opposite sides of an exact half cent when grouped
+    by month. Remove sub-cent summation noise before decimal half-even
+    cent rounding; unrounded model and bucket costs remain untouched.
+    """
+    amount = Decimal(str(value)).quantize(Decimal("0.00000001"), rounding=ROUND_HALF_EVEN)
+    return float(amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN))
 
 
 # ============================================================
@@ -1050,7 +1062,7 @@ def compute_usage(period: str, date_from: Optional[str] = None, date_to: Optiona
         # substituted for something far wider (D1).
         "range": range_info,
         "total_tokens": total_tokens,
-        "total_cost": round(total_cost, 2),
+        "total_cost": _round_usage_cost(total_cost),
         "total_messages": total_messages,
         "cache_hit_rate": cache_hit_rate(global_in, global_cache),
         "by_tool": by_tool,
@@ -1142,7 +1154,7 @@ def _compute_previous_usage(
 
     return {
         "total_tokens": total_tokens,
-        "total_cost": round(total_cost, 2),
+        "total_cost": _round_usage_cost(total_cost),
         "total_messages": total_messages,
     }
 

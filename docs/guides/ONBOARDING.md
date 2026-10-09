@@ -301,3 +301,5 @@ always invoking the exact interpreter it installed (never a bare `tokdash`):
 
 `--json` results carry `ok` plus the resolved URL/service details; a non-zero exit means
 the action failed (or was refused). Check `ok` / the exit code, not the prose.
+
+See also: [Troubleshooting guide](TROUBLESHOOTING.md) for common errors.

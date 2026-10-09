@@ -72,6 +72,29 @@ def test_overlapping_tools_count_once_on_the_clock(fake_tools):
     assert data["active_ms_sum"] == 120_000
 
 
+def test_hourly_agent_buckets_use_the_same_additive_intervals(fake_tools):
+    start = 119 * MINUTE
+    fake_tools["codex"] = {"c1": _raw("codex", "c1", [start, start + 2 * MINUTE])}
+    fake_tools["claude"] = {"a1": _raw("claude", "a1", [start, start + 2 * MINUTE])}
+    data = get_active_time_data("today", "2026-01-01", "2026-01-01")
+    assert data["active_ms"] == 120_000
+    assert data["active_ms_sum"] == 240_000
+    assert data["sparkline"]["granularity"] == "hour"
+    assert [row["agent_ms"] for row in data["sparkline"]["buckets"]] == [120_000, 120_000]
+    assert sum(row["agent_ms"] for row in data["sparkline"]["buckets"]) == data["active_ms_sum"]
+
+
+def test_daily_agent_buckets_follow_review_session_selection(fake_tools):
+    fake_tools["codex"] = {
+        "main": _raw("codex", "main", [0, MINUTE]),
+        "review": _raw("codex", "review", [0, 2 * MINUTE], is_review_session=True),
+    }
+    for include, expected in ((True, 180_000), (False, 60_000)):
+        data = get_active_time_data("week", "2026-01-01", "2026-01-07", include_review_sessions=include)
+        assert data["sparkline"]["granularity"] == "day"
+        assert sum(row["agent_ms"] for row in data["sparkline"]["buckets"]) == data["active_ms_sum"] == expected
+
+
 def test_each_tool_is_reported_separately(fake_tools):
     fake_tools["codex"] = {"c1": _raw("codex", "c1", [0, MINUTE])}
     fake_tools["kimi"] = {"k1": _raw("kimi", "k1", [0, 2 * MINUTE])}

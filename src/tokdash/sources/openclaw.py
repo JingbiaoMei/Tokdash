@@ -16,6 +16,7 @@ try:
     from ..clientpaths import openclaw_agent_sessions_glob
     from ..dateutil import local_midnight
     from ..pricing import PricingDatabase
+    from ..usage_buckets import add_bucket, bucket_granularity, bucket_key, sql_bucket_expression, sql_bucket_key
     from ..store_logging import log_store_failure
     from ..usage_store import (
         USAGE_ENTRY_FORMAT_VERSION,
@@ -32,6 +33,7 @@ except ImportError:  # pragma: no cover
     from clientpaths import openclaw_agent_sessions_glob
     from dateutil import local_midnight
     from pricing import PricingDatabase
+    from usage_buckets import add_bucket, bucket_granularity, bucket_key, sql_bucket_expression, sql_bucket_key
     USAGE_ENTRY_FORMAT_VERSION = 1  # type: ignore
 
     class UsageDatabaseSchemaTooNewError(RuntimeError):  # type: ignore
@@ -644,7 +646,11 @@ def _openclaw_usage_from_store(
     """
     if where:
         query += " WHERE " + " AND ".join(where)
-    query += " GROUP BY model"
+    granularity = bucket_granularity(since_date, until_date)
+    if granularity:
+        expression = sql_bucket_expression(since_date, until_date, granularity)
+        query = query.replace("SELECT", f"SELECT {expression} AS bucket,", 1)
+    query += " GROUP BY model" + (", bucket" if granularity else "")
 
     # Both fetches share ONE snapshot. Read separately, they could straddle a
     # write that lands under superseded pricing, and the model totals would then
@@ -661,6 +667,7 @@ def _openclaw_usage_from_store(
 
     rows, contribution_rows = store._read_priced(_read)  # type: ignore[attr-defined]
 
+    buckets: dict[str, dict] = {}
     models: Dict[str, Any] = {}
     total_tokens = 0
     total_cost = 0.0
@@ -681,22 +688,22 @@ def _openclaw_usage_from_store(
         if tokens == 0:
             continue
 
-        models[model] = {
-            "tokens": tokens,
-            "tokens_in": tokens_in,
-            "tokens_out": tokens_out,
-            "tokens_cache": tokens_cache,
-            "cost": cost,
-            "messages": messages,
-            "cache_hit_rate": _cache_hit_rate(tokens_in, tokens_cache),
-        }
+        stats = models.setdefault(model, {"tokens": 0, "tokens_in": 0, "tokens_out": 0,
+                                          "tokens_cache": 0, "cost": 0.0, "messages": 0})
+        for field, value in (("tokens", tokens), ("tokens_in", tokens_in), ("tokens_out", tokens_out),
+                             ("tokens_cache", tokens_cache), ("cost", cost), ("messages", messages)):
+            stats[field] += value
+        stats["cache_hit_rate"] = _cache_hit_rate(stats["tokens_in"], stats["tokens_cache"])
+        if granularity:
+            add_bucket(buckets, sql_bucket_key(row["bucket"], granularity), tokens=tokens, cost=cost, messages=messages,
+                       tokens_in=tokens_in, tokens_cache=tokens_cache, model=model)
         total_tokens += tokens
         total_cost += cost
         total_messages += messages
         total_tokens_in += tokens_in
         total_tokens_cache += tokens_cache
 
-    return {
+    result = {
         "total_tokens": int(total_tokens),
         "total_cost": float(total_cost),
         "total_messages": int(total_messages),
@@ -706,6 +713,9 @@ def _openclaw_usage_from_store(
         "models": models,
         "contributions": store._contribution_days_from_rows(contribution_rows),  # type: ignore[attr-defined]
     }
+    if granularity:
+        result["sparkline"] = {"granularity": granularity, "buckets": [buckets[key] for key in sorted(buckets)]}
+    return result
 
 
 def get_session_usage(
@@ -749,6 +759,8 @@ def get_session_usage(
         }
     )
 
+    buckets: dict[str, dict] = {}
+    granularity = bucket_granularity(since_date, until_date)
     total_messages = 0
 
     session_dirs = sessions_dir if isinstance(sessions_dir, list) else [sessions_dir]
@@ -790,6 +802,9 @@ def get_session_usage(
         msg_date = msg_dt.astimezone().strftime("%Y-%m-%d")
 
         total_messages += 1
+        if granularity:
+            add_bucket(buckets, bucket_key(ts_ms, granularity), tokens=tokens_total, cost=cost,
+                       messages=1, tokens_in=tokens_in, tokens_cache=tokens_cache, model=model)
 
         stats = model_stats[model]
         stats["tokens_in"] += tokens_in
@@ -879,7 +894,7 @@ def get_session_usage(
             }
         )
 
-    return {
+    result = {
         "total_tokens": int(total_tokens),
         "total_cost": float(total_cost),
         "total_messages": int(total_messages),
@@ -889,6 +904,9 @@ def get_session_usage(
         "models": models,
         "contributions": contributions,
     }
+    if granularity:
+        result["sparkline"] = {"granularity": granularity, "buckets": [buckets[key] for key in sorted(buckets)]}
+    return result
 
 
 def get_usage_for_days(days: int) -> Dict[str, Any]:

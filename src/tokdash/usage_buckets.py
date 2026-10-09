@@ -1,0 +1,132 @@
+"""Bounded Overview buckets folded alongside the existing headline aggregation."""
+from __future__ import annotations
+
+from bisect import bisect_right
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+try:
+    from .model_normalization import normalize_model_name
+except ImportError:  # pragma: no cover - OpenClaw's standalone import
+    from model_normalization import normalize_model_name
+
+
+def bucket_granularity(since: datetime | None, until: datetime | None) -> str | None:
+    if since is None or until is None:
+        return None
+    days = ((until - timedelta(microseconds=1)).astimezone().date() - since.astimezone().date()).days + 1
+    return "hour" if days == 1 else "day" if 1 < days <= 31 else None
+
+
+def bucket_key(timestamp_ms: int, granularity: str) -> str:
+    local = datetime.fromtimestamp(timestamp_ms / 1000).astimezone()
+    return local.strftime("%Y-%m-%dT%H" if granularity == "hour" else "%Y-%m-%d")
+
+
+def local_hour_keys(since: datetime) -> list[str]:
+    """Clock hours that actually exist on this date; repeated hours share a key."""
+    date = since.astimezone().date()
+    start = datetime.combine(date, datetime.min.time()).astimezone()
+    stop = datetime.combine(date + timedelta(days=1), datetime.min.time()).astimezone()
+    return sorted({bucket_key(stamp, "hour") for stamp in range(
+        int(start.timestamp() * 1000), int(stop.timestamp() * 1000), 3_600_000)})
+
+
+def sql_bucket_expression(since: datetime | None, until: datetime | None, granularity: str) -> str:
+    """Group by integer clock buckets when the window has one UTC offset.
+
+    SQLite's local-time formatting per event is comparatively expensive. Most
+    short windows have a constant offset; a window crossing a clock change uses
+    SQLite's exact local-time conversion instead. No schema/index change needed.
+    """
+    if granularity not in ("hour", "day"):
+        raise ValueError(f"unsupported bucket granularity: {granularity}")
+    if since is not None and until is not None:
+        first = since.astimezone().date()
+        last = until.astimezone().date()
+        offsets = set()
+        for day in range((last - first).days + 1):
+            date = first + timedelta(days=day)
+            for hour in (0, 12):
+                offsets.add(datetime.combine(date, datetime.min.time()).replace(hour=hour).astimezone().utcoffset())
+        if len(offsets) == 1:
+            offset = int(next(iter(offsets)).total_seconds() * 1000)
+            step = 3_600_000 if granularity == "hour" else 86_400_000
+            return f"CAST((timestamp + {offset}) / {step} AS INTEGER)"
+    pattern = "%Y-%m-%dT%H" if granularity == "hour" else "%Y-%m-%d"
+    return f"strftime('{pattern}', timestamp / 1000, 'unixepoch', 'localtime')"
+
+
+def sql_bucket_key(value: int | str, granularity: str) -> str:
+    if isinstance(value, str):
+        return value
+    step = 3600 if granularity == "hour" else 86400
+    return datetime.fromtimestamp(value * step, timezone.utc).strftime(
+        "%Y-%m-%dT%H" if granularity == "hour" else "%Y-%m-%d")
+
+
+def add_bucket(buckets: dict[str, dict], key: str, *, tokens: int, cost: float,
+               messages: int, tokens_in: int, tokens_cache: int, model: str) -> None:
+    row = buckets.get(key)
+    if row is None:
+        row = buckets[key] = {"key": key, "tokens": 0, "cost": 0.0, "messages": 0,
+                              "input": 0, "cache": 0, "models": {}}
+    row["tokens"] += tokens
+    row["cost"] += cost
+    row["messages"] += messages
+    row["input"] += tokens_in
+    row["cache"] += tokens_cache
+    canonical = normalize_model_name(model)
+    row["models"][canonical] = row["models"].get(canonical, 0) + tokens
+
+
+def merge_buckets(parts: list[dict[str, Any] | None]) -> dict[str, Any] | None:
+    if not parts or any(not part or not part.get("granularity") for part in parts):
+        return None
+    granularity = parts[0]["granularity"]
+    if any(part["granularity"] != granularity for part in parts):
+        return None
+    buckets: dict[str, dict] = {}
+    for part in parts:
+        for src in part.get("buckets", []):
+            row = buckets.setdefault(src["key"], {"key": src["key"], "tokens": 0, "cost": 0.0,
+                                                 "messages": 0, "input": 0, "cache": 0, "models": {}})
+            for field in ("tokens", "cost", "messages", "input", "cache"):
+                row[field] += src[field]
+            for model, tokens in src["models"].items():
+                row["models"][model] = row["models"].get(model, 0) + tokens
+    return {"granularity": granularity, "buckets": [buckets[key] for key in sorted(buckets)]}
+
+
+def interval_buckets(intervals: list[tuple[int, int]], granularity: str) -> dict[str, Any]:
+    """Split additive agent intervals at real hour/day boundaries, including DST."""
+    if not intervals:
+        return {"granularity": granularity, "buckets": []}
+    first = min(start for start, _ in intervals)
+    last = max(end for _, end in intervals)
+    # Resolve the at most 25 hour / 31 day boundaries once. Converting every
+    # interval to local time is expensive for tools with thousands of events.
+    local = datetime.fromtimestamp(first / 1000).astimezone()
+    floor = local.replace(minute=0, second=0, microsecond=0) if granularity == "hour" else datetime.combine(local.date(), datetime.min.time()).astimezone()
+    edges = [int(floor.timestamp() * 1000)]
+    keys = []
+    while edges[-1] < last:
+        local = datetime.fromtimestamp(edges[-1] / 1000).astimezone()
+        keys.append(local.strftime("%Y-%m-%dT%H" if granularity == "hour" else "%Y-%m-%d"))
+        if granularity == "hour":
+            boundary = edges[-1] + (3600 - local.minute * 60 - local.second) * 1000
+        else:
+            tomorrow = local.date() + timedelta(days=1)
+            boundary = int(datetime.combine(tomorrow, datetime.min.time()).astimezone().timestamp() * 1000)
+        edges.append(boundary)
+    buckets: dict[str, int] = {}
+    for start, end in intervals:
+        index = bisect_right(edges, start) - 1
+        while start < end:
+            stop = min(end, edges[index + 1])
+            key = keys[index]
+            buckets[key] = buckets.get(key, 0) + stop - start
+            start = stop
+            index += 1
+    return {"granularity": granularity,
+            "buckets": [{"key": key, "agent_ms": buckets[key]} for key in sorted(buckets)]}

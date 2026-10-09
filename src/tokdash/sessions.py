@@ -28,6 +28,7 @@ from .activity_insights import (
 )
 from .compute import cache_hit_rate, pct_change, period_to_days, previous_period_range
 from .dateutil import local_midnight, parse_date_range
+from .usage_buckets import bucket_granularity, interval_buckets, local_hour_keys
 from .pricing import PricingDatabase
 from .sources.coding_tools import (
     CODEX_DEFAULT_MODEL,
@@ -6738,16 +6739,25 @@ def get_active_time_data(
     include_codex_review = _include_codex_review_sessions(include_review_sessions)
     cap_ms = active_gap_cap_ms()
 
+    since_ms, until_ms = _window_bounds(period, date_from, date_to)
     by_tool, unavailable, all_intervals = _active_time_window(
-        *_window_bounds(period, date_from, date_to), include_codex_review=include_codex_review
+        since_ms, until_ms, include_codex_review=include_codex_review
+    )
+    granularity = bucket_granularity(
+        datetime.fromtimestamp(since_ms / 1000).astimezone() if since_ms else None,
+        datetime.fromtimestamp(until_ms / 1000).astimezone() if until_ms else None,
     )
     active_ms = _merged_interval_ms(all_intervals)
     active_ms_sum = sum(int(row["active_ms_sum"]) for row in by_tool.values())
+    sparkline = interval_buckets(all_intervals, granularity) if granularity else None
+    if granularity == "hour":
+        sparkline["keys"] = local_hour_keys(datetime.fromtimestamp(since_ms / 1000).astimezone())
 
     return {
         "period": period,
         "active_ms": active_ms,
         "active_ms_sum": active_ms_sum,
+        "sparkline": sparkline,
         "comparison": _active_time_comparison(
             period,
             date_from,

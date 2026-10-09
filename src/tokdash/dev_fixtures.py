@@ -28,6 +28,8 @@ from .insights import (
     parse_facets,
 )
 from .sessions import SESSION_TOOLS, _include_codex_review_sessions
+from .model_normalization import normalize_model_name
+from .usage_buckets import local_hour_keys
 from .usage_store import model_cost_rank_key, model_rank_key
 
 # Usage sources (Overview, /api/tools) and session tools (Session Explorer,
@@ -165,6 +167,42 @@ def _model_row(name: str, tokens: int, seed: int) -> dict[str, Any]:
     }
 
 
+def _dense_sparkline(range_info: Mapping[str, Any], models: list[dict], agent_ms: int | None = None) -> dict | None:
+    try:
+        days = (date.fromisoformat(str(range_info["to"])) - date.fromisoformat(str(range_info["from"]))).days + 1
+    except (KeyError, TypeError, ValueError):
+        days = _days_in_range(range_info)
+    if days > 31:
+        return None
+    start, end = _effective_span(range_info)
+    now = datetime.now().astimezone()
+    if days == 1:
+        clock_keys = local_hour_keys(datetime.combine(start, datetime.min.time()).astimezone())
+        through = f"{end.isoformat()}T{now.hour:02d}" if end == now.date() else f"{end.isoformat()}T23"
+        keys = [key for key in clock_keys if key <= through]
+    else:
+        keys = [(start + timedelta(days=i)).isoformat() for i in range((end - start).days + 1)]
+    weights = [1 + math.sin(i * 1.3) ** 2 * 4 for i in range(len(keys))]
+    metadata = {"keys": clock_keys} if days == 1 else {}
+    if agent_ms is not None:
+        return {"granularity": "hour" if days == 1 else "day", **metadata,
+                "buckets": [{"key": key, "agent_ms": value} for key, value in zip(keys, _split_int(agent_ms, weights))]}
+    weight_total = sum(weights)
+    rows = [{"key": key, "tokens": 0, "cost": 0.0, "messages": 0, "input": 0, "cache": 0, "models": {}} for key in keys]
+    for model in models:
+        amounts = {field: _split_int(int(model.get(field, 0)), weights)
+                   for field in ("tokens", "messages", "tokens_in", "tokens_cache")}
+        for i, row in enumerate(rows):
+            canonical = normalize_model_name(model["name"])
+            row["models"][canonical] = row["models"].get(canonical, 0) + amounts["tokens"][i]
+            row["tokens"] += amounts["tokens"][i]
+            row["messages"] += amounts["messages"][i]
+            row["input"] += amounts["tokens_in"][i]
+            row["cache"] += amounts["tokens_cache"][i]
+            row["cost"] += float(model["cost"]) * weights[i] / weight_total
+    return {"granularity": "hour" if days == 1 else "day", "buckets": rows, **metadata}
+
+
 def dense_usage(range_info: Mapping[str, Any], seed: int = 0) -> dict[str, Any]:
     """Return a crowded but internally consistent Overview payload."""
     days = _days_in_range(range_info)
@@ -296,6 +334,7 @@ def dense_usage(range_info: Mapping[str, Any], seed: int = 0) -> dict[str, Any]:
         "range": dict(range_info),
         "timestamp": _now_iso(),
         "total_tokens": total_tokens,
+        "sparkline": _dense_sparkline(range_info, combined_models),
         "total_cost": total_cost,
         "total_messages": total_messages,
         "tokens_in": sum(row["tokens_in"] for row in by_tool.values()),
@@ -727,6 +766,7 @@ def dense_active_time(
         "range": dict(range_info),
         "active_ms": active_ms,
         "active_ms_sum": active_ms_sum,
+        "sparkline": _dense_sparkline(range_info, [], agent_ms=active_ms_sum),
         "comparison": {
             "active_ms_prev": int(active_ms * 0.88),
             "active_ms_sum_prev": int(active_ms_sum * 0.91),

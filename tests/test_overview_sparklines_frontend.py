@@ -1505,3 +1505,178 @@ def test_module_makes_no_request_and_touches_no_backend_surface():
         "indexedDB", "setTimeout", "setInterval", "navigator.sendBeacon",
     ):
         assert forbidden not in module, f"sparkline module must not use {forbidden}"
+
+BUCKET_CASES = r"""
+const output = {};
+let overviewActiveTimeState = { data: null, key: null };
+function activeTimeRequestKey(_days, from, to) { return `${from}:${to}`; }
+function upgrade(f) {
+  const buckets = f.rows[0].stats.contributions.map((day) => ({
+    key: day.date, ...day.totals,
+    input: day.tokenBreakdown.input + (day.tokenBreakdown.cacheWrite || 0),
+    cache: day.tokenBreakdown.cacheRead,
+    models: Object.fromEntries(day.sources.map((source) => [normalizeModelName(source.modelId), sparklineSourceTokens(source)])),
+  }));
+  f.usage.sparkline = { granularity: 'day', buckets };
+  return f;
+}
+let f = upgrade(weekFixture());
+f.rows[0].stats.contributions[0].totals.tokens = 123456;
+f.rows[0].stats.contributions[0].totals.messages = 1000;
+output.week = metricView(scenario(f.rows, f.usage).curves);
+output.statsAbsent = metricView(scenario([{...f.rows[0], stats: {}}], f.usage).curves);
+const hourly = usagePayload({ range: {from:'2026-09-27',to:'2026-09-27'}, tokens: 100,
+  cost: 1, messages: 9, cache: 0.9, topModels: [{name:'model-a',tokens:100}], timestamp: '2026-09-27T02:45:00' });
+hourly.sparkline = {granularity:'hour', buckets:[
+  {key:'2026-09-27T01',tokens:10,cost:0.1,messages:4,input:0,cache:10,models:{'model-a':10}},
+  {key:'2026-09-27T02',tokens:90,cost:0.9,messages:5,input:10,cache:80,models:{'model-a':90}},
+]};
+const dayContext = {start:'2026-09-27',end:'2026-09-27'};
+output.today = metricView(scenario([{serverId:'local', usage:hourly,stats:{}}],hourly,dayContext).curves);
+overviewActiveTimeState = {key:'2026-09-27:2026-09-27',data:{active_ms_sum:180000,_sparklineServerKey:'local',
+  _sparklinePayloads:[{range:hourly.range,timestamp:hourly.timestamp,active_ms_sum:180000,unavailable_tools:[],
+    sparkline:{granularity:'hour',buckets:[{key:'2026-09-27T01',agent_ms:60000},{key:'2026-09-27T02',agent_ms:120000}]}}]}};
+output.agent = metricView(deriveSparklineCurves(hourly));
+overviewActiveTimeState.key = 'old';
+output.agentMoved = metricView(deriveSparklineCurves(hourly));
+overviewActiveTimeState.data = null;
+output.paint = renderOverviewSparklines(hourly, {today:parseDateKey('2026-09-27')});
+output.hourlyAria = node('sparklineTokens').attrs['aria-label'];
+hourly.timestamp = '2026-09-28T03:00:00';
+output.yesterday = metricView(scenario([{serverId:'local',usage:hourly,stats:{}}],hourly,dayContext).curves);
+hourly.sparkline.keys = Array.from({length:24},(_,i)=>`2026-09-27T${String(i).padStart(2,'0')}`).filter(key=>key!=='2026-09-27T03');
+output.skippedClockHour = metricView(deriveSparklineCurves(hourly));
+delete hourly.sparkline.keys;
+hourly.sparkline.buckets[0].messages = null;
+output.nulls = metricView(deriveSparklineCurves(hourly));
+hourly.sparkline.buckets[0].messages = 4;
+hourly.sparkline.buckets[0].models['model-a'] = null;
+output.nullModel = metricView(deriveSparklineCurves(hourly));
+hourly.sparkline.buckets[0].models['model-a'] = 10;
+hourly.sparkline.buckets.push({...hourly.sparkline.buckets[0]});
+output.duplicate = metricView(deriveSparklineCurves(hourly));
+f = upgrade(weekFixture());
+f.usage.total_messages = 999;
+output.mismatch = metricView(scenario(f.rows,f.usage).curves);
+f = upgrade(weekFixture());
+const b = upgrade(weekFixture({perDay:[1,2,3,4,5,6,7]}));
+const combined = usagePayload({tokens:308,cost:3.08,messages:28,cache:0,topModels:[{name:'model-a',tokens:308}]});
+output.multi = metricView(scenario([f.rows[0],{...b.rows[0],serverId:'remote'}],combined).curves);
+f.usage.sparkline.buckets[0].cost += .004;
+b.usage.sparkline.buckets[0].cost += .004;
+output.multiRounded = metricView(scenario([f.rows[0],{...b.rows[0],serverId:'remote'}],combined).curves);
+f.usage.sparkline.buckets[0].cost -= .004;
+b.usage.sparkline.buckets[0].cost -= .004;
+b.usage.sparkline.buckets.forEach(row => { row.models = {'model-b':row.tokens}; });
+b.usage.top_models = b.usage.combined_models = [{name:'model-b',tokens:28}];
+const disjoint = {...combined, top_models:[{name:'model-a',tokens:280}],
+  combined_models:[{name:'model-a',tokens:280},{name:'model-b',tokens:28}]};
+output.disjoint = metricView(scenario([f.rows[0],{...b.rows[0],serverId:'remote'}],disjoint).curves);
+b.usage.sparkline.buckets.forEach(row => { row.models = {'model-a':row.tokens}; });
+b.usage.top_models = b.usage.combined_models = [{name:'model-a',tokens:28}];
+delete b.usage.sparkline;
+output.mixed = metricView(scenario([f.rows[0],{...b.rows[0],serverId:'remote'}],combined).curves);
+output.partial = metricView(scenario([{...f.rows[0],retained:true}],f.usage).curves);
+output.fetchCalls = fetchCalls;
+process.stdout.write(JSON.stringify(output));
+"""
+
+
+@pytest.fixture(scope="module")
+def bucket_results(tmp_path_factory):
+    return _run_script(tmp_path_factory.mktemp("sparkline-buckets"), _harness_script(_source(), BUCKET_CASES), "buckets")
+
+
+def test_week_buckets_draw_without_stats_or_snapshot_reconciliation(bucket_results):
+    for case in ("week", "statsAbsent"):
+        for metric in ("tokens", "cost", "messages", "cache_hit_rate", "top_model"):
+            assert bucket_results[case][metric]["points"] == 7, metric
+            assert bucket_results[case][metric]["line"], metric
+    assert bucket_results["week"]["tokens"]["values"] == [10, 20, 30, 40, 50, 60, 70]
+    assert bucket_results["fetchCalls"] == 0
+
+
+def test_today_uses_hourly_values_and_future_hours_are_unknown(bucket_results):
+    case = bucket_results["today"]
+    assert case["tokens"]["values"] == [0, 10, 90] + [None] * 21
+    assert case["messages"]["values"] == [0, 4, 5] + [None] * 21
+    assert case["cache_hit_rate"]["values"][:3] == [None, 1, 80 / 90]
+    assert "Hourly recorded values in local time" in bucket_results["hourlyAria"]
+    assert "3 of 24 hours measured" in bucket_results["hourlyAria"]
+
+
+def test_yesterday_is_a_complete_hourly_day(bucket_results):
+    assert bucket_results["yesterday"]["tokens"]["values"] == [0, 10, 90] + [0] * 21
+    assert bucket_results["yesterday"]["tokens"]["points"] == 24
+    assert bucket_results["skippedClockHour"]["tokens"]["points"] == 23
+    assert bucket_results["skippedClockHour"]["tokens"]["values"][3] is None
+
+
+def test_agent_curve_uses_its_own_intervals_and_clears_on_range_change(bucket_results):
+    assert bucket_results["agent"]["agent_time"]["values"] == [0, 60000, 120000] + [None] * 21
+    assert bucket_results["agentMoved"]["agent_time"]["values"] == []
+
+
+def test_bucket_validation_rejects_missing_duplicate_or_mismatched_measurements(bucket_results):
+    assert bucket_results["nulls"]["messages"]["reason"] == "components"
+    assert bucket_results["nullModel"]["top_model"]["reason"] == "components"
+    assert bucket_results["duplicate"]["tokens"]["points"] == 0
+    assert bucket_results["mismatch"]["messages"]["reason"] == "mismatch"
+    assert bucket_results["mismatch"]["tokens"]["points"] == 7
+    assert bucket_results["partial"]["tokens"]["points"] == 0
+
+
+def test_multiple_servers_sum_each_bucket_before_drawing(bucket_results):
+    assert bucket_results["multi"]["tokens"]["values"] == [11, 22, 33, 44, 55, 66, 77]
+    assert bucket_results["multi"]["top_model"]["values"] == [11, 22, 33, 44, 55, 66, 77]
+    assert bucket_results["mixed"]["tokens"]["values"] == [11, 22, 33, 44, 55, 66, 77]
+
+
+def test_multiple_servers_allow_independent_cost_rounding_and_disjoint_models(bucket_results):
+    assert bucket_results["multiRounded"]["cost"]["reason"] == ""
+    assert bucket_results["multiRounded"]["cost"]["points"] == 7
+    assert bucket_results["disjoint"]["top_model"]["reason"] == ""
+    assert bucket_results["disjoint"]["top_model"]["values"] == [10, 20, 30, 40, 50, 60, 70]
+
+
+def test_real_usage_response_draws_hourly_curves_without_stats(tmp_path, monkeypatch):
+    """Exercise the actual SQL -> compute -> API -> JS contract, including batch messages."""
+    from tokdash import api, compute
+    from tokdash.dateutil import parse_date_range
+    from tokdash.sources.openclaw import _openclaw_usage_from_store
+    from tokdash.usage_store import UsageEntryStore, build_source_signature
+
+    since, until = parse_date_range("2026-09-21", "2026-09-21")
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    rows = [{"source": "codex", "model": "model-a", "timestamp": int(since.timestamp() * 1000) + hour * 3_600_000,
+             "input": 10, "output": 5, "cacheRead": 20, "cost": .01, "messageCount": count}
+            for hour, count in ((1, 4), (2, 7))]
+    store.sync_source("codex", build_source_signature(files=[["synthetic", 1, 1]], parser={"v": 1}), lambda: rows)
+
+    class Tracker:
+        parsers = {}
+        source_errors = []
+
+    monkeypatch.setattr(compute, "CodingToolsUsageTracker", Tracker)
+    monkeypatch.setattr(compute, "_sync_usage_store", lambda _tracker: (store, ["codex"]))
+    monkeypatch.setattr(compute, "_collect_live_coding_entries", lambda *unused: [])
+    monkeypatch.setattr(compute, "get_session_usage_range", lambda start, stop: _openclaw_usage_from_store(store, start, stop))
+    api._clear_cache()
+    try:
+        payload = api.get_usage("today", "2026-09-21", "2026-09-21", refresh=True)
+    finally:
+        api._clear_cache()
+    assert payload["total_messages"] == 11
+    assert payload["sparkline"]["granularity"] == "hour"
+    assert len(payload["sparkline"]["keys"]) == 24
+    tail = "const payload = " + json.dumps(payload) + ";\n" + r"""
+const result = scenario([{serverId:'local',usage:payload,stats:{}}], payload,
+  {start:'2026-09-21',end:'2026-09-21',today:'2026-09-27'});
+process.stdout.write(JSON.stringify({metrics:metricView(result.curves),fetches:fetchCalls}));
+"""
+    result = _run_script(tmp_path, _harness_script(_source(), tail), "real-hourly-contract")
+    for metric in ("tokens", "cost", "messages", "cache_hit_rate", "top_model"):
+        assert result["metrics"][metric]["reason"] == "", metric
+        assert result["metrics"][metric]["line"], metric
+    assert result["metrics"]["messages"]["values"] == [0, 4, 7] + [0] * 21
+    assert result["fetches"] == 0

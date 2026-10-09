@@ -1,0 +1,164 @@
+"""Buckets must use headline counting/pricing and never add a source scan."""
+from datetime import timedelta
+import os
+import time
+
+import pytest
+
+from tokdash.compute import parse_entries_json
+from tokdash.dateutil import parse_date_range
+from tokdash.usage_buckets import bucket_granularity, bucket_key, interval_buckets, local_hour_keys
+from tokdash.usage_store import UsageEntryStore, build_source_signature
+from tokdash.sources.openclaw import _openclaw_usage_from_store
+
+
+def entries():
+    start, _ = parse_date_range("2026-09-21", "2026-09-21")
+    return [
+        {"source": "codex", "provider": "openai", "model": "gpt-5.3-codex",
+         "timestamp": int((start + timedelta(hours=hour)).timestamp() * 1000),
+         "input": 20, "output": 10, "cacheRead": 80, "cacheWrite": 5,
+         "reasoning": 7, "cost": cost, "costAuthoritative": authoritative, "messageCount": count,
+         **({"_billing": {"kind": "fixed", "cost": 0.0}} if authoritative else {})}
+        for hour, cost, authoritative, count in ((1, 0.2, False, 4), (2, 0, True, 7), (3, 0, False, 9))
+    ]
+
+
+@pytest.mark.parametrize("granularity", ["hour", "day"])
+def test_store_buckets_match_live_headlines_with_one_sql_scan(tmp_path, granularity):
+    raw = entries()
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    store.sync_source("codex", build_source_signature(files=[["fixture", 1, 1]], parser={"v": 1}), lambda: raw)
+    statements = []
+    read = store._read_priced
+
+    def traced(fn):
+        def run(conn):
+            conn.set_trace_callback(statements.append)
+            return fn(conn)
+        return read(run)
+
+    store._read_priced = traced
+    actual = store.aggregate_entries(sources=["codex"], bucket_granularity=granularity)
+    live = parse_entries_json({"entries": raw}, granularity=granularity)
+    assert actual["total_tokens"] == live["total_tokens"] == 366
+    assert actual["total_messages"] == live["total_messages"] == 20
+    assert actual["total_cost"] == pytest.approx(live["total_cost"])
+    assert actual["all_models"][0]["tokens"] == 366
+    assert len(actual["all_models"]) == 1
+    assert sum(row["messages"] for row in actual["sparkline"]["buckets"]) == 20
+    assert sum(row["cost"] for row in actual["sparkline"]["buckets"]) == pytest.approx(actual["total_cost"])
+    assert actual["sparkline"] == live["sparkline"]
+    queries = [sql for sql in statements if "FROM usage_entries" in sql and sql.lstrip().upper().startswith("SELECT")]
+    assert len(queries) == 1
+
+
+def test_bucket_granularity_is_bounded_and_uses_calendar_days():
+    for end, expected in (("2026-09-01", "hour"), ("2026-09-07", "day"),
+                          ("2026-10-01", "day"), ("2026-10-02", None)):
+        since, until = parse_date_range("2026-09-01", end)
+        assert bucket_granularity(since, until) == expected
+    assert bucket_granularity(None, None) is None
+
+
+def test_tokscale_backend_reuses_loaded_entries_for_hourly_buckets(monkeypatch):
+    from tokdash import compute
+
+    since, until = parse_date_range("2026-09-21", "2026-09-21")
+    calls = []
+    monkeypatch.setattr(compute, "USE_LOCAL_CODING_TOOLS_BACKEND", False)
+    monkeypatch.setattr(compute, "run_tokscale_json", lambda args: calls.append(args) or {"entries": entries()})
+    data = compute.get_tools_data_for_range(since, until)
+    assert data["sparkline"]["granularity"] == "hour"
+    assert sum(row["messages"] for row in data["sparkline"]["buckets"]) == data["total_messages"] == 20
+    assert calls == [["--since", "2026-09-21", "--until", "2026-09-21"]]
+    monkeypatch.setattr(compute, "period_to_range_args", lambda period: calls[0])
+    assert compute.get_tools_data("today")["sparkline"] == data["sparkline"]
+    assert len(calls) == 2
+
+
+def test_openclaw_buckets_preserve_models_costs_and_message_counts(tmp_path):
+    raw = [{**row, "source": "openclaw", "reasoning": 0, "cost": 0.01} for row in entries()]
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    store.sync_source("openclaw", build_source_signature(files=[["openclaw", 1, 1]], parser={"v": 1}), lambda: raw)
+    since, until = parse_date_range("2026-09-21", "2026-09-21")
+    data = _openclaw_usage_from_store(store, since, until)
+    assert data["sparkline"]["granularity"] == "hour"
+    assert sum(row["tokens"] for row in data["sparkline"]["buckets"]) == data["total_tokens"]
+    assert sum(row["messages"] for row in data["sparkline"]["buckets"]) == data["total_messages"] == 20
+    assert sum(row["cost"] for row in data["sparkline"]["buckets"]) == pytest.approx(data["total_cost"])
+    assert data["models"]["gpt-5.3-codex"]["tokens"] == data["total_tokens"]
+
+
+def test_agent_intervals_split_hours_and_keep_concurrent_agents_additive():
+    since, _ = parse_date_range("2026-09-21", "2026-09-21")
+    start = int((since + timedelta(hours=1, minutes=59)).timestamp() * 1000)
+    split = interval_buckets([(start, start + 120_000)] * 2, "hour")
+    assert split["buckets"] == [
+        {"key": "2026-09-21T01", "agent_ms": 120_000},
+        {"key": "2026-09-21T02", "agent_ms": 120_000},
+    ]
+
+
+@pytest.mark.skipif(not hasattr(time, "tzset"), reason="tzset unavailable")
+@pytest.mark.parametrize("zone,day", [("Europe/London", "2026-10-25"), ("Europe/London", "2026-03-29"), ("Asia/Kolkata", "2026-09-21")])
+def test_interval_buckets_conserve_duration_across_dst_and_half_hour_zones(zone, day):
+    prior = os.environ.get("TZ")
+    try:
+        os.environ["TZ"] = zone
+        time.tzset()
+        since, until = parse_date_range(day, day)
+        bounds = (int(since.timestamp() * 1000), int(until.timestamp() * 1000))
+        for granularity in ("hour", "day"):
+            split = interval_buckets([bounds], granularity)
+            assert sum(row["agent_ms"] for row in split["buckets"]) == bounds[1] - bounds[0]
+            assert all(row["key"].startswith(day) for row in split["buckets"])
+        assert bucket_granularity(since, until) == "hour"
+        assert bucket_key(bounds[0], "hour") == f"{day}T00"
+        keys = local_hour_keys(since)
+        assert len(keys) == (23 if day == "2026-03-29" else 24)
+        if day == "2026-03-29":
+            assert f"{day}T01" not in keys
+    finally:
+        if prior is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = prior
+        time.tzset()
+
+
+@pytest.mark.skipif(not hasattr(time, "tzset"), reason="tzset unavailable")
+@pytest.mark.parametrize("zone,first,last", [
+    ("Europe/London", "2026-10-25", "2026-10-25"),
+    ("Europe/London", "2026-03-27", "2026-04-02"),
+    ("Europe/London", "2026-07-01", "2026-07-07"),
+    ("Asia/Kolkata", "2026-09-21", "2026-09-21"),
+])
+def test_sql_buckets_match_local_event_buckets_across_timezones(tmp_path, zone, first, last):
+    prior = os.environ.get("TZ")
+    try:
+        os.environ["TZ"] = zone
+        time.tzset()
+        since, until = parse_date_range(first, last)
+        start = int(since.timestamp() * 1000)
+        stop = int(until.timestamp() * 1000)
+        raw = [{"source": "codex", "model": "model-a", "timestamp": stamp,
+                "input": 10, "output": 5, "cacheRead": 20, "cost": .01, "messageCount": 3}
+               for stamp in range(start + 1_800_000, stop, 3_600_000)]
+        store = UsageEntryStore(tmp_path / "usage.sqlite3")
+        store.sync_source("codex", build_source_signature(files=[["fixture", 1, 1]], parser={"v": 1}), lambda: raw)
+        granularity = bucket_granularity(since, until)
+        data = store.aggregate_entries(sources=["codex"], since=since, until=until, bucket_granularity=granularity)
+        live = parse_entries_json({"entries": raw}, granularity=granularity)
+        assert data["sparkline"]["granularity"] == live["sparkline"]["granularity"]
+        assert len(data["sparkline"]["buckets"]) == len(live["sparkline"]["buckets"])
+        for actual, expected in zip(data["sparkline"]["buckets"], live["sparkline"]["buckets"]):
+            assert actual == {**expected, "cost": pytest.approx(expected["cost"])}
+        assert data["total_tokens"] == live["total_tokens"]
+        assert data["total_messages"] == live["total_messages"]
+    finally:
+        if prior is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = prior
+        time.tzset()

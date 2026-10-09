@@ -238,7 +238,9 @@ def main():
               "corpus": {k: results["candidate"][k] for k in ("corpus_days", "corpus_start", "corpus_end")},
               "database_storage": str(database_dir),
               "gc_mode": args.gc_mode,
-              "gate": "candidate p95 <= baseline p95 + max(10 ms, 10% of baseline p95)", "cases": {}, "raw": results}
+              "gate": "candidate p95 <= baseline p95 + max(10 ms, 10% of baseline p95)",
+              "correctness_gate": "Nonmonetary fields match baseline; candidate cents match exact integer-mill oracle; baseline cost drift allowed only within one cent at an exact half-cent boundary",
+              "cases": {}, "raw": results}
     for key in results["baseline"]["samples"]:
         before = summary(results["baseline"]["samples"][key])
         after = summary(results["candidate"]["samples"][key])
@@ -262,8 +264,16 @@ def main():
                 copy["comparison"].pop("cost_pct")
                 return copy
 
-            baseline_rounding_drift = not monetary_fields_match(baseline_totals)
-            correctness = monetary_fields_match(candidate_totals) and nonmonetary(baseline_totals) == nonmonetary(candidate_totals)
+            def explained_legacy_rounding():
+                current_delta = abs(baseline_totals["total_cost"]-oracle["total_cost"])
+                previous_delta = abs(baseline_totals["comparison"]["cost_prev"]-oracle["cost_prev"])
+                current_ok = current_delta == 0 or (oracle["current_mills"] % 10 == 5 and current_delta <= .010000001)
+                previous_ok = previous_delta == 0 or (oracle["previous_mills"] % 10 == 5 and previous_delta <= .010000001)
+                return current_ok and previous_ok
+
+            baseline_rounding_drift = not monetary_fields_match(baseline_totals) and explained_legacy_rounding()
+            correctness = (monetary_fields_match(candidate_totals) and explained_legacy_rounding()
+                           and nonmonetary(baseline_totals) == nonmonetary(candidate_totals))
         report["cases"][key] = {"baseline": before, "candidate": after, "budget_ms": budget,
             "cpu_baseline": summary(results["baseline"]["cpu_samples"][key]),
             "cpu_candidate": summary(results["candidate"]["cpu_samples"][key]),

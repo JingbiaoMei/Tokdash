@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timedelta
+import gc
 import json
 import math
 import os
@@ -74,6 +75,9 @@ def worker(args):
         key = json.loads(line)["case"]
         kind, window = key.split("/", 1)
         start, end = cases[window]
+        enabled = gc.isenabled()
+        if args.gc_mode == "isolated":
+            gc.disable()
         t = time.perf_counter()
         cpu = time.process_time()
         if kind == "usage":
@@ -84,6 +88,8 @@ def worker(args):
             fields = ("active_ms", "active_ms_sum")
         elapsed = (time.perf_counter()-t)*1000
         cpu_elapsed = (time.process_time()-cpu)*1000
+        if enabled:
+            gc.enable()
         print(json.dumps({"ms": elapsed, "cpu_ms": cpu_elapsed, "totals": {field: data[field] for field in fields}}), flush=True)
 
 
@@ -98,6 +104,8 @@ def main():
     parser.add_argument("--output", default="output/sparkline-validation")
     parser.add_argument("--report-name", default="aggregation-performance.json")
     parser.add_argument("--database-dir", help="Override temporary SQLite storage (default: OS temporary filesystem)")
+    parser.add_argument("--gc-mode", choices=("normal", "isolated"), default="normal",
+                        help="isolated excludes cyclic garbage collection from timed aggregation; browser verification keeps normal GC")
     args = parser.parse_args()
     if args.rows_per_day < 1 or args.repeats < 1:
         parser.error("--rows-per-day and --repeats must be positive")
@@ -118,7 +126,8 @@ def main():
     try:
         for label, repo in (("baseline", args.baseline), ("candidate", Path.cwd())):
             cmd = [sys.executable, str(Path(__file__).resolve()), "--worker", "--repo", str(repo), "--label", label,
-                   "--rows-per-day", str(args.rows_per_day), "--output", args.output, "--database-dir", str(database_dir)]
+                   "--rows-per-day", str(args.rows_per_day), "--output", args.output, "--database-dir", str(database_dir),
+                   "--gc-mode", args.gc_mode]
             env = dict(os.environ, TOKDASH_DATA_DIR=str(Path(args.output).resolve()/label), PYTHONPATH=str(Path(repo).resolve()/"src"))
             log = (Path(args.output)/f"{label}-benchmark.log").open("w")
             logs.append(log)
@@ -157,6 +166,7 @@ def main():
     report = {"rows": results["candidate"]["rows"], "repeats": args.repeats,
               "method": "paired alternating processes; 24-hour events; 3 warmups; same corpus and headline semantics",
               "database_storage": str(database_dir),
+              "gc_mode": args.gc_mode,
               "gate": "candidate p95 <= baseline p95 + max(10 ms, 10% of baseline p95)", "cases": {}, "raw": results}
     for key in results["baseline"]["samples"]:
         before = summary(results["baseline"]["samples"][key])

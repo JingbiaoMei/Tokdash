@@ -72,6 +72,21 @@ def test_overlapping_tools_count_once_on_the_clock(fake_tools):
     assert data["active_ms_sum"] == 120_000
 
 
+def test_all_time_agent_headline_avoids_windows_pre_epoch_timestamp_conversion(fake_tools, monkeypatch):
+    class WindowsDateTime(datetime):
+        @classmethod
+        def fromtimestamp(cls, stamp, tz=None):
+            if stamp < 0:
+                raise OSError("Windows cannot convert a pre-epoch timestamp")
+            return super().fromtimestamp(stamp, tz)
+
+    monkeypatch.setattr(sessions, "datetime", WindowsDateTime)
+    fake_tools["codex"] = {"c1": _raw("codex", "c1", [0, MINUTE])}
+    data = get_active_time_data("all")
+    assert data["active_ms_sum"] == 60_000
+    assert data["sparkline"] is None
+
+
 def test_hourly_agent_buckets_use_the_same_additive_intervals(fake_tools):
     start = 119 * MINUTE
     fake_tools["codex"] = {"c1": _raw("codex", "c1", [start, start + 2 * MINUTE])}

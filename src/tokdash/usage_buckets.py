@@ -14,7 +14,14 @@ except ImportError:  # pragma: no cover - OpenClaw's standalone import
 def bucket_granularity(since: datetime | None, until: datetime | None) -> str | None:
     if since is None or until is None:
         return None
-    days = ((until - timedelta(microseconds=1)).astimezone().date() - since.astimezone().date()).days + 1
+    # All-time uses a pre-epoch boundary Windows cannot convert to local time.
+    # Reject wide windows first; the extra day allows for clock-offset changes.
+    if until - since > timedelta(days=32):
+        return None
+    try:
+        days = ((until - timedelta(microseconds=1)).astimezone().date() - since.astimezone().date()).days + 1
+    except (OSError, OverflowError, ValueError):
+        return None
     return "hour" if days == 1 else "day" if 1 < days <= 31 else None
 
 
@@ -43,7 +50,7 @@ def sql_bucket_expression(since: datetime | None, until: datetime | None, granul
         raise ValueError(f"unsupported bucket granularity: {granularity}")
     if since is not None and until is not None:
         first = since.astimezone().date()
-        last = until.astimezone().date()
+        last = (until - timedelta(microseconds=1)).astimezone().date()
         offsets = set()
         for day in range((last - first).days + 1):
             date = first + timedelta(days=day)

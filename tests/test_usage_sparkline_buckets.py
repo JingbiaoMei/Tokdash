@@ -1,5 +1,5 @@
 """Buckets must use headline counting/pricing and never add a source scan."""
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 import os
 import time
 
@@ -59,6 +59,19 @@ def test_bucket_granularity_is_bounded_and_uses_calendar_days():
         since, until = parse_date_range("2026-09-01", end)
         assert bucket_granularity(since, until) == expected
     assert bucket_granularity(None, None) is None
+
+
+def test_wide_pre_epoch_windows_never_require_windows_local_time_conversion():
+    class WindowsDateTime(datetime):
+        def astimezone(self, tz=None):
+            if self.year < 1970:
+                raise OSError("Windows cannot convert a pre-epoch local time")
+            return super().astimezone(tz)
+
+    assert bucket_granularity(WindowsDateTime(1926, 1, 1, tzinfo=timezone.utc),
+                              WindowsDateTime(2026, 1, 1, tzinfo=timezone.utc)) is None
+    assert bucket_granularity(WindowsDateTime(1926, 1, 1, tzinfo=timezone.utc),
+                              WindowsDateTime(1926, 1, 2, tzinfo=timezone.utc)) is None
 
 
 def test_tokscale_backend_reuses_loaded_entries_for_hourly_buckets(monkeypatch):

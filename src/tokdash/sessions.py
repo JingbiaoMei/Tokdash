@@ -6744,8 +6744,8 @@ def get_active_time_data(
         since_ms, until_ms, include_codex_review=include_codex_review
     )
     granularity = bucket_granularity(
-        datetime.fromtimestamp(since_ms / 1000).astimezone() if since_ms else None,
-        datetime.fromtimestamp(until_ms / 1000).astimezone() if until_ms else None,
+        datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(milliseconds=since_ms) if since_ms is not None else None,
+        datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(milliseconds=until_ms) if until_ms is not None else None,
     )
     active_ms = _merged_interval_ms(all_intervals)
     active_ms_sum = sum(int(row["active_ms_sum"]) for row in by_tool.values())

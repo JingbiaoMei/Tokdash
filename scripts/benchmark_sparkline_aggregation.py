@@ -16,6 +16,7 @@ import random
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 
 
@@ -42,7 +43,7 @@ def worker(args):
             rows.append({"source": "openclaw" if i % 10 == 0 else "codex", "model": f"model-{i % 5}", "timestamp": int(stamp.timestamp()*1000),
                          "input": 100+i%13, "output": 30, "cacheRead": 200, "cacheWrite": 7, "reasoning": 4,
                          "cost": .001*(i%7+1), "messageCount": i%3+1})
-    store = UsageEntryStore(Path(args.output) / f"{args.label}-usage.sqlite3")
+    store = UsageEntryStore(Path(args.database_dir or args.output) / f"{args.label}-usage.sqlite3")
     for source in ("codex", "openclaw"):
         selected = [row for row in rows if row["source"] == source]
         signature = build_source_signature(files=[["synthetic", len(selected), 1]],
@@ -74,6 +75,7 @@ def worker(args):
         kind, window = key.split("/", 1)
         start, end = cases[window]
         t = time.perf_counter()
+        cpu = time.process_time()
         if kind == "usage":
             data = compute.compute_usage("today", start.isoformat(), end.isoformat())
             fields = ("total_tokens", "total_cost", "total_messages", "cache_hit_rate")
@@ -81,7 +83,8 @@ def worker(args):
             data = sessions.get_active_time_data("today", start.isoformat(), end.isoformat())
             fields = ("active_ms", "active_ms_sum")
         elapsed = (time.perf_counter()-t)*1000
-        print(json.dumps({"ms": elapsed, "totals": {field: data[field] for field in fields}}), flush=True)
+        cpu_elapsed = (time.process_time()-cpu)*1000
+        print(json.dumps({"ms": elapsed, "cpu_ms": cpu_elapsed, "totals": {field: data[field] for field in fields}}), flush=True)
 
 
 def main():
@@ -94,6 +97,7 @@ def main():
     parser.add_argument("--repeats", type=int, default=48)
     parser.add_argument("--output", default="output/sparkline-validation")
     parser.add_argument("--report-name", default="aggregation-performance.json")
+    parser.add_argument("--database-dir", help="Override temporary SQLite storage (default: OS temporary filesystem)")
     args = parser.parse_args()
     if args.rows_per_day < 1 or args.repeats < 1:
         parser.error("--rows-per-day and --repeats must be positive")
@@ -104,14 +108,17 @@ def main():
     if not args.baseline:
         parser.error("--baseline is required")
     cases = [f"{kind}/{window}" for kind in ("usage", "active") for window in ("today", "yesterday", "week", "year")]
-    results = {label: {"samples": {key: [] for key in cases}, "totals": {}}
+    results = {label: {"samples": {key: [] for key in cases}, "cpu_samples": {key: [] for key in cases}, "totals": {}}
                for label in ("baseline", "candidate")}
     processes = {}
     logs = []
+    temporary = tempfile.TemporaryDirectory(prefix="tokdash-sparkline-bench-")
+    database_dir = Path(args.database_dir or temporary.name).resolve()
+    database_dir.mkdir(parents=True, exist_ok=True)
     try:
         for label, repo in (("baseline", args.baseline), ("candidate", Path.cwd())):
             cmd = [sys.executable, str(Path(__file__).resolve()), "--worker", "--repo", str(repo), "--label", label,
-                   "--rows-per-day", str(args.rows_per_day), "--output", args.output]
+                   "--rows-per-day", str(args.rows_per_day), "--output", args.output, "--database-dir", str(database_dir)]
             env = dict(os.environ, TOKDASH_DATA_DIR=str(Path(args.output).resolve()/label), PYTHONPATH=str(Path(repo).resolve()/"src"))
             log = (Path(args.output)/f"{label}-benchmark.log").open("w")
             logs.append(log)
@@ -133,6 +140,7 @@ def main():
                     result = json.loads(proc.stdout.readline())
                     if iteration >= 3:
                         results[label]["samples"][key].append(result["ms"])
+                        results[label]["cpu_samples"][key].append(result["cpu_ms"])
                         results[label]["totals"][key] = result["totals"]
     finally:
         for proc in processes.values():
@@ -145,14 +153,18 @@ def main():
                 proc.wait()
         for log in logs:
             log.close()
+        temporary.cleanup()
     report = {"rows": results["candidate"]["rows"], "repeats": args.repeats,
               "method": "paired alternating processes; 24-hour events; 3 warmups; same corpus and headline semantics",
+              "database_storage": str(database_dir),
               "gate": "candidate p95 <= baseline p95 + max(10 ms, 10% of baseline p95)", "cases": {}, "raw": results}
     for key in results["baseline"]["samples"]:
         before = summary(results["baseline"]["samples"][key])
         after = summary(results["candidate"]["samples"][key])
         budget = max(10, before["p95_ms"]*.1)
         report["cases"][key] = {"baseline": before, "candidate": after, "budget_ms": budget,
+            "cpu_baseline": summary(results["baseline"]["cpu_samples"][key]),
+            "cpu_candidate": summary(results["candidate"]["cpu_samples"][key]),
             "pass": after["p95_ms"] <= before["p95_ms"]+budget,
             "totals_equal": results["baseline"]["totals"][key] == results["candidate"]["totals"][key]}
     path = Path(args.output)/args.report_name

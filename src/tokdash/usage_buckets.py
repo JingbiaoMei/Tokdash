@@ -119,14 +119,32 @@ def interval_buckets(intervals: list[tuple[int, int]], granularity: str) -> dict
             tomorrow = local.date() + timedelta(days=1)
             boundary = int(datetime.combine(tomorrow, datetime.min.time()).astimezone().timestamp() * 1000)
         edges.append(boundary)
-    buckets: dict[str, int] = {}
+    totals = [0] * len(keys)
+    step = edges[1] - edges[0] if len(edges) > 1 else None
+    if step and any(right - left != step for left, right in zip(edges, edges[1:])):
+        step = None
+    origin = edges[0]
     for start, end in intervals:
-        index = bisect_right(edges, start) - 1
+        if end <= start:
+            continue
+        # Uniform real-time boundaries permit integer indexing, including DST
+        # repeated/skipped clock hours. Unequal days or half-hour clock changes
+        # still use the exact precomputed boundaries.
+        index = (start - origin) // step if step else bisect_right(edges, start) - 1
+        # Nearly every capped activity interval fits within one bucket. Keep
+        # that path to one binary search and an integer addition, without a
+        # dictionary lookup or boundary-splitting loop for each event gap.
+        if end <= edges[index + 1]:
+            totals[index] += end - start
+            continue
         while start < end:
             stop = min(end, edges[index + 1])
-            key = keys[index]
-            buckets[key] = buckets.get(key, 0) + stop - start
+            totals[index] += stop - start
             start = stop
             index += 1
+    buckets: dict[str, int] = {}
+    for key, total in zip(keys, totals):
+        if total:
+            buckets[key] = buckets.get(key, 0) + total
     return {"granularity": granularity,
             "buckets": [{"key": key, "agent_ms": buckets[key]} for key in sorted(buckets)]}

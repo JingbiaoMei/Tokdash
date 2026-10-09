@@ -1992,9 +1992,10 @@
     .usage-report-panel-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
     .usage-report-panel-title { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; color: var(--color-label); }
     .usage-report-spacer { flex: 1; }
-    .usage-report-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+    .usage-report-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px 24px; }
+    @media (max-width: 640px) { .usage-report-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 14px; } }
     .usage-report-kpi-label { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; color: var(--color-label); }
-    .usage-report-kpi-value { font-size: 27px; font-weight: 800; margin-top: 6px; letter-spacing: -.02em; }
+    .usage-report-kpi-value { font-size: clamp(20px, 2.2vw, 27px); font-weight: 800; margin-top: 6px; letter-spacing: -.02em; overflow-wrap: anywhere; }
     .usage-report-kpi-sub { font-size: 12px; color: var(--color-muted); margin-top: 4px; }
     .usage-report-pill { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; vertical-align: middle; color: var(--color-cta); background: color-mix(in srgb, var(--color-cta) 16%, transparent); }
     .usage-report-delta-up { color: #16A34A; font-weight: 800; }
@@ -2008,7 +2009,6 @@
     .kpi-delta.is-down { color: #16A34A; }
     html.dark .kpi-delta.is-up { color: #F87171; }
     html.dark .kpi-delta.is-down { color: #4ADE80; }
-    .usage-report-sentence { font-size: 16px; line-height: 1.6; margin: 0; max-width: 80ch; }
     .usage-report-banner { margin-top: 14px; border: 1px solid var(--color-cta); border-radius: 12px; padding: 10px 14px; background: color-mix(in srgb, var(--color-cta) 12%, transparent); font-size: 13px; line-height: 1.5; }
     .usage-report-notice { color: var(--color-muted); font-size: 13px; margin: 0; }
     /* Day maps. The month grid takes the Stats page's presentation: fixed 24px
@@ -5258,6 +5258,7 @@
               <select id="usageReportServer" class="ui-input compact-control"></select>
             </label>
             <div class="usage-report-seg" id="usageReportPeriod" role="group" data-i18n-aria="usageReportPeriod" aria-label="Report period">
+              <button type="button" data-period="day" data-i18n="usageReportPeriodDay">Day</button>
               <button type="button" data-period="week" data-i18n="usageReportPeriodWeek">Week</button>
               <button type="button" data-period="month" data-i18n="usageReportPeriodMonth">Month</button>
               <button type="button" data-period="year" data-i18n="usageReportPeriodYear">Year</button>
@@ -5286,6 +5287,14 @@
                 <div class="usage-report-kpi-value mono" id="usageReportKCost" style="color: var(--color-cost);">—</div>
               </div>
               <div>
+                <div class="usage-report-kpi-label" data-i18n="messages">Messages</div>
+                <div class="usage-report-kpi-value mono" id="usageReportKMessages">—</div>
+              </div>
+              <div>
+                <div class="usage-report-kpi-label" data-i18n="usageReportColSessions">Sessions</div>
+                <div class="usage-report-kpi-value mono" id="usageReportKSessions">—</div>
+              </div>
+              <div>
                 <div class="usage-report-kpi-label">
                   <span data-i18n="usageReportActiveTime">Active time</span>
                   <span class="usage-report-pill" data-i18n="usageReportEst">est.</span>
@@ -5301,11 +5310,7 @@
             </div>
           </section>
 
-          <section class="usage-report-panel">
-            <p class="usage-report-sentence" id="usageReportSentence"></p>
-          </section>
-
-          <section class="usage-report-panel">
+          <section class="usage-report-panel" id="usageReportDaysPanel">
             <div class="usage-report-panel-head">
               <span class="usage-report-panel-title" data-i18n="usageReportDaysTitle">Days</span>
               <span class="usage-report-spacer"></span>
@@ -5383,7 +5388,7 @@
 
             <div class="usage-report-tier-group is-amber" style="margin-top:18px">
               <p class="usage-report-tier-h" data-i18n="usageReportAmberTitle">Project detail card</p>
-              <p class="usage-report-tier-p" data-i18n="usageReportAmberBody">Everything on the overview card plus the top projects by tokens, and the reconciliation line against the period total.</p>
+              <p class="usage-report-tier-p" data-i18n="usageReportAmberBody">Overview metrics plus the top projects by tokens.</p>
               <div class="usage-report-cards" id="usageReportAmberCards"></div>
               <div class="usage-report-export-row">
                 <button type="button" class="btn btn-primary compact-control" data-export="amber" data-i18n="usageReportExportAmber">Export project detail</button>
@@ -7282,6 +7287,9 @@
         moreTools: '+{n} more tools',
         usageReport: 'Report',
         usageReportServerLabel: 'Server',
+        usageReportPeriodDay: 'Day',
+        usageReportTitleDay: 'Today',
+        usageReportChipYesterday: 'Yesterday',
         usageReportPeriodWeek: 'Week',
         usageReportPeriodMonth: 'Month',
         usageReportPeriodYear: 'Year',
@@ -7306,15 +7314,11 @@
         usageReportDays: 'Active days',
         usageReportDaysTitle: 'Days',
         usageReportActiveSub: '{agent} of agent time in parallel',
+        usageReportVsPriorDay: 'vs the previous day',
         usageReportVsPrior: 'vs the prior {n} days',
         usageReportNoDelta: 'no prior window to compare yet',
         usageReportNoDeltaYear: 'no delta on a partial year',
         usageReportDaysSub: '{n} days in the window',
-        usageReportSentence: 'In {range} you drove {sessions} sessions and used {tokens} tokens ({cost}), {pct}% more than {prior}.',
-        usageReportSentenceLess: 'In {range} you drove {sessions} sessions and used {tokens} tokens ({cost}), {pct}% less than {prior}.',
-        usageReportSentenceFlat: 'In {range} you drove {sessions} sessions and used {tokens} tokens ({cost}).',
-        usageReportSentenceWeek: 'this week',
-        usageReportSentenceYear: 'the year to date',
         usageReportStreak: '{streak}-day streak · {a} of {n} days active · busiest day {date} ({tokens})',
         usageReportStreakLapsed: 'longest run {streak} days · {a} of {n} days active · busiest day {date} ({tokens})',
         usageReportEmptyPeriod: 'No activity recorded in this window.',
@@ -7323,8 +7327,6 @@
         usageReportTopModel: 'Top model',
         usageReportTopProject: 'Top project',
         usageReportSessionsActive: '{sessions} sessions · {hours} active',
-        usageReportPodiumProjectNote: '{n} projects · ranked by tokens · {u} unattributed · {g} from sources with no project records (OpenClaw, live tools)',
-        usageReportProjectGroupNote: 'Projects are grouped by repository remote — the same codebase under two remotes appears twice.',
         usageReportFacetCovers: 'Analytics facets cover {pct} of the period total - a different scan of the same window.',
         usageReportMissingProjects: 'project records unavailable on this server',
         usageReportWhen: 'When you work',
@@ -7343,16 +7345,13 @@
         usageReportColCost: 'Cost',
         usageReportColCostQual: 'API list price',
         usageReportColActive: 'Active',
-        usageReportFooterDays: 'Days begin at {machine}’s local midnight.',
-        usageReportFooterCost: 'Cost figures are API list-price equivalents, not billed spend.',
-        usageReportFooterActive: 'Active time is estimated from recorded event gaps (cap {cap}).',
         usageReportFooterSrc: 'data: tokdash on {machine} · {n} tool sources · v{version}',
         usageReportShareTitle: 'Share',
         usageReportSharePreamble: 'Two cards, two privacy tiers. The preview is the export: same layout, same painted pixels.',
         usageReportGreenTitle: 'Overview card · counts only',
         usageReportGreenBody: 'Tokens, sessions, days, streak, busiest day, estimated active time, top harnesses and models. Safe to post.',
         usageReportAmberTitle: 'Project detail card',
-        usageReportAmberBody: 'Everything on the overview card plus the top projects by tokens, and the reconciliation line against the period total.',
+        usageReportAmberBody: 'Overview metrics plus the top projects by tokens.',
         usageReportNickname: 'Machine nickname',
         usageReportCostToggle: 'Include cost (API list price, not your bill)',
         usageReportExportGreen: 'Export overview card',
@@ -7366,6 +7365,7 @@
         usageReportCardYearTitle: '{year} · year to date',
         usageReportCardWeekTitle: 'Week of {date}',
         usageReportCardRange: '{from} – {to}',
+        usageReportCardHeroSubDay: '{sessions} sessions · {requests} requests · {agent} agent time',
         usageReportCardHeroSub: '{days} of {total} days active · {sessions} sessions · {requests} requests · {agent} agent time',
         usageReportCardHarnesses: 'Top harnesses',
         usageReportCardModels: 'Top models',
@@ -7897,6 +7897,9 @@
         moreTools: '另有 {n} 个工具',
         usageReport: '报告',
         usageReportServerLabel: '服务器',
+        usageReportPeriodDay: '日',
+        usageReportTitleDay: '今天',
+        usageReportChipYesterday: '昨天',
         usageReportPeriodWeek: '周',
         usageReportPeriodMonth: '月',
         usageReportPeriodYear: '年',
@@ -7921,15 +7924,11 @@
         usageReportDays: '活跃天数',
         usageReportDaysTitle: '每日',
         usageReportActiveSub: '并行 agent 时间合计 {agent}',
+        usageReportVsPriorDay: '较前一天',
         usageReportVsPrior: '较之前 {n} 天',
         usageReportNoDelta: '暂无可对比的前期区间',
         usageReportNoDeltaYear: '进行中的周期不做同比',
         usageReportDaysSub: '本期共 {n} 天',
-        usageReportSentence: '{range}你驱动了 {sessions} 个会话，消耗 {tokens} token（{cost}），比{prior}多 {pct}%。',
-        usageReportSentenceLess: '{range}你驱动了 {sessions} 个会话，消耗 {tokens} token（{cost}），比{prior}少 {pct}%。',
-        usageReportSentenceFlat: '{range}你驱动了 {sessions} 个会话，消耗 {tokens} token（{cost}）。',
-        usageReportSentenceWeek: '本周',
-        usageReportSentenceYear: '今年年初至今',
         usageReportStreak: '连续编程 {streak} 天 · {n} 天中 {a} 天有记录 · 最忙的一天 {date}（{tokens}）',
         usageReportStreakLapsed: '最长连续 {streak} 天 · {n} 天中 {a} 天有记录 · 最忙的一天 {date}（{tokens}）',
         usageReportEmptyPeriod: '该时段暂无记录。',
@@ -7938,8 +7937,6 @@
         usageReportTopModel: '最常用模型',
         usageReportTopProject: '投入最多的项目',
         usageReportSessionsActive: '{sessions} 个会话 · 活跃 {hours}',
-        usageReportPodiumProjectNote: '{n} 个项目 · 按 token 排序 · {u} 未归属 · {g} 来自无项目记录的来源（OpenClaw 及在线工具）',
-        usageReportProjectGroupNote: '项目按仓库 remote 分组 —— 同一代码库挂在两个 remote 下会出现两次。',
         usageReportFacetCovers: '分析分面覆盖本期总量的 {pct} —— 与总量来自同一窗口的另一次扫描。',
         usageReportMissingProjects: '该服务器无项目归属记录',
         usageReportWhen: '你的时间分布',
@@ -7958,16 +7955,13 @@
         usageReportColCost: '费用',
         usageReportColCostQual: '目录价',
         usageReportColActive: '活跃时长',
-        usageReportFooterDays: '每日按{machine}的本地零点划分。',
-        usageReportFooterCost: '费用为 API 目录价估算，非实际账单。',
-        usageReportFooterActive: '活跃时长按记录的事件间隔估算（上限 {cap}）。',
         usageReportFooterSrc: '数据来源：{machine}上的 tokdash · {n} 个工具来源 · v{version}',
         usageReportShareTitle: '分享',
         usageReportSharePreamble: '两张卡片，两种隐私级别。预览即导出：同一套排版，同一批像素。',
         usageReportGreenTitle: '概况卡片 · 仅统计数字',
         usageReportGreenBody: 'Token、会话、活跃天数、连续记录、最忙的一天、估算活跃时长、常用 harness 与模型。可以直接转发。',
         usageReportAmberTitle: '项目明细卡片',
-        usageReportAmberBody: '包含概况卡片的全部内容，另加按 token 排序的项目排行，以及与本期总量的对账说明。',
+        usageReportAmberBody: '总览指标，以及 token 用量最多的项目。',
         usageReportNickname: '机器昵称',
         usageReportCostToggle: '包含费用（按 API 目录价，非实际账单）',
         usageReportExportGreen: '导出概况卡片',
@@ -7981,6 +7975,7 @@
         usageReportCardYearTitle: '{year} 年 · 年初至今',
         usageReportCardWeekTitle: '{date} 当周',
         usageReportCardRange: '{from} – {to}',
+        usageReportCardHeroSubDay: '{sessions} 个会话 · {requests} 次请求 · agent 时间 {agent}',
         usageReportCardHeroSub: '{total} 天中 {days} 天有记录 · {sessions} 个会话 · {requests} 次请求 · Agent 时间 {agent}',
         usageReportCardHarnesses: 'Harness 排名',
         usageReportCardModels: '模型排名',
@@ -8513,6 +8508,9 @@
         moreTools: '他 {n} 件のツール',
         usageReport: 'レポート',
         usageReportServerLabel: 'サーバー',
+        usageReportPeriodDay: '日',
+        usageReportTitleDay: '今日',
+        usageReportChipYesterday: '昨日',
         usageReportPeriodWeek: '週',
         usageReportPeriodMonth: '月',
         usageReportPeriodYear: '年',
@@ -8537,15 +8535,11 @@
         usageReportDays: '稼働日',
         usageReportDaysTitle: '日別',
         usageReportActiveSub: '並列エージェント時間の合計 {agent}',
+        usageReportVsPriorDay: '前日比',
         usageReportVsPrior: '前 {n} 日間比',
         usageReportNoDelta: '比較できる前期がありません',
         usageReportNoDeltaYear: '進行中の期間は増減を表示しません',
         usageReportDaysSub: '期間内 {n} 日',
-        usageReportSentence: '{range}は {sessions} セッションを動かし、{tokens} トークン（{cost}）を使いました。{prior}より {pct}% 多い。',
-        usageReportSentenceLess: '{range}は {sessions} セッションを動かし、{tokens} トークン（{cost}）を使いました。{prior}より {pct}% 少ない。',
-        usageReportSentenceFlat: '{range}は {sessions} セッションを動かし、{tokens} トークン（{cost}）を使いました。',
-        usageReportSentenceWeek: '今週',
-        usageReportSentenceYear: '年初から現在まで',
         usageReportStreak: '連続 {streak} 日 · {n} 日中 {a} 日が稼働 · 最も忙しい日 {date}（{tokens}）',
         usageReportStreakLapsed: '最長連続 {streak} 日 · {n} 日中 {a} 日が稼働 · 最も忙しい日 {date}（{tokens}）',
         usageReportEmptyPeriod: 'この期間の記録はありません。',
@@ -8554,8 +8548,6 @@
         usageReportTopModel: '最多のモデル',
         usageReportTopProject: '最多のプロジェクト',
         usageReportSessionsActive: '{sessions} セッション · 稼働 {hours}',
-        usageReportPodiumProjectNote: '{n} プロジェクト · トークン数順 · 帰属先なし {u} · プロジェクト記録のない来源（OpenClaw とライブツール）が {g}',
-        usageReportProjectGroupNote: 'プロジェクトはリポジトリの remote でグループ化しているため、同じコードベースでも remote が異なると 2 件表示されます。',
         usageReportFacetCovers: '分析ファセットは期間合計の {pct} をカバーします - 同じ期間を別系統で集計した値です。',
         usageReportMissingProjects: 'このサーバーではプロジェクト記録を利用できません',
         usageReportWhen: '作業時間帯',
@@ -8574,16 +8566,13 @@
         usageReportColCost: 'コスト',
         usageReportColCostQual: 'API 公称価格',
         usageReportColActive: '稼働時間',
-        usageReportFooterDays: '1 日の区切りは{machine}の現地時刻の午前 0 時です。',
-        usageReportFooterCost: 'コストは API 公称価格換算で、実際の請求額ではありません。',
-        usageReportFooterActive: '稼働時間は記録されたイベント間隔から推定しています（上限 {cap}）。',
         usageReportFooterSrc: 'データ出所: {machine}の tokdash · {n} 個のツールソース · v{version}',
         usageReportShareTitle: '共有',
         usageReportSharePreamble: '2 種のカード、2 段階の公開範囲。プレビューがそのまま書き出しです。同じレイアウト、同じ描画結果です。',
         usageReportGreenTitle: '概要カード · 集計数のみ',
         usageReportGreenBody: 'トークン数、セッション数、稼働日、連続日、最も多かった日、推定稼働時間、よく使うハーネスとモデル。そのまま投稿して問題ありません。',
         usageReportAmberTitle: 'プロジェクト明細カード',
-        usageReportAmberBody: '概要カードの内容に、トークン数順のプロジェクトと期間合計との対応説明を加えています。',
+        usageReportAmberBody: '概要の指標と、トークン使用量が多いプロジェクト。',
         usageReportNickname: 'マシンのニックネーム',
         usageReportCostToggle: 'コストを含める（API 公称価格、実際の請求額ではありません）',
         usageReportExportGreen: '概要カードを書き出す',
@@ -8597,6 +8586,7 @@
         usageReportCardYearTitle: '{year} 年 · 年初から',
         usageReportCardWeekTitle: '{date} 開始の週',
         usageReportCardRange: '{from} – {to}',
+        usageReportCardHeroSubDay: '{sessions} セッション · {requests} リクエスト · エージェント稼働 {agent}',
         usageReportCardHeroSub: '{total} 日中 {days} 日が稼働日 · {sessions} セッション · {requests} リクエスト · エージェント時間 {agent}',
         usageReportCardHarnesses: 'ハーネス上位',
         usageReportCardModels: 'モデル上位',
@@ -9129,6 +9119,9 @@
         moreTools: '나머지 {n}개 도구',
         usageReport: '리포트',
         usageReportServerLabel: '서버',
+        usageReportPeriodDay: '일',
+        usageReportTitleDay: '오늘',
+        usageReportChipYesterday: '어제',
         usageReportPeriodWeek: '주',
         usageReportPeriodMonth: '월',
         usageReportPeriodYear: '년',
@@ -9153,15 +9146,11 @@
         usageReportDays: '활동일',
         usageReportDaysTitle: '일자별',
         usageReportActiveSub: '병렬 에이전트 시간 합계 {agent}',
+        usageReportVsPriorDay: '전일 대비',
         usageReportVsPrior: '이전 {n}일 대비',
         usageReportNoDelta: '비교할 이전 기간이 없습니다',
         usageReportNoDeltaYear: '진행 중인 기간은 증감을 표시하지 않습니다',
         usageReportDaysSub: '기간 내 {n}일',
-        usageReportSentence: '{range} 동안 {sessions} 세션을 실행하고 {tokens} 토큰({cost})을 사용했습니다. {prior}보다 {pct}% 많습니다.',
-        usageReportSentenceLess: '{range} 동안 {sessions} 세션을 실행하고 {tokens} 토큰({cost})을 사용했습니다. {prior}보다 {pct}% 적습니다.',
-        usageReportSentenceFlat: '{range} 동안 {sessions} 세션을 실행하고 {tokens} 토큰({cost})을 사용했습니다.',
-        usageReportSentenceWeek: '이번 주',
-        usageReportSentenceYear: '연초부터 현재까지',
         usageReportStreak: '연속 {streak}일 · {n}일 중 {a}일 활동 · 가장 바빴던 날 {date}({tokens})',
         usageReportStreakLapsed: '최장 연속 {streak}일 · {n}일 중 {a}일 활동 · 가장 바빴던 날 {date}({tokens})',
         usageReportEmptyPeriod: '이 기간에는 기록이 없습니다.',
@@ -9170,9 +9159,7 @@
         usageReportTopModel: '최다 모델',
         usageReportTopProject: '최다 프로젝트',
         usageReportSessionsActive: '세션 {sessions}회 · 활동 {hours}',
-        usageReportPodiumProjectNote: '프로젝트 {n}개 · 토큰 순 · 미귀속 {u} · 프로젝트 기록이 없는 소스(OpenClaw, 라이브 툴) {g}',
-        usageReportProjectGroupNote: '프로젝트는 저장소 remote 기준으로 묶기 때문에, 같은 코드베이스라도 remote가 다르면 두 번 표시됩니다.',
-        usageReportFacetCovers: '분석 팩트가 기간 합계의 {pct}를 포함합니다 - 같은 기간을 다른 방식으로 집계한 값입니다.',
+        usageReportFacetCovers: '분석 데이터가 기간 합계의 {pct}를 포함합니다 - 같은 기간을 다른 방식으로 집계한 값입니다.',
         usageReportMissingProjects: '이 서버에서는 프로젝트 기록을 사용할 수 없습니다',
         usageReportWhen: '작업 시간대',
         usageReportWhenTz: '로컬 시간 · {tz}',
@@ -9190,16 +9177,13 @@
         usageReportColCost: '비용',
         usageReportColCostQual: 'API 정가',
         usageReportColActive: '활동',
-        usageReportFooterDays: '하루는 {machine}의 현지 자정을 기준으로 구분합니다.',
-        usageReportFooterCost: '비용은 API 정가 환산액이며 실제 청구액이 아닙니다.',
-        usageReportFooterActive: '활동 시간은 기록된 이벤트 간격으로 추정합니다(상한 {cap}).',
         usageReportFooterSrc: '데이터: {machine}의 tokdash · 툴 소스 {n}개 · v{version}',
         usageReportShareTitle: '공유',
         usageReportSharePreamble: '두 장의 카드, 두 단계의 공개 범위. 미리보기가 그대로 내보내기 결과입니다. 같은 배치, 같은 그려진 픽셀입니다.',
         usageReportGreenTitle: '개요 카드 · 집계만',
         usageReportGreenBody: '토큰, 세션, 활동일, 연속 기록, 가장 바빴던 날, 추정 활동 시간, 자주 쓰는 하네스와 모델. 그대로 올려도 됩니다.',
         usageReportAmberTitle: '프로젝트 상세 카드',
-        usageReportAmberBody: '개요 카드의 모든 내용에 토큰 순 프로젝트 순위와 기간 합계 대비 대응 설명을 더했습니다.',
+        usageReportAmberBody: '개요 지표에 토큰 사용량 기준 상위 프로젝트를 추가합니다.',
         usageReportNickname: '머신 별명',
         usageReportCostToggle: '비용 포함 (API 정가, 실제 청구액 아님)',
         usageReportExportGreen: '개요 카드 내보내기',
@@ -9213,6 +9197,7 @@
         usageReportCardYearTitle: '{year}년 · 연초부터',
         usageReportCardWeekTitle: '{date} 시작 주',
         usageReportCardRange: '{from} – {to}',
+        usageReportCardHeroSubDay: '세션 {sessions}회 · 요청 {requests}회 · 에이전트 시간 {agent}',
         usageReportCardHeroSub: '{total}일 중 {days}일 활동 · 세션 {sessions}회 · 요청 {requests}회 · 에이전트 시간 {agent}',
         usageReportCardHarnesses: '상위 하네스',
         usageReportCardModels: '상위 모델',
@@ -9745,6 +9730,9 @@
         moreTools: '+{n} herramientas más',
         usageReport: 'Informe',
         usageReportServerLabel: 'Servidor',
+        usageReportPeriodDay: 'Día',
+        usageReportTitleDay: 'Hoy',
+        usageReportChipYesterday: 'Ayer',
         usageReportPeriodWeek: 'Semana',
         usageReportPeriodMonth: 'Mes',
         usageReportPeriodYear: 'Año',
@@ -9769,15 +9757,11 @@
         usageReportDays: 'Días activos',
         usageReportDaysTitle: 'Días',
         usageReportActiveSub: '{agent} de tiempo de agente en paralelo',
+        usageReportVsPriorDay: 'frente al día anterior',
         usageReportVsPrior: 'frente a los {n} días anteriores',
         usageReportNoDelta: 'sin periodo anterior que comparar',
         usageReportNoDeltaYear: 'sin variación en un periodo en curso',
         usageReportDaysSub: '{n} días en la ventana',
-        usageReportSentence: 'En {range} ejecutaste {sessions} sesiones y usaste {tokens} tokens ({cost}), un {pct}% más que {prior}.',
-        usageReportSentenceLess: 'En {range} ejecutaste {sessions} sesiones y usaste {tokens} tokens ({cost}), un {pct}% menos que {prior}.',
-        usageReportSentenceFlat: 'En {range} ejecutaste {sessions} sesiones y usaste {tokens} tokens ({cost}).',
-        usageReportSentenceWeek: 'esta semana',
-        usageReportSentenceYear: 'lo que va del año',
         usageReportStreak: 'racha de {streak} días · {a} de {n} días activos · día más intenso {date} ({tokens})',
         usageReportStreakLapsed: 'mejor racha {streak} días · {a} de {n} días activos · día más intenso {date} ({tokens})',
         usageReportEmptyPeriod: 'Sin actividad registrada en este periodo.',
@@ -9785,9 +9769,7 @@
         usageReportTopHarness: 'Harness principal',
         usageReportTopModel: 'Modelo principal',
         usageReportTopProject: 'Proyecto principal',
-        usageReportSessionsActive: '{sessions} sesiones · {hours} activo',
-        usageReportPodiumProjectNote: '{n} proyectos · ordenados por tokens · {u} sin atribución · {g} de fuentes sin registros de proyecto (OpenClaw, herramientas en vivo)',
-        usageReportProjectGroupNote: 'Los proyectos se agrupan por remote del repositorio: el mismo código con dos remotes aparece dos veces.',
+        usageReportSessionsActive: '{sessions} sesiones · tiempo activo: {hours}',
         usageReportFacetCovers: 'Las facetas de análisis cubren {pct} del total del periodo: un escaneo distinto de la misma ventana.',
         usageReportMissingProjects: 'sin registros de proyecto en este servidor',
         usageReportWhen: 'Cuándo trabajas',
@@ -9806,16 +9788,13 @@
         usageReportColCost: 'Coste',
         usageReportColCostQual: 'Precio de lista API',
         usageReportColActive: 'Activo',
-        usageReportFooterDays: 'Los días empiezan a la medianoche local de {machine}.',
-        usageReportFooterCost: 'El coste equivale a los precios de lista de la API, no al importe facturado.',
-        usageReportFooterActive: 'El tiempo activo se estima con los intervalos registrados (tope {cap}).',
         usageReportFooterSrc: 'datos: tokdash en {machine} · {n} fuentes de herramientas · v{version}',
         usageReportShareTitle: 'Compartir',
         usageReportSharePreamble: 'Dos tarjetas, dos niveles de privacidad. La vista previa es la exportación: mismo diseño, mismos píxeles pintados.',
         usageReportGreenTitle: 'Tarjeta resumen · solo recuentos',
         usageReportGreenBody: 'Tokens, sesiones, días, racha, día más intenso, tiempo activo estimado, principales harness y modelos. Se puede publicar tal cual.',
         usageReportAmberTitle: 'Tarjeta de proyectos',
-        usageReportAmberBody: 'Todo lo de la tarjeta resumen más los proyectos principales por tokens y la línea de conciliación con el total del periodo.',
+        usageReportAmberBody: 'Las métricas del resumen y los proyectos principales por tokens.',
         usageReportNickname: 'Apodo de la máquina',
         usageReportCostToggle: 'Incluir coste (precio de lista de la API, no tu factura)',
         usageReportExportGreen: 'Exportar tarjeta resumen',
@@ -9829,6 +9808,7 @@
         usageReportCardYearTitle: '{year} · hasta hoy',
         usageReportCardWeekTitle: 'Semana del {date}',
         usageReportCardRange: '{from} – {to}',
+        usageReportCardHeroSubDay: '{sessions} sesiones · {requests} solicitudes · {agent} de tiempo de agente',
         usageReportCardHeroSub: '{days} de {total} días activos · {sessions} sesiones · {requests} solicitudes · {agent} de tiempo de agente',
         usageReportCardHarnesses: 'Harness principales',
         usageReportCardModels: 'Modelos principales',
@@ -10361,6 +10341,9 @@
         moreTools: '+{n} ferramentas a mais',
         usageReport: 'Relatório',
         usageReportServerLabel: 'Servidor',
+        usageReportPeriodDay: 'Dia',
+        usageReportTitleDay: 'Hoje',
+        usageReportChipYesterday: 'Ontem',
         usageReportPeriodWeek: 'Semana',
         usageReportPeriodMonth: 'Mês',
         usageReportPeriodYear: 'Ano',
@@ -10385,15 +10368,11 @@
         usageReportDays: 'Dias ativos',
         usageReportDaysTitle: 'Dias',
         usageReportActiveSub: '{agent} de tempo de agente em paralelo',
-        usageReportVsPrior: 'vs. os {n} dias anteriores',
+        usageReportVsPriorDay: 'em relação ao dia anterior',
+        usageReportVsPrior: 'em relação aos {n} dias anteriores',
         usageReportNoDelta: 'sem período anterior para comparar',
         usageReportNoDeltaYear: 'sem variação em um período em andamento',
         usageReportDaysSub: '{n} dias na janela',
-        usageReportSentence: 'Em {range} você rodou {sessions} sessões e usou {tokens} tokens ({cost}), {pct}% mais que {prior}.',
-        usageReportSentenceLess: 'Em {range} você rodou {sessions} sessões e usou {tokens} tokens ({cost}), {pct}% menos que {prior}.',
-        usageReportSentenceFlat: 'Em {range} você rodou {sessions} sessões e usou {tokens} tokens ({cost}).',
-        usageReportSentenceWeek: 'esta semana',
-        usageReportSentenceYear: 'até agora neste ano',
         usageReportStreak: 'sequência de {streak} dias · {a} de {n} dias ativos · dia mais ocupado {date} ({tokens})',
         usageReportStreakLapsed: 'melhor sequência {streak} dias · {a} de {n} dias ativos · dia mais ocupado {date} ({tokens})',
         usageReportEmptyPeriod: 'Nenhuma atividade registrada neste período.',
@@ -10401,10 +10380,8 @@
         usageReportTopHarness: 'Harness principal',
         usageReportTopModel: 'Modelo principal',
         usageReportTopProject: 'Projeto principal',
-        usageReportSessionsActive: '{sessions} sessões · {hours} ativo',
-        usageReportPodiumProjectNote: '{n} projetos · ordenados por tokens · {u} sem atribuição · {g} de fontes sem registros de projeto (OpenClaw, ferramentas ao vivo)',
-        usageReportProjectGroupNote: 'Os projetos são agrupados pelo remote do repositório: o mesmo código com dois remotes aparece duas vezes.',
-        usageReportFacetCovers: 'Os facets de análise cobrem {pct} do total do período: outra leitura da mesma janela.',
+        usageReportSessionsActive: '{sessions} sessões · tempo ativo: {hours}',
+        usageReportFacetCovers: 'Os dados da análise cobrem {pct} do total do período: outra leitura da mesma janela.',
         usageReportMissingProjects: 'sem registros de projeto neste servidor',
         usageReportWhen: 'Quando você trabalha',
         usageReportWhenTz: 'Hora local · {tz}',
@@ -10422,16 +10399,13 @@
         usageReportColCost: 'Custo',
         usageReportColCostQual: 'Preço de lista da API',
         usageReportColActive: 'Ativo',
-        usageReportFooterDays: 'Os dias começam à meia-noite local marcada por {machine}.',
-        usageReportFooterCost: 'Os valores de custo equivalem aos preços de lista da API, não à fatura.',
-        usageReportFooterActive: 'O tempo ativo é estimado pelos intervalos registrados (limite {cap}).',
         usageReportFooterSrc: 'dados: tokdash · {machine} · {n} fontes de ferramentas · v{version}',
         usageReportShareTitle: 'Compartilhar',
         usageReportSharePreamble: 'Dois cartões, dois níveis de privacidade. A prévia é a exportação: mesmo layout, mesmos pixels pintados.',
         usageReportGreenTitle: 'Cartão de visão geral · só contagens',
         usageReportGreenBody: 'Tokens, sessões, dias, sequência, dia mais intenso, tempo ativo estimado, principais harness e modelos. Pode publicar sem medo.',
         usageReportAmberTitle: 'Cartão de projetos',
-        usageReportAmberBody: 'Tudo do cartão de visão geral mais os principais projetos por tokens e a linha de conciliação com o total do período.',
+        usageReportAmberBody: 'As métricas da visão geral e os principais projetos por tokens.',
         usageReportNickname: 'Apelido da máquina',
         usageReportCostToggle: 'Incluir custo (preço de lista da API, não sua fatura)',
         usageReportExportGreen: 'Exportar cartão de visão geral',
@@ -10445,6 +10419,7 @@
         usageReportCardYearTitle: '{year} · ano até agora',
         usageReportCardWeekTitle: 'Semana de {date}',
         usageReportCardRange: '{from} – {to}',
+        usageReportCardHeroSubDay: '{sessions} sessões · {requests} solicitações · {agent} de tempo de agente',
         usageReportCardHeroSub: '{days} de {total} dias ativos · {sessions} sessões · {requests} solicitações · {agent} de tempo de agente',
         usageReportCardHarnesses: 'Principais harness',
         usageReportCardModels: 'Principais modelos',
@@ -14497,8 +14472,8 @@
     }
 
     /* Big figures in unit words, two units at most: 25 hours reads as "1 day
-       1 hour", 34 days as "1 month 4 days". Below a day the compact h/m form
-       above stays. Intl does the plural and the locale; the joiner drops the
+       1 hour", 34 days as "1 month 4 days". Intl does the plural and the locale;
+       sub-day figures use the same localized units. The joiner drops the
        space where the locale's words carry none. */
     const durationUnitFormatters = new Map();
 
@@ -14513,16 +14488,20 @@
         }
         durationUnitFormatters.set(key, formatter);
       }
-      return formatter.format(value);
+      const formatted = formatter.format(value);
+      return currentLang === 'ja' ? formatted.replace(/\s+/g, '') : formatted;
     }
 
     function formatDurationUnits(ms) {
       const seconds = Math.max(0, Math.round(Number(ms || 0) / 1000));
-      if (seconds < 86400) return formatDuration(ms);
+      if (!seconds) return '—';
       const joiner = currentLang === 'zh' || currentLang === 'ja' ? '' : ' ';
       const pair = (headUnit, head, tailUnit, tail) =>
         (tail ? `${formatDurationUnit(headUnit, head)}${joiner}${formatDurationUnit(tailUnit, tail)}`
           : formatDurationUnit(headUnit, head));
+      if (seconds < 60) return formatDurationUnit('second', seconds);
+      if (seconds < 3600) return formatDurationUnit('minute', Math.floor(seconds / 60));
+      if (seconds < 86400) return pair('hour', Math.floor(seconds / 3600), 'minute', Math.floor((seconds % 3600) / 60));
       let days = Math.floor(seconds / 86400);
       if (days < 7) {
         let remHours = Math.round((seconds - days * 86400) / 3600);
@@ -18646,7 +18625,7 @@
     let preserveStatsNavigationOnNextActivation = false;
 
     /* ---- Usage report (Report tab) --------------------------------------
-       A calendar-aligned week / month / year report, scoped to one server:
+       A calendar-aligned day / week / month / year report, scoped to one server:
        insights facets (streaks, peaks, day maps, projects) have no defined
        merge semantics across servers, so a merged report is not offered
        rather than being offered and wrong. Three requests per period switch:
@@ -18664,11 +18643,11 @@
     // the scan again for nothing.
     const USAGE_REPORT_FACETS = 'daily,streaks,firsts,hourly,weekday,tools,models,projects';
     const USAGE_REPORT_HEAT_FACETS = 'daily,streaks,firsts';
-    const USAGE_REPORT_PERIODS = ['week', 'month', 'year'];
+    const USAGE_REPORT_PERIODS = ['day', 'week', 'month', 'year'];
     const USAGE_REPORT_PREFS_KEY = 'tokdash-usage-report-prefs';
     const usageReportState = {
       period: 'month',
-      // How many periods back the window sits: 0 is the current week/month/year,
+      // How many periods back the window sits: 0 is the current day/week/month/year,
       // 1 the one before it. Picked from the top-bar chips the report swaps in.
       back: 0,
       serverId: 'local',
@@ -18748,6 +18727,11 @@
 
     function usageReportWindows(period, back = 0) {
       const today = usageReportToday();
+      if (period === 'day') {
+        const day = new Date(today.getFullYear(), today.getMonth(), today.getDate() - back);
+        const key = formatDateKey(day);
+        return { date_from: key, date_to: key };
+      }
       if (period === 'week') {
         const start = startOfWeekMonday(today);
         start.setDate(start.getDate() - 7 * back);
@@ -18767,6 +18751,7 @@
 
     function usageReportPeriodLength(period, fromKey) {
       const start = parseDateKey(fromKey);
+      if (period === 'day') return 1;
       if (period === 'week') return 7;
       if (period === 'month') return new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate();
       const year = start.getFullYear();
@@ -18788,6 +18773,7 @@
     // The calendar span the grid needs, which is wider than the window: a month
     // that started on Thursday still draws its Monday column, blank.
     function usageReportCalendar(period, fromKey, toKey) {
+      if (period === 'day') return usageReportDayKeys(fromKey, toKey);
       const from = parseDateKey(fromKey);
       const to = parseDateKey(toKey);
       let start;
@@ -19294,6 +19280,7 @@
       // The current window gets the familiar title; a past window names itself,
       // the same way the share card does.
       if (model.range.to === formatDateKey(usageReportToday())) {
+        if (model.period === 'day') return t('usageReportTitleDay');
         if (model.period === 'week') return t('usageReportTitleWeek');
         if (model.period === 'month') return t('usageReportTitleMonth');
         return t('usageReportTitleYear');
@@ -19307,6 +19294,17 @@
     function usageReportChipDefs() {
       const today = usageReportToday();
       const period = usageReportState.period;
+      if (period === 'day') {
+        return [0, 1, 2, 3, 4, 5, 6].map((back) => {
+          const date = parseDateKey(usageReportWindows('day', back).date_from);
+          return {
+            back,
+            label: back === 0 ? t('usageReportTitleDay')
+              : back === 1 ? t('usageReportChipYesterday')
+              : formatShortDate(date, date.getFullYear() !== today.getFullYear()),
+          };
+        });
+      }
       if (period === 'week') {
         return [0, 1, 2, 3].map((back) => ({
           back,
@@ -19385,21 +19383,22 @@
       document.querySelectorAll('#usageReportPeriod button').forEach((button) => {
         button.setAttribute('aria-pressed', String(button.dataset.period === usageReportState.period));
       });
+      document.getElementById('usageReportDaysPanel').hidden = ['day', 'week'].includes(usageReportState.period);
       usageReportRenderPeriodChips();
     }
 
     function usageReportRenderLoading() {
       document.getElementById('usageReportStatePanel').hidden = true;
       document.getElementById('usageReportBanner').hidden = true;
-      ['usageReportKTokens', 'usageReportKCost', 'usageReportKActive', 'usageReportKDays'].forEach((id) => {
+      ['usageReportKTokens', 'usageReportKCost', 'usageReportKMessages', 'usageReportKSessions', 'usageReportKActive', 'usageReportKDays'].forEach((id) => {
         renderLoadingPlaceholder(document.getElementById(id));
       });
       ['usageReportKTokensSub', 'usageReportKActiveSub', 'usageReportKDaysSub',
-        'usageReportSentence', 'usageReportHeat', 'usageReportStreak', 'usageReportLegend',
+        'usageReportHeat', 'usageReportStreak', 'usageReportLegend',
         'usageReportRange', 'usageReportProgress',
         'usageReportPodium', 'usageReportGroupNote', 'usageReportWhen', 'usageReportTz',
         'usageReportAgentsBody', 'usageReportAgentsNote', 'usageReportFooter'].forEach((id) => usageReportText(document.getElementById(id), ''));
-      usageReportText(document.getElementById('usageReportTitle'), t(usageReportState.period === 'year' ? 'usageReportTitleYear' : usageReportState.period === 'week' ? 'usageReportTitleWeek' : 'usageReportTitleMonth'));
+      usageReportText(document.getElementById('usageReportTitle'), t({ day: 'usageReportTitleDay', week: 'usageReportTitleWeek', month: 'usageReportTitleMonth', year: 'usageReportTitleYear' }[usageReportState.period]));
       usageReportClearShare();
     }
 
@@ -19428,7 +19427,8 @@
     function usageReportRenderHead(model) {
       usageReportText(document.getElementById('usageReportTitle'), usageReportPeriodTitle(model));
       usageReportText(document.getElementById('usageReportRange'),
-        `${formatShortDate(model.range.from, true)} – ${formatShortDate(model.range.to, true)}`);
+        model.period === 'day' ? formatShortDate(model.range.from, true)
+          : `${formatShortDate(model.range.from, true)} – ${formatShortDate(model.range.to, true)}`);
       usageReportText(document.getElementById('usageReportProgress'),
         model.elapsed < model.periodLength ? t('usageReportInProgress', { d: model.elapsed, n: model.periodLength }) : '');
     }
@@ -19479,7 +19479,7 @@
       if (!empty) {
         if (usageReportShowDelta(model)) {
           tokensSub.append(usageReportDeltaSpan(model.comparison.tokens_pct));
-          tokensSub.append(document.createTextNode(` ${t('usageReportVsPrior', { n: model.elapsed })}`));
+          tokensSub.append(document.createTextNode(` ${model.elapsed === 1 ? t('usageReportVsPriorDay') : t('usageReportVsPrior', { n: model.elapsed })}`));
         } else {
           // Two different silences: a year in progress is not compared by rule,
           // while a missing prior window is a fact about the data.
@@ -19487,12 +19487,14 @@
         }
       }
       usageReportText(document.getElementById('usageReportKCost'), empty ? '—' : formatCurrency(model.cost));
+      usageReportText(document.getElementById('usageReportKMessages'), usageReportFigure(model.messages, formatNumber));
     }
 
     // The half that waits: runtime comes from /api/active-time, the active-day
     // count from the insights streaks facet.
     function usageReportRenderHeroActivity(model) {
       const empty = model.isEmpty;
+      usageReportText(document.getElementById('usageReportKSessions'), usageReportFigure(model.sessions, formatNumber));
       usageReportText(document.getElementById('usageReportKActive'), empty || !model.activeMs ? '—' : formatDurationUnits(model.activeMs));
       usageReportText(document.getElementById('usageReportKActiveSub'), empty || !model.agentMs ? '' : t('usageReportActiveSub', { agent: formatDurationUnits(model.agentMs) }));
       const daysEl = document.getElementById('usageReportKDays');
@@ -19508,41 +19510,7 @@
         total.textContent = `/${model.elapsed}`;
         daysEl.append(total);
       }
-      usageReportText(document.getElementById('usageReportKDaysSub'), empty ? '' : t('usageReportDaysSub', { n: model.elapsed }));
-    }
-
-    // The sentence reads "In {range}", so it needs the phrase the head cannot
-    // supply: a bare month name, and a phrase that survives the preposition.
-    function usageReportSentenceRange(model) {
-      if (model.period === 'month') {
-        return parseDateKey(model.range.from).toLocaleDateString(langLocale(), { month: 'long' });
-      }
-      if (model.period === 'week') return t('usageReportSentenceWeek');
-      return t('usageReportSentenceYear');
-    }
-
-    function usageReportRenderSentence(model) {
-      const priorEnd = parseDateKey(model.range.from);
-      priorEnd.setDate(priorEnd.getDate() - 1);
-      const priorStart = new Date(priorEnd);
-      priorStart.setDate(priorStart.getDate() - (model.elapsed - 1));
-      const vars = {
-        range: usageReportSentenceRange(model),
-        sessions: usageReportFigure(model.sessions, formatNumber),
-        tokens: formatTokenCount(model.tokens),
-        cost: formatCurrency(model.cost),
-        prior: `${formatShortDate(priorStart, true)} – ${formatShortDate(priorEnd, true)}`,
-      };
-      if (model.isEmpty) {
-        usageReportText(document.getElementById('usageReportSentence'), t('usageReportEmptyPeriod'));
-        return;
-      }
-      if (!usageReportShowDelta(model)) {
-        usageReportText(document.getElementById('usageReportSentence'), t('usageReportSentenceFlat', vars));
-        return;
-      }
-      vars.pct = Math.abs(model.comparison.tokens_pct).toFixed(1);
-      usageReportText(document.getElementById('usageReportSentence'), t(model.comparison.tokens_pct < 0 ? 'usageReportSentenceLess' : 'usageReportSentence', vars));
+      usageReportText(document.getElementById('usageReportKDaysSub'), empty || model.period === 'day' ? '' : t('usageReportDaysSub', { n: model.elapsed }));
     }
 
     function usageReportCell(day) {
@@ -19562,7 +19530,7 @@
       }
       cell.style.background = heatColor(day.level);
       cell.dataset.token = '1';
-      cell.title = `${day.date} · ${formatTokenCount(day.tokens)} tokens · ${formatNumber(day.messages)} messages`;
+      cell.title = `${day.date} · ${formatTokenCount(day.tokens)} ${t('usageReportTokens')} · ${formatNumber(day.messages)} ${t('messages')}`;
       return cell;
     }
 
@@ -19584,20 +19552,16 @@
 
     function usageReportRenderHeat(model) {
       const host = document.getElementById('usageReportHeat');
-      usageReportRenderLegend();
       host.replaceChildren();
-      if (!model.dailyAvailable || !model.cells.length) {
-        usageReportText(host, t('usageReportFacetsMissing', { facets: USAGE_REPORT_HEAT_FACETS }));
+      if (model.period === 'day' || model.period === 'week') {
+        document.getElementById('usageReportLegend').replaceChildren();
         usageReportText(document.getElementById('usageReportStreak'), '');
         return;
       }
-
-      if (model.period === 'week') {
-        // One stretched row of seven cells reads as a loading artifact, not a
-        // map -- the week view drops the day grid (and its legend) and keeps
-        // the streak line beneath it.
-        document.getElementById('usageReportLegend').replaceChildren();
-        usageReportRenderStreak(model);
+      usageReportRenderLegend();
+      if (!model.dailyAvailable || !model.cells.length) {
+        usageReportText(host, t('usageReportFacetsMissing', { facets: USAGE_REPORT_HEAT_FACETS }));
+        usageReportText(document.getElementById('usageReportStreak'), '');
         return;
       }
 
@@ -19700,6 +19664,7 @@
        and tool names are all data that arrives over the wire. */
     function usageReportFillNote(el, entries) {
       if (!el) return;
+      el.hidden = !entries.some((entry) => entry && String(entry.text || '') !== '');
       const fragment = document.createDocumentFragment();
       entries
         .filter((entry) => entry && String(entry.text || '') !== '')
@@ -19796,27 +19761,8 @@
       ];
       host.replaceChildren(...tiles);
 
-      if (!model.projectsAvailable) {
-        usageReportFillNote(note, [
-          { text: t('usageReportMissingProjects') },
-          { text: t('usageReportProjectGroupNote'), faint: true },
-        ]);
-        return;
-      }
-      // Every project surface prints all three reconciliation components (5.2):
-      // the ranked rows, the facet's own unattributed bucket, and the share the
-      // facet never sees at all.
-      const entries = [
-        {
-          text: t('usageReportPodiumProjectNote', {
-            n: model.projectCount,
-            u: usageReportShare(model.unattrShare),
-            g: usageReportShare(model.gapShare),
-          }),
-        },
-        { text: t('usageReportProjectGroupNote'), faint: true },
-      ];
-      if (usageReportShowFacetCoverage(model)) {
+      const entries = model.projectsAvailable ? [] : [{ text: t('usageReportMissingProjects') }];
+      if (model.projectsAvailable && usageReportShowFacetCoverage(model)) {
         entries.push({ text: t('usageReportFacetCovers', { pct: usageReportShare(model.facetTotal / model.tokens) }), faint: true });
       }
       usageReportFillNote(note, entries);
@@ -19859,10 +19805,10 @@
       const strip = document.createElement('div');
       strip.className = 'usage-report-hbars';
       let buckets = model.hourly.buckets || [];
-      const isToday = model.isToday || model.period === 'today' || (typeof usageReportState !== 'undefined' && usageReportState && usageReportState.period === 'today');
+      const isToday = model.period === 'day' && model.range.to === formatDateKey(usageReportToday());
       if (isToday) {
-        const currentHour = new Date().getHours();
-        buckets = buckets.filter((row) => Number(row.hour) <= currentHour);
+        const currentHour = usageReportToday().getHours();
+        buckets = buckets.map((row) => Number(row.hour) > currentHour ? { ...row, tokens: 0 } : row);
       }
       const maxHour = Math.max(1, ...buckets.map((row) => Number(row.tokens) || 0));
       const nightHours = new Set((model.hourly.night_hours || []).map(Number));
@@ -19903,7 +19849,7 @@
       // A week or a month has not met every weekday yet. A weekday it never met
       // prints an empty bar and an em dash, not a zero: "no Thursday has
       // happened" is not "Thursday used nothing".
-      const weekdays = model.weekday.buckets || [];
+      const weekdays = model.period === 'day' ? [] : model.weekday.buckets || [];
       const maxWeekday = Math.max(1, ...weekdays.map((row) => Number(row.tokens) || 0));
       const labels = getDayLabels();
       weekdays.forEach((row) => {
@@ -19926,7 +19872,7 @@
         side.append(line);
       });
 
-      if (model.weekday.peak_weekday !== null && model.weekday.peak_weekday !== undefined) {
+      if (model.period !== 'day' && model.weekday.peak_weekday !== null && model.weekday.peak_weekday !== undefined) {
         const peak = document.createElement('p');
         peak.className = 'usage-report-notice';
         peak.style.marginTop = '8px';
@@ -20002,13 +19948,9 @@
     function usageReportRenderFooter(model) {
       const host = document.getElementById('usageReportFooter');
       if (!host) return;
-      // Both of these are claims about one machine -- whose midnight starts a
-      // day, and whose tokdash did the counting -- so they name the server the
-      // report was read from rather than assuming it is the local one.
+      // The source line names the server the report was read from.
       const machine = usageReportMachineName();
-      const lines = [t('usageReportFooterDays', { machine }), t('usageReportFooterCost')];
-      if (model.gapCapMs) lines.push(t('usageReportFooterActive', { cap: formatDuration(model.gapCapMs) }));
-      if (model.projectsAvailable) lines.push(t('usageReportProjectGroupNote'));
+      const lines = [];
       if (model.coverage) {
         const sources = (model.coverage.stored_sources || []).length + (model.coverage.live_sources || []).length;
         lines.push(t('usageReportFooterSrc', { n: sources, machine, version: usageReportState.version || USAGE_REPORT_EM }));
@@ -20197,6 +20139,7 @@
 
     function usageReportCardTitle(model) {
       const from = parseDateKey(model.range.from);
+      if (model.period === 'day') return formatShortDate(model.range.from, true);
       if (model.period === 'year') {
         // A completed year is just its number; "year to date" only fits the
         // one still running.
@@ -20252,14 +20195,16 @@
       // its eyebrow and its manifest, and dropping it buys back line length.
       line(t(tier === 'green' ? 'usageReportTierGreen' : 'usageReportTierAmber'), 9, { weight: 800, fill: accent, lh: 12 });
       line(usageReportClipText(usageReportCardTitle(model), usageReportCardFont(20, 800), contentW), 20, { weight: 800, lh: 24 });
-      usageReportWrapText(
-        t('usageReportCardRange', {
-          from: formatShortDate(model.range.from, true),
-          to: formatShortDate(model.range.to, true),
-        }),
-        usageReportCardFont(10, 400),
-        contentW,
-      ).forEach((row) => line(row, 10, { fill: pal.muted, lh: 13 }));
+      if (model.period !== 'day') {
+        usageReportWrapText(
+          t('usageReportCardRange', {
+            from: formatShortDate(model.range.from, true),
+            to: formatShortDate(model.range.to, true),
+          }),
+          usageReportCardFont(10, 400),
+          contentW,
+        ).forEach((row) => line(row, 10, { fill: pal.muted, lh: 13 }));
+      }
       top += 5;
 
       let heroSize = 34;
@@ -20279,7 +20224,7 @@
       // estimate -- a shared card claims what the agents did, and "est." on an
       // artifact nobody can hover is noise).
       usageReportWrapText(
-        t('usageReportCardHeroSub', {
+        t(model.period === 'day' ? 'usageReportCardHeroSubDay' : 'usageReportCardHeroSub', {
           days: streaks ? String(streaks.active_days) : USAGE_REPORT_EM,
           total: model.elapsed,
           sessions: usageReportFigure(model.sessions, formatNumber),
@@ -20304,7 +20249,7 @@
         day.future ? pal.border : null,
       );
       let heatH = 0;
-      if (model.period === 'week') {
+      if (model.period === 'day' || model.period === 'week') {
         // Dropped on purpose; see above.
       } else if (days.length <= 42) {
         // Month: the report page's presentation -- square cells on the weekday
@@ -20522,7 +20467,7 @@
           chip.textContent = t(tier === 'green' ? 'usageReportTierGreen' : 'usageReportTierAmber');
           const themeLabel = document.createElement('span');
           themeLabel.className = 'mono';
-          themeLabel.textContent = mode;
+          themeLabel.textContent = t(mode === 'light' ? 'themeLight' : 'themeDark');
           caption.append(chip, themeLabel);
           const box = document.createElement('div');
           box.className = 'usage-report-cardbox';
@@ -20677,7 +20622,6 @@
       usageReportRenderHead(model);
       usageReportRenderBanner(model);
       usageReportRenderHero(model);
-      usageReportRenderSentence(model);
       usageReportRenderHeat(model);
       usageReportRenderPodium(model);
       usageReportRenderWhen(model);

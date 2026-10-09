@@ -1,3 +1,7 @@
+"""Tests for the Grok Build parser.
+
+Covers parsing of Grok unified.jsonl log files.
+"""
 import json
 from pathlib import Path
 

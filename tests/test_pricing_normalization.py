@@ -1,3 +1,7 @@
+"""Tests for pricing normalization.
+
+Covers case-insensitive lookup, provider prefix stripping, and release date suffix removal.
+"""
 from tokdash.pricing import PricingDatabase
 
 

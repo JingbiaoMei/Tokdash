@@ -1,3 +1,7 @@
+"""Tests for Codex quota collection.
+
+Covers collect_codex_session_snapshots and incremental collection.
+"""
 from __future__ import annotations
 
 import json

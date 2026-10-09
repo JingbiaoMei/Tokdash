@@ -1,3 +1,7 @@
+"""Tests for the multi-server frontend.
+
+Covers the multi-server dashboard view and server selection UI.
+"""
 from __future__ import annotations
 
 import json

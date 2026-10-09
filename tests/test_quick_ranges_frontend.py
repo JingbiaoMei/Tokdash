@@ -1,3 +1,7 @@
+"""Tests for the quick ranges frontend.
+
+Covers the quick range selector buttons in the dashboard.
+"""
 from __future__ import annotations
 
 import json

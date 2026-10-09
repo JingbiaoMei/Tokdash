@@ -1,3 +1,7 @@
+"""Tests for Claude quota via macOS Keychain.
+
+Covers OAuth token retrieval from the Keychain for Claude quota polling.
+"""
 from __future__ import annotations
 
 import json

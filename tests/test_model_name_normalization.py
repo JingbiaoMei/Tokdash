@@ -1,3 +1,8 @@
+"""Tests for model name normalization.
+
+Covers provider prefix stripping, case/punctuation normalization,
+and snapshot/release suffix removal.
+"""
 from tokdash.model_normalization import normalize_model_name
 
 

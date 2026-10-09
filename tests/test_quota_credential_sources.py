@@ -1,3 +1,7 @@
+"""Tests for quota credential sources.
+
+Covers discovery of credential files for all supported providers.
+"""
 from __future__ import annotations
 
 import json

@@ -1,3 +1,8 @@
+"""Tests for the activity insights module.
+
+Covers build_activity_insights, canonical_mcp_tool_name, new_activity_record,
+record_reasoning_turn, and record_structured_tool_call.
+"""
 from __future__ import annotations
 
 import json

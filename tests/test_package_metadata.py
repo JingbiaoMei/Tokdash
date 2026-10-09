@@ -1,3 +1,7 @@
+"""Tests for package metadata and version configuration.
+
+Covers pyproject.toml version matching and module docstring enforcement.
+"""
 import re
 from pathlib import Path
 

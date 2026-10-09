@@ -1,3 +1,7 @@
+"""Tests for OpenCode Go quota collection.
+
+Covers quota polling, credential detection, and snapshot collection.
+"""
 from __future__ import annotations
 
 import json

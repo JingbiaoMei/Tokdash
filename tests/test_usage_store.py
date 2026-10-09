@@ -1,3 +1,7 @@
+"""Tests for the usage store.
+
+Covers SQLite storage, sync, query operations, and entry parsing.
+"""
 from __future__ import annotations
 
 import json

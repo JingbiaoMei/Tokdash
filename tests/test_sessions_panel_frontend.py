@@ -1,3 +1,7 @@
+"""Tests for the sessions panel frontend.
+
+Covers the session list and detail views for all supported tools.
+"""
 from __future__ import annotations
 
 import re

@@ -1,3 +1,7 @@
+"""Tests for OpenClaw cacheWrite token handling.
+
+Covers that cacheWrite is counted as input tokens in OpenClaw sessions.
+"""
 import json
 from datetime import datetime, timezone
 from pathlib import Path

@@ -1,3 +1,7 @@
+"""Smoke tests for the API server.
+
+Covers basic endpoint availability and response shapes.
+"""
 import os
 import asyncio
 

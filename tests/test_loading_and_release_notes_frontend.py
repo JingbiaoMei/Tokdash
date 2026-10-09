@@ -1,3 +1,7 @@
+"""Tests for the loading and release notes frontend.
+
+Covers the loading spinner and release notes panel in the dashboard.
+"""
 from __future__ import annotations
 
 import json

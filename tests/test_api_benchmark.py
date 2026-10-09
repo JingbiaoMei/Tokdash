@@ -1,3 +1,7 @@
+"""Tests for the API benchmark script.
+
+Covers loading and running scripts/benchmark_api_latency.py.
+"""
 from __future__ import annotations
 
 import importlib.util

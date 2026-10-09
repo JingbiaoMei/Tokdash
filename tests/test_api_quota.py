@@ -1,3 +1,8 @@
+"""Tests for the quota API endpoints.
+
+Covers /api/quota, /api/quota/history, /api/quota/consent, /api/quota/settings,
+and /api/quota/refresh routes.
+"""
 from __future__ import annotations
 
 import pytest

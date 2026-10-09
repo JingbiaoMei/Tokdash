@@ -1,3 +1,7 @@
+"""Tests for quota network requests.
+
+Covers HTTP error handling, retries, and response parsing for all providers.
+"""
 from __future__ import annotations
 
 import base64

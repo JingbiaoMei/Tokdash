@@ -1,3 +1,7 @@
+"""Tests for the insights module.
+
+Covers period resolution, aliases, and the observable range block.
+"""
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta

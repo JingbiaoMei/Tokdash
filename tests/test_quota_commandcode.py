@@ -1,3 +1,7 @@
+"""Tests for CommandCode quota collection.
+
+Covers API endpoints for whoami, credits, and subscriptions.
+"""
 from __future__ import annotations
 
 import json

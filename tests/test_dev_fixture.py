@@ -1,3 +1,7 @@
+"""Tests for the dev fixture mode.
+
+Covers --dev-fixture dense and --dev-seed behavior.
+"""
 from __future__ import annotations
 
 import asyncio

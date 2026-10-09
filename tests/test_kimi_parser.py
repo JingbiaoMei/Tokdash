@@ -1,3 +1,7 @@
+"""Tests for the Kimi CLI / Kimi Code parser.
+
+Covers parsing of Kimi session files in both legacy and current formats.
+"""
 from datetime import datetime, timezone
 from pathlib import Path
 

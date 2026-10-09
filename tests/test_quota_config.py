@@ -1,3 +1,7 @@
+"""Tests for quota configuration.
+
+Covers network consent defaults, round-tripping, and config file handling.
+"""
 from __future__ import annotations
 
 import json

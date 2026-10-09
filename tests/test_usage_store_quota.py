@@ -1,3 +1,7 @@
+"""Tests for quota storage in the usage store.
+
+Covers quota snapshot persistence, retrieval, and repair operations.
+"""
 from __future__ import annotations
 
 import json

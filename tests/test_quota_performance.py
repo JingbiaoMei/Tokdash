@@ -1,3 +1,7 @@
+"""Tests for quota polling performance.
+
+Covers timing and efficiency of bulk quota snapshot operations.
+"""
 from __future__ import annotations
 
 import time

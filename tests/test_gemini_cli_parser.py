@@ -1,3 +1,7 @@
+"""Tests for the Gemini CLI parser.
+
+Covers parsing of Gemini CLI session files in JSON and JSONL formats.
+"""
 from datetime import datetime, timezone
 from pathlib import Path
 

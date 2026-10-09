@@ -1,3 +1,7 @@
+"""Tests for period semantics in session data.
+
+Covers month vs numeric days period handling.
+"""
 from __future__ import annotations
 
 from datetime import datetime

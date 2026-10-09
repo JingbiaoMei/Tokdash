@@ -1,3 +1,7 @@
+"""Tests for the readable tokens frontend.
+
+Covers the human-readable token formatting in the dashboard.
+"""
 from __future__ import annotations
 
 import json
@@ -8,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-import tokdash  # type: ignore[import-untyped]
+import tokdash
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 

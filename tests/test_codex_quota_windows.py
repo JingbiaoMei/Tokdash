@@ -1,3 +1,7 @@
+"""Tests for Codex quota window classification on Windows.
+
+Covers classify_codex_api_windows and _codex_window_used_percent_from_raw.
+"""
 from __future__ import annotations
 
 import json

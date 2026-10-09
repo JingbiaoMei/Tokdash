@@ -1,3 +1,7 @@
+"""Tests for frontend model name normalization sync.
+
+Covers that the JS normalizer stays in sync with the Python normalize_model_name.
+"""
 from __future__ import annotations
 
 import json

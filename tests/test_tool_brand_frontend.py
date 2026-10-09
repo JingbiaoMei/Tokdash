@@ -1,3 +1,7 @@
+"""Tests for the tool brand frontend.
+
+Covers tool brand icons, labels, and identity rendering in the dashboard.
+"""
 from __future__ import annotations
 
 import json

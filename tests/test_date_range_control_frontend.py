@@ -1,3 +1,7 @@
+"""Tests for the date range control in the frontend.
+
+Covers the date range picker UI and its interaction with the API.
+"""
 from __future__ import annotations
 
 import json

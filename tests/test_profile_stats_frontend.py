@@ -1,3 +1,7 @@
+"""Tests for the profile stats frontend.
+
+Covers the profile statistics panel in the dashboard.
+"""
 from __future__ import annotations
 
 import json

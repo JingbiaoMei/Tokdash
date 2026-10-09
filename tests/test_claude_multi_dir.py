@@ -1,3 +1,7 @@
+"""Tests for Claude Code multi-directory session parsing.
+
+Covers session discovery across multiple Claude config directories.
+"""
 from pathlib import Path
 
 import tokdash.sessions as sessions

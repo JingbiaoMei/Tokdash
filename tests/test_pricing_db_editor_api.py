@@ -1,3 +1,7 @@
+"""Tests for the pricing database editor API.
+
+Covers reading, saving, and validating pricing database JSON.
+"""
 import json
 import threading
 from datetime import datetime

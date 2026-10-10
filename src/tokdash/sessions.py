@@ -701,11 +701,13 @@ def _clip_intervals(
 ) -> list[tuple[int, int]]:
     """Trim intervals to the window, dropping the ones left empty."""
     clipped: list[tuple[int, int]] = []
+    since_ms = int(since_ms) if since_ms is not None else None
+    until_ms = int(until_ms) if until_ms is not None else None
     for start, end in intervals:
-        if since_ms is not None:
-            start = max(start, int(since_ms))
-        if until_ms is not None:
-            end = min(end, int(until_ms))
+        if since_ms is not None and start < since_ms:
+            start = since_ms
+        if until_ms is not None and end > until_ms:
+            end = until_ms
         if end > start:
             clipped.append((start, end))
     return clipped

@@ -103,7 +103,9 @@ def worker(args):
     def active_window(since_ms, until_ms, **unused):
         lo = bisect_right(stamps, since_ms-120_000)
         hi = bisect_left(stamps, until_ms)
-        selected = [(max(start, since_ms), min(end, until_ms)) for start, end in intervals[lo:hi]]
+        # Exercise each revision's production clipper. Source discovery is
+        # stubbed equally; clipping, aggregation and encoding remain timed.
+        selected = sessions._clip_intervals(intervals[lo:hi], since_ms, until_ms)
         total = sum(end-start for start, end in selected)
         return {"codex": {"active_ms_sum": total}}, [], selected
 
@@ -238,6 +240,7 @@ def main():
               "corpus": {k: results["candidate"][k] for k in ("corpus_days", "corpus_start", "corpus_end")},
               "database_storage": str(database_dir),
               "gc_mode": args.gc_mode,
+              "active_interval_clipping": "Each revision's production sessions._clip_intervals; source discovery stubbed equally",
               "gate": "candidate p95 <= baseline p95 + max(10 ms, 10% of baseline p95)",
               "correctness_gate": "Nonmonetary fields match baseline; candidate cents match exact integer-mill oracle; baseline cost drift allowed only within one cent at an exact half-cent boundary",
               "cases": {}, "raw": results}

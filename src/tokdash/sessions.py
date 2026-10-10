@@ -6754,6 +6754,10 @@ def get_active_time_data(
     if granularity == "hour":
         sparkline["keys"] = local_hour_keys(datetime.fromtimestamp(since_ms / 1000).astimezone())
 
+    # The previous window allocates its own clipped intervals. Release the
+    # current window first to reduce the live heap and GC work on annual ranges.
+    del ordered, all_intervals
+
     return {
         "period": period,
         "active_ms": active_ms,

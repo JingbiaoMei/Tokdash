@@ -17,13 +17,28 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
     parser.add_argument("--baseline", required=True, type=Path)
+    parser.add_argument("--unchanged", type=Path, help="Earlier complete campaign for unchanged Usage/native paths")
+    parser.add_argument("--unchanged-revision", help="Revision tested by the earlier complete campaign")
     args = parser.parse_args()
+    if bool(args.unchanged) != bool(args.unchanged_revision):
+        parser.error("--unchanged and --unchanged-revision must be supplied together")
     root = args.output
     rows = []
     datasets = {}
     for workload in ("regular", "dense"):
         report = json.loads((root / workload / "aggregation-performance.json").read_text())
-        assert report["repeats"] == 96 and len(report["cases"]) == 30, workload
+        assert report["repeats"] == 96, workload
+        source_reports = {case: str(root / workload / "aggregation-performance.json") for case in report["cases"]}
+        if args.unchanged:
+            prior_path = args.unchanged / workload / "aggregation-performance.json"
+            prior = json.loads(prior_path.read_text())
+            assert prior["repeats"] == 96 and len(prior["cases"]) == 30
+            assert prior["rows"] == report["rows"] and prior["corpus"] == report["corpus"]
+            assert len(report["cases"]) == 10 and all(case.startswith("active/") for case in report["cases"])
+            unaffected = {case: value for case, value in prior["cases"].items() if not case.startswith("active/")}
+            report["cases"] = {**unaffected, **report["cases"]}
+            source_reports.update({case: str(prior_path) for case in unaffected})
+        assert len(report["cases"]) == 30, workload
         datasets[workload] = {key: report[key] for key in ("rows", "corpus", "gc_mode", "method")}
         for case, values in report["cases"].items():
             rows.append({
@@ -40,6 +55,7 @@ def main():
                 "latency_pass": values["pass"], "correctness_pass": values["correctness_pass"],
                 "totals_equal": values["totals_equal"],
                 "legacy_half_cent_rounding": values["baseline_rounding_drift"],
+                "source_report": source_reports[case],
             })
     browser = json.loads((root / "browser/browser-performance.json").read_text())
     assert browser["repeats_per_range"] == 32 and len(browser["cases"]) == 10
@@ -90,6 +106,8 @@ def main():
         "visual_checks": curve_checks, "screenshots": len(visual["screens"]),
         "backend_paired_samples": 96 * 60, "browser_paired_samples": 32 * 10,
         "gate": browser["gate"], "datasets": datasets,
+        "unchanged_paths_revision": args.unchanged_revision,
+        "campaign_note": "Usage/native results retained from the complete campaign; all Agent Time cases and browser checks rerun after the interval lifetime change." if args.unchanged else "All cases from one complete campaign.",
         "all_pass": passed, "cases": rows, "browser_diagnostics": diagnostics,
         "limits": "Synthetic warm-cache workloads on this machine; native source discovery is stubbed equally. Browser fixtures isolate rendering and requests from database aggregation. Timings do not guarantee identical performance on every installation.",
     }

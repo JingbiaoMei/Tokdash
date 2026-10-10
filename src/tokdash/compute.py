@@ -161,15 +161,26 @@ def _collect_parser_tail(parser: Any, file_sig: tuple[str, int, int], start_offs
 
     tmp_path = None
     original_file_signatures = parser._file_signatures
+    # The slice goes through the parser's ordinary file reader, so it has to be
+    # told it is not holding a file. A parser that pairs records across lines reads
+    # a bracket that opens before the offset as a call with no timing, which is the
+    # opposite of what it is; told the truth, it asks for a whole-file reparse
+    # instead and the timing survives the append boundary.
+    original_tail_slice = getattr(parser, "parsing_tail_slice", False)
+    original_identity_path = getattr(parser, "tail_source_path", None)
     try:
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=Path(path).suffix, delete=False) as handle:
             handle.write(text)
             tmp_path = handle.name
         stat = Path(tmp_path).stat()
         parser._file_signatures = lambda: ((str(tmp_path), int(stat.st_mtime_ns), int(stat.st_size)),)
+        parser.parsing_tail_slice = True
+        parser.tail_source_path = path
         return parser._parse_all(), safe_offset
     finally:
         parser._file_signatures = original_file_signatures
+        parser.parsing_tail_slice = original_tail_slice
+        parser.tail_source_path = original_identity_path
         if tmp_path:
             try:
                 os.unlink(tmp_path)

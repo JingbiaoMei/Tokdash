@@ -506,8 +506,11 @@ def test_a_range_change_during_a_load_is_queued_not_dropped():
     assert "updateDashboard(queued.customDays, queued.dateFrom, queued.dateTo, queued.options);" in finally_block
     assert "inFlightDashboardKey = null;" in finally_block
     deferred = finally_block.split("if (queued) {", 1)[1]
-    assert deferred.index("} else {") < deferred.index("loadActivityInsights(")
-    assert deferred.index("} else {") < deferred.index("scheduleStatsWarm(")
+    # The existing standalone speed page also suppresses Overview follow-ups.
+    # Keep its navigation guard while checking the queue's branch ordering.
+    follow_up = "} else if (typeof usageReportSpeedState === 'undefined' || !usageReportSpeedState.active) {"
+    assert deferred.index(follow_up) < deferred.index("loadActivityInsights(")
+    assert deferred.index(follow_up) < deferred.index("scheduleStatsWarm(")
 
 
 def test_manual_refresh_reaches_the_server_cache():

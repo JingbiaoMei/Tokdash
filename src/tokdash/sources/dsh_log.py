@@ -458,7 +458,15 @@ def fold_dsh_usage_samples(
     seed_length, seed_unprovable = dsh_seed_boundary(header, events)
     # Insertion-ordered: a replaced key keeps the position of its first sighting,
     # so the emitted order stays the log's order rather than the fold's.
+    from ..speed_mode import timing_enabled
+    measure_speed = timing_enabled()
+    if measure_speed:
+        from ..output_speed_readers import dsh_stream_timing
+        from ..output_speed import unmeasured, STATUS_RETRY_CONTAMINATED, STATUS_INCOMPLETE, STATUS_MISSING_TIMING
+
     samples: Dict[str, Dict[str, Any]] = {}
+    streams = {}
+    retry_steps = set()
     attempts: Dict[Tuple[int, int], int] = {}
     latest_model = ""
     latest_provider = ""
@@ -478,7 +486,8 @@ def fold_dsh_usage_samples(
 
         if event_type not in (
             "assistant/chunk", "assistant/message", "assistant/attempt",
-            "compaction/summary", "llm/retry-started",
+            "compaction/summary", "llm/retry-started", "llm/retry",
+            "text-chunks", "reasoning-chunks", "tool-call-chunks",
         ):
             continue
 
@@ -489,12 +498,23 @@ def fold_dsh_usage_samples(
         if seed_unprovable or (seed_length and (seq is None or seq < seed_length)):
             continue
 
+        if measure_speed and event_type in ("llm/retry", "llm/retry-started"):
+            retry_steps.add((_to_int(data.get("turn")), _to_int(data.get("step"))))
         if event_type == "llm/retry-started":
             turn = _to_int(data.get("turn"))
             step = _to_int(data.get("step"))
             if turn is not None and step is not None:
                 key = (turn, step)
                 attempts[key] = attempts.get(key, 0) + 1
+            continue
+
+        coordinates = (_to_int(data.get("turn")), _to_int(data.get("step")))
+        stream_key = (*coordinates, attempts.get(coordinates, 0))
+        if measure_speed and event_type == "assistant/chunk":
+            streams.setdefault(stream_key, []).append({"type": "chunk", "time": event.get("time"), "chunk": data.get("chunk")})
+        elif event_type in ("text-chunks", "reasoning-chunks", "tool-call-chunks"):
+            if measure_speed:
+                streams.setdefault(stream_key, []).append({"type": event_type, "time0": event.get("time0")})
             continue
 
         is_compaction = False
@@ -603,8 +623,20 @@ def fold_dsh_usage_samples(
             # separately here would count those tokens twice downstream.
             "reasoning": 0,
         }
+        if measure_speed:
+            if is_compaction:
+                speed = unmeasured(STATUS_MISSING_TIMING)
+            elif event_type == "assistant/attempt":
+                speed = unmeasured(STATUS_INCOMPLETE)
+            else:
+                stream = data.get("stream") if isinstance(data.get("stream"), list) else streams.get(stream_key)
+                speed = dsh_stream_timing(stream, usage)
+            sample["_speed"] = speed
         samples[entry_key] = sample
 
+    for sample in samples.values():
+        if (sample["turn"], sample["step"]) in retry_steps:
+            sample["_speed"] = unmeasured(STATUS_RETRY_CONTAMINATED)
     return list(samples.values())
 
 

@@ -38,6 +38,23 @@ flowchart LR
 
 **Presentation.** `api.py` exposes usage and quota data through FastAPI routes and serves the WebUI. The Textual TUI first asks a running `tokdash serve` of the same version over HTTP, and only falls back to in-process functions when that fails (`tui/data.py`, `tui/remote.py`). Statusline integrations call `GET /api/usage` for compact usage data.
 
+## Output speed cache
+
+Ordinary usage ingestion does not extract response timing. The Model output speed
+page and session speed APIs request a separate worker that builds the disposable
+`output_speed.sqlite3` database beside the primary usage database. It stores scalar
+measurements and canonical session membership, with atomic publication and
+input-scoped failures. Readers display the last successful snapshot while a build
+is pending and subscribe to job events only while their page is visible.
+
+Model and session rates divide summed measured tokens by summed matched duration.
+Groups retain source, model, measurement kind and token basis so incompatible
+timing windows are not combined. Model/hour results use bounded process caching
+keyed by publication revision, filters and local-clock identity. See
+[the API contract](../reference/API.md#get-apioutput-speed),
+[configuration](../reference/CONFIG.md) and
+[benchmark results](benchmarks/OUTPUT_SPEED.md).
+
 ## Quota polling subsystem
 
 Quota tracking runs alongside usage aggregation and stores time-stamped quota snapshots in the same local SQLite usage database. When enabled by the master switch, the poller gathers Codex session-derived quota locally and, with credential-scan consent and provider-specific network consent, reads disclosed local CLI credentials and requests quota from supported providers. The daemon schedules ordinary polls with jitter and can add provider-scoped samples before and after fixed reset boundaries. The WebUI and TUI can trigger manual refreshes via `/api/quota/refresh` and the TUI's `u` key. See [`QUOTA.md`](../reference/QUOTA.md) for the full quota polling design.

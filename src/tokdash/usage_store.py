@@ -21,7 +21,7 @@ from .usage_buckets import add_bucket, sql_bucket_expression, sql_bucket_key, sq
 logger = logging.getLogger(__name__)
 
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 13
 SIGNATURE_VERSION = 3
 
 
@@ -69,6 +69,58 @@ def read_stored_schema_version(conn: sqlite3.Connection) -> Optional[int]:
         return None
 
 
+class UsageDatabaseNeedsMigrationError(RuntimeError):
+    """The usage database is on an older layout that this build migrates forward.
+
+    The mirror of :class:`UsageDatabaseSchemaTooNewError`, and deliberately the
+    opposite signal: a newer database never becomes readable by this build, while
+    an older one does as soon as the migration chain has run. A read-only route
+    must not be the thing that runs it -- ``read_connection`` carries no DDL by
+    design -- so the honest answer is "not yet, retry after the next sync", not
+    SQLite's ``no such column`` dressed up as an unexpected server fault.
+    """
+
+    def __init__(self, *, path: Any, found: Optional[int], supported: int) -> None:
+        self.path = Path(str(path))
+        self.found = found
+        self.supported = int(supported)
+        super().__init__(
+            f"usage database at {self.path} is on schema "
+            f"{found if found is not None else 'unknown'} and this Tokdash is "
+            f"still migrating it to schema {supported}; the next sync finishes "
+            "the migration, so retry shortly"
+        )
+
+
+#: Columns a stored-timing read touches. They arrive with SCHEMA_VERSION 10, so a
+#: database a previous build wrote is valid, readable, and missing every one of
+#: them. Probe the columns rather than trusting the number in ``meta``: a
+#: half-finished migration, or a database rebuilt by hand, both look current in
+#: ``meta`` and still fail the SELECT.
+SPEED_COLUMNS = (
+    "speed_tokens",
+    "speed_ms",
+    "speed_calls",
+    "speed_kind",
+    "speed_token_basis",
+    "speed_status",
+)
+
+
+def speed_columns_present(conn: sqlite3.Connection) -> bool:
+    """True when ``usage_entries`` carries every stored-timing column.
+
+    One ``PRAGMA table_info``, so it is cheap enough to run per request. It reads
+    the catalog the connection is already pinned to, which is exactly the layout
+    the next SELECT in the same transaction will face.
+    """
+    try:
+        names = {str(row[1]) for row in conn.execute("PRAGMA table_info(usage_entries)")}
+    except sqlite3.Error:
+        return False
+    return all(column in names for column in SPEED_COLUMNS)
+
+
 def raise_if_usage_db_incompatible(db_path: Optional[Path] = None) -> None:
     """Cheap pre-flight: refuse a too-new database before any source discovery.
 
@@ -109,10 +161,35 @@ def raise_if_usage_db_incompatible(db_path: Optional[Path] = None) -> None:
 # format changes — not when a parser changes what it puts in one.
 USAGE_ENTRY_FORMAT_VERSION = 1
 
+#: meta key holding the monotonic measurement generation. It advances with every
+#: committed change to the stored timing statistics, so a comparison cache can
+#: key on "has any timing moved?" for the price of one indexed meta lookup
+#: instead of a whole-corpus scan. See UsageEntryStore.measurement_generation().
+MEASUREMENT_GENERATION_META_KEY = "measurement_generation_v1"
+
+#: Entry key under which a parser hands back its output-speed measurement, and
+#: used only by opt-in derived-cache readers. Private for the same reason as
+#: ``_billing``: the timing statistics belong to the row, but not to the public
+#: usage payload, so ``public_usage_entry`` strips it and existing payloads keep
+#: their exact current shape.
+SPEED_ENTRY_KEY = "_speed"
+
 # Private keys stripped from a stored row before it is serialized into
 # raw_json, so /api/usage, /api/tools, `tokdash export` and query_entries()
-# never see them. Billing provenance lives in its own column instead.
-PRIVATE_ENTRY_KEYS = ("_billing",)
+# never see them. Billing provenance lives in its own column instead, and
+# output-speed timing lives in a separate disposable database.
+PRIVATE_ENTRY_KEYS = ("_billing", SPEED_ENTRY_KEY, "_session_id")
+
+#: The six flat fields a parser may hand in instead of the nested private key.
+#: Read by :func:`_speed_for_storage`, then removed from the stored blob.
+SPEED_ENTRY_FIELDS = (
+    "speed_tokens",
+    "speed_ms",
+    "speed_calls",
+    "speed_kind",
+    "speed_token_basis",
+    "speed_status",
+)
 
 
 class UsageFileVanished(FileNotFoundError):
@@ -137,6 +214,24 @@ class UsageFileVanished(FileNotFoundError):
     def __init__(self, path: str):
         super().__init__(2, "No such file or directory", str(path))
         self.filename = str(path)
+
+
+class UsageTailSliceIncomplete(RuntimeError):
+    """A parser could not make sense of the SLICE the store handed it.
+
+    Tail append hands a parser the bytes after the stored offset and stores what
+    comes back. Parsers whose rows are self-contained cannot tell a slice from a
+    file and must not try. A parser that pairs records ACROSS lines can, and has to:
+    a bracket that opens before the offset, or a duration that arrives for a row an
+    earlier append already stored, is not evidence that the call had no timing -- it
+    is evidence that the slice was too short. Reading only the tail in that case
+    would leave the row unmeasured forever, because nothing ever revisits it.
+
+    Raising this asks for the conservative path: ``sync_files`` already falls back
+    to a whole-file parse when a tail parse cannot deliver, so a timing that
+    straddles an append boundary arrives late instead of being lost, and the
+    incremental path stays available for every append where the records do fit.
+    """
 
 # quota_history consumption: reset times within this many seconds are treated as the same
 # physical window, absorbing the ±1s poll-to-poll jitter (and Codex start-of-window
@@ -860,11 +955,104 @@ def _entry_for_storage(entry: dict[str, Any]) -> Optional[dict[str, Any]]:
     raw["timestamp"] = timestamp
     raw["messageCount"] = _int_field(raw, "messageCount") or 1
     raw["entry_key"] = _entry_key(raw)
+    raw.pop(SPEED_ENTRY_KEY, None)
+    raw.pop('output_speed', None)
+    # Timing belongs only to the disposable derived cache.
+    for _speed_key in SPEED_ENTRY_FIELDS:
+        raw.pop(_speed_key, None)
     if not isinstance(raw.get("_billing"), dict):
         # No provenance: the row keeps whatever cost it arrived with and is
         # never repriced, rather than being guessed at from its public buckets.
         raw.pop("_billing", None)
     return raw
+
+
+def _speed_for_storage(entry: dict[str, Any]) -> dict[str, Any]:
+    """Canonical output-speed statistics for one row.
+
+    A parser may either hand back the six flat fields it took from its source, or
+    nothing at all. Absent means unmeasured, and unmeasured is stored as explicit
+    zeroes with status 'unknown' so a historical row can never be mistaken for a
+    call that measured zero milliseconds.
+    """
+    from .output_speed import CanonicalSpeed, sanitize_stored, unmeasured
+
+    supplied = entry.get(SPEED_ENTRY_KEY)
+    if isinstance(supplied, CanonicalSpeed):
+        # The readers hang the association's own verdict on the row, and that
+        # verdict has been through every rule below by construction. Re-running
+        # them here was a dataclass round-trip on each of the ~14k rows a corpus
+        # ingests, which measured larger than the association that made it.
+        return supplied
+    if isinstance(supplied, dict):
+        candidate = dict(supplied)
+    else:
+        candidate = {
+            "speed_tokens": entry.get("speed_tokens"),
+            "speed_ms": entry.get("speed_ms"),
+            "speed_calls": entry.get("speed_calls"),
+            "speed_kind": entry.get("speed_kind"),
+            "speed_token_basis": entry.get("speed_token_basis"),
+            "speed_status": entry.get("speed_status"),
+        }
+    if not any(
+        candidate.get(key) not in (None, "", 0, 0.0)
+        for key in ("speed_tokens", "speed_ms", "speed_calls", "speed_kind", "speed_status")
+    ):
+        return unmeasured()
+    return sanitize_stored(candidate)
+
+
+def _speed_field(entry: dict[str, Any], name: str, default: Any) -> Any:
+    speed = entry.get(SPEED_ENTRY_KEY)
+    if not isinstance(speed, dict):
+        return default
+    value = speed.get(name)
+    return default if value is None else value
+
+
+def _speed_int(entry: dict[str, Any], name: str) -> int:
+    try:
+        return int(_speed_field(entry, name, 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _speed_float(entry: dict[str, Any], name: str) -> float:
+    try:
+        return float(_speed_field(entry, name, 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _speed_str(entry: dict[str, Any], name: str) -> str:
+    return str(_speed_field(entry, name, "") or "")
+
+
+def _speed_row(entry: dict[str, Any]) -> tuple:
+    """The six speed column values, in INSERT order."""
+    return (
+        _speed_int(entry, "speed_tokens"),
+        _speed_float(entry, "speed_ms"),
+        _speed_int(entry, "speed_calls"),
+        _speed_str(entry, "speed_kind"),
+        _speed_str(entry, "speed_token_basis"),
+        _speed_str(entry, "speed_status") or "unknown",
+    )
+
+
+SPEED_INSERT_SUFFIX = (
+    ", speed_tokens, speed_ms, speed_calls, speed_kind, speed_token_basis, speed_status"
+)
+SPEED_PLACEHOLDERS = ", ?, ?, ?, ?, ?, ?"
+SPEED_UPDATE_CLAUSE = (
+    "speed_tokens = excluded.speed_tokens,\n"
+    "                            speed_ms = excluded.speed_ms,\n"
+    "                            speed_calls = excluded.speed_calls,\n"
+    "                            speed_kind = excluded.speed_kind,\n"
+    "                            speed_token_basis = excluded.speed_token_basis,\n"
+    "                            speed_status = excluded.speed_status"
+)
 
 
 def _billing_json(entry: dict[str, Any]) -> str:
@@ -1089,6 +1277,10 @@ class UsageEntryStore:
                 billing_json TEXT NOT NULL DEFAULT '',
                 cost_authoritative INTEGER NOT NULL DEFAULT 0
             );
+            CREATE TABLE IF NOT EXISTS usage_session_inputs (
+                source TEXT NOT NULL, session_id TEXT NOT NULL, file_path TEXT NOT NULL,
+                PRIMARY KEY(source, session_id, file_path)
+            );
             CREATE TABLE IF NOT EXISTS session_records (
                 tool TEXT NOT NULL,
                 session_id TEXT NOT NULL,
@@ -1255,6 +1447,61 @@ class UsageEntryStore:
                     "UPDATE usage_entries SET cost_authoritative = 1 WHERE id = ?",
                     updates,
                 )
+        if any(name in columns for name in SPEED_ENTRY_FIELDS):
+            core = "id,source,file_path,entry_key,model,provider,timestamp,input,output,cache_read,cache_write,reasoning,cost,message_count,raw_json,billing_json,cost_authoritative"
+            ddl = conn.execute("SELECT sql FROM sqlite_master WHERE name='usage_entries'").fetchone()[0]
+            core_ddl = ddl[:ddl.index(",\n                speed_tokens")] + "\n            )" if ",\n                speed_tokens" in ddl else None
+            if core_ddl is None:
+                # Older formatting: use the fresh schema declarations explicitly.
+                declarations = [f'"{row["name"]}" {row["type"]}' + (" PRIMARY KEY" if row["pk"] else "") + (" NOT NULL" if row["notnull"] else "") + (f' DEFAULT {row["dflt_value"]}' if row["dflt_value"] is not None else "") for row in conn.execute("PRAGMA table_info(usage_entries)") if row["name"] not in SPEED_ENTRY_FIELDS]
+                core_ddl = "CREATE TABLE usage_entries (" + ",".join(declarations) + ")"
+            conn.execute(core_ddl.replace("usage_entries", "usage_entries_core", 1))
+            conn.execute(f"INSERT INTO usage_entries_core ({core}) SELECT {core} FROM usage_entries")
+            conn.execute("DROP TABLE usage_entries")
+            conn.execute("ALTER TABLE usage_entries_core RENAME TO usage_entries")
+            for name, fields in (("source_time", "source,timestamp"), ("source_file", "source,file_path"), ("time", "timestamp"), ("group", "source,provider,model,timestamp")):
+                conn.execute(f"CREATE INDEX idx_usage_entries_{name} ON usage_entries({fields})")
+            conn.execute("CREATE UNIQUE INDEX idx_usage_entries_source_key ON usage_entries(source,entry_key) WHERE entry_key != ''")
+        if current < 12:
+            for row in conn.execute("SELECT rowid,raw_json FROM session_records"):
+                raw = json.loads(row["raw_json"])
+                changed = False
+                for turn in raw.get("turns", []):
+                    for key in ("_speed", "output_speed"):
+                        if key in turn:
+                            del turn[key]
+                            changed = True
+                if changed:
+                    conn.execute("UPDATE session_records SET raw_json=? WHERE rowid=?", (stable_json(raw), row["rowid"]))
+        if current < 13:
+            # Repair schema-12 caches too, including durable rows whose source
+            # logs no longer exist. Transfer at most 256 candidate blobs at once.
+            for table in ('usage_entries', 'session_records'):
+                predicates = ' OR '.join('raw_json LIKE ?' for _ in range(2+len(SPEED_ENTRY_FIELDS)))
+                cursor = conn.execute(f'SELECT rowid AS repair_rowid,raw_json FROM {table} WHERE {predicates}',
+                    tuple(f'%"{key}"%' for key in ('_speed','output_speed',*SPEED_ENTRY_FIELDS)))
+                while True:
+                    batch = cursor.fetchmany(256)
+                    if not batch:
+                        break
+                    updates = []
+                    for row in batch:
+                        try:
+                            raw = json.loads(row['raw_json'])
+                        except (ValueError, TypeError):
+                            continue
+                        if not isinstance(raw, dict):
+                            continue
+                        objects = [raw] if table=='usage_entries' else [t for t in raw.get('turns',[]) if isinstance(t,dict)]
+                        changed = False
+                        for obj in objects:
+                            for key in ('_speed','output_speed',*SPEED_ENTRY_FIELDS):
+                                if key in obj:
+                                    del obj[key]; changed = True
+                        if changed:
+                            updates.append((stable_json(raw),row['repair_rowid']))
+                    conn.executemany(f'UPDATE {table} SET raw_json=? WHERE rowid=?',updates)
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_usage_session_inputs_file ON usage_session_inputs(source,file_path,session_id)')
         conn.execute(
             "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)",
             (str(SCHEMA_VERSION),),
@@ -1262,6 +1509,68 @@ class UsageEntryStore:
         _repair_codex_api_percent_scale_rows(conn)
         _repair_grok_snapshot_email_rows(conn)
         conn.commit()
+
+    def read_connection(self) -> sqlite3.Connection:
+        """A reader's connection on the store's pragmas, with no schema and no migration.
+
+        Read-only routes need the busy timeout and row factory the writers get, but
+        not the ensure-schema pass -- the one part of ``_connect`` that writes DDL.
+        A GET must never be the thing that migrates a usage database, and SQLite
+        does not support read-only DDL. (Opening the file still creates an empty
+        one when nothing is there; callers that must distinguish "no database"
+        check for the path first, as the comparison route does.) WAL gives this
+        connection the same committed snapshot every other reader sees, which is
+        what makes a cross-process change visible without shared in-memory state.
+        """
+        return self._connect(ensure_schema=False)
+
+    def measurement_generation(self) -> int:
+        """Monotonic accounting/ownership generation; timing is stored separately.
+
+        This is the cheap answer to "has any measurement moved?", so a comparison
+        cache can key on it instead of scanning the corpus. It is a whole-database
+        counter on purpose: source-scoped generations only pay off once a
+        measurement change is frequent enough to cause real cross-source churn,
+        and none of the timing sources append that fast.
+
+        Reads are one indexed `meta` lookup. Cross-process visibility comes for
+        free because SQLite's WAL snapshot makes the same commit visible to every
+        reader, and the caller reads the rows from that same connection.
+        """
+        try:
+            with closing(self.read_connection()) as conn:
+                row = conn.execute(
+                    "SELECT value FROM meta WHERE key = ?",
+                    (MEASUREMENT_GENERATION_META_KEY,),
+                ).fetchone()
+        except sqlite3.Error:
+            # No meta table yet (a database from before meta existed) is the same
+            # answer as no generations yet: nothing has moved.
+            return 0
+        if row is None:
+            return 0
+        try:
+            return int(row["value"])
+        except (TypeError, ValueError):
+            return 0
+
+    def _bump_measurement_generation(self, conn: sqlite3.Connection) -> None:
+        """Advance the generation inside the writer's own transaction.
+
+        Same transaction, not afterwards: a generation that outran its data would
+        cache a miss against rows that are not there yet, and one that lagged
+        would let a reader cache stale timing under a key it believes is current.
+        A single UPSERT per commit is the whole cost.
+        """
+        conn.execute(
+            """
+            INSERT INTO meta(key, value)
+            VALUES(?, CAST(1 AS TEXT))
+            ON CONFLICT(key) DO UPDATE SET
+                value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT)
+            """,
+            (MEASUREMENT_GENERATION_META_KEY,),
+        )
 
     def source_signature(self, source: str) -> Optional[str]:
         with closing(self._connect()) as conn:
@@ -1538,15 +1847,17 @@ class UsageEntryStore:
                         len(entries),
                     ),
                 )
+                self._bump_measurement_generation(conn)
                 conn.commit()
                 return True
 
-    def file_contexts(self, source: str) -> dict[str, Any]:
+    def file_contexts(self, source: str, *, paths=None) -> dict[str, Any]:
         """Previously established file metadata, including durable missing files."""
         with closing(self._connect()) as conn:
-            rows = conn.execute(
-                "SELECT path, signature FROM file_state WHERE source = ?", (source,),
-            ).fetchall()
+            if paths is None:
+                rows = conn.execute('SELECT path, signature FROM file_state WHERE source=?',(source,)).fetchall()
+            else:
+                rows = [row for path in paths for row in conn.execute('SELECT path, signature FROM file_state WHERE source=? AND path=?',(source,path))]
         contexts = {}
         for row in rows:
             try:
@@ -1922,7 +2233,7 @@ class UsageEntryStore:
                             source, file_path, entry_key, model, provider, timestamp,
                             input, output, cache_read, cache_write, reasoning,
                             cost, message_count, raw_json, billing_json, cost_authoritative
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(source, entry_key) WHERE entry_key != ''
                         DO UPDATE SET
                             file_path = excluded.file_path,
@@ -1951,9 +2262,13 @@ class UsageEntryStore:
                             source, file_path, entry_key, model, provider, timestamp,
                             input, output, cache_read, cache_write, reasoning,
                             cost, message_count, raw_json, billing_json, cost_authoritative
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                 for (path, mtime_ns, size), entries, safe_offset, appended in parsed:
+                    if not appended:
+                        conn.execute("DELETE FROM usage_session_inputs WHERE source=? AND file_path=?", (source,path))
+                    conn.executemany("INSERT OR IGNORE INTO usage_session_inputs VALUES (?,?,?)",
+                                     ((source,str(sid),path) for sid in {e.get('_session_id') for e in entries} if sid))
                     total_changed_entries += len(entries)
                     if not appended:
                         if unresolved_keys:
@@ -2052,6 +2367,7 @@ class UsageEntryStore:
                     """,
                     (source,),
                 )
+                conn.execute("DELETE FROM usage_session_inputs WHERE source=? AND file_path NOT IN (SELECT path FROM file_state WHERE source=?)", (source,source))
                 total_entries_row = conn.execute(
                     "SELECT COUNT(*) AS n FROM usage_entries WHERE source = ?",
                     (source,),
@@ -2073,6 +2389,10 @@ class UsageEntryStore:
                         total_entries,
                     ),
                 )
+                # Only a sync that actually moved rows advances the generation. A
+                # steady-state sync that found every file unchanged returns before
+                # here, so the common request costs zero extra writes.
+                self._bump_measurement_generation(conn)
                 conn.commit()
                 return True
 

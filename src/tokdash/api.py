@@ -8,6 +8,7 @@ import logging
 import math
 import os
 import secrets
+import sqlite3
 import threading
 import time
 from collections import OrderedDict
@@ -46,7 +47,17 @@ from .dateutil import parse_date_range
 from .insights import UnknownFacetError, compute_insights
 from .instance_identity import get_instance_id_async
 from .usage_store import SCHEMA_VERSION as USAGE_DB_SCHEMA_VERSION
-from .usage_store import UsageDatabaseSchemaTooNewError
+from .usage_store import (
+    MEASUREMENT_GENERATION_META_KEY,
+    UsageDatabaseNeedsMigrationError,
+    UsageDatabaseSchemaTooNewError,
+    UsageEntryStore,
+    raise_if_usage_db_incompatible,
+    read_stored_schema_version,
+    speed_columns_present,
+    usage_db_path,
+)
+from . import speed_report, speed_native
 from .sessions import (
     SESSION_TOOLS,
     get_active_time_data,
@@ -924,6 +935,10 @@ def _request_is_loopback_write(request: Request) -> bool:
 
 @app.middleware("http")
 async def _write_guard(request: Request, call_next):
+    # Structured read queries and disposable derived-cache builds have the same
+    # authority as their GET equivalents; they cannot modify user configuration.
+    if request.method.upper() == 'POST' and _request_route_path(request) in {'/api/session-speeds', '/api/output-speed/ensure'}:
+        return await call_next(request)
     if request.method.upper() in _MUTATING_METHODS and _dev_fixture_mode(request.app):
         return JSONResponse(
             {"detail": "Writes are disabled while a synthetic development fixture is active."},
@@ -1476,6 +1491,8 @@ def _cache_epoch_value() -> int:
 def _cache_set_if_epoch(key: str, value: Any, epoch: int) -> bool:
     with _cache_guard:
         if epoch != _cache_epoch:
+            return False
+        if isinstance(value, dict) and any(r.get("status") == "read_failure" for r in value.get("source_status", [])):
             return False
         _cache[key] = (datetime.now().timestamp(), value)
         _cache.move_to_end(key)
@@ -2410,6 +2427,176 @@ def get_session(tool: str, session_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/output-speed")
+def get_output_speed(
+    view: str = "across-models",
+    period: str = "year",
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    source: Optional[str] = None,
+    model: Optional[str] = None,
+    measurement_kind: Optional[str] = None,
+    token_basis: Optional[str] = None,
+    refresh: bool = False,
+    cache_only: bool = False,
+) -> Dict[str, Any]:
+    """Model output throughput, for the standalone Model output speed page.
+
+    Lazy by design: the report's normal load never calls this, and the dashboard
+    only requests it once the page is open. Two views share one route so the
+    hourly view cannot disagree with the table it summarises -- both are built
+    from the same grouped read of the same snapshot.
+
+    A rate here is always SUM(matched output tokens) / SUM(matched duration),
+    never an average of per-call rates, so one long call counts for the time it
+    actually took. Absence is null throughout: an unmeasured model or an empty
+    hour has no rate rather than a zero one.
+    """
+    _validate_date_params(date_from, date_to)
+    if view not in ("across-models", "time-of-day"):
+        raise HTTPException(status_code=400, detail="unknown view")
+    if _dev_fixture_mode() == "dense":
+        return {
+            "schema_version": speed_report.SPEED_CACHE_CONTRACT_VERSION,
+            "view": view,
+            "metric": "output_tok_per_s",
+            "aggregation": "sum_tokens_over_sum_duration",
+            "range": resolve_period(period, date_from, date_to),
+            "rows": [],
+            "source_status": [],
+            "note": "fixture_mode",
+            "available_measurement_range": None,
+        }
+    try:
+        if view == "time-of-day":
+            error = speed_report.validate_key(source or "", model or "", measurement_kind or "", token_basis or "")
+            if error:
+                raise HTTPException(status_code=400, detail=error)
+        resolved = resolve_period(period, date_from, date_to)
+        from .speed_cache import payload
+        return payload(str(resolved['from']), str(resolved['to']), view=view,
+                       source=source or '', model=model or '', kind=measurement_kind or '',
+                       basis=token_basis or '', refresh=refresh, cache_only=cache_only)
+    except UsageDatabaseSchemaTooNewError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except UsageDatabaseNeedsMigrationError as e:
+        # 503, unlike the too-new case above: this database does become readable
+        # on its own, once the sync that runs the migration chain gets its turn.
+        # 503 is the dashboard's retry signal, and fetchJsonWithRetry already
+        # backs off on it, so a report opened during a first-run migration fills
+        # itself in instead of showing the reader a server error.
+        raise HTTPException(status_code=503, detail=str(e))
+    except CacheBackpressureError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except sqlite3.OperationalError as exc:
+        _raise_speed_database_error(exc)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _raise_speed_database_error(exc: sqlite3.OperationalError):
+    # A publication writer is temporary backpressure, not a failed timing read.
+    code = getattr(exc, 'sqlite_errorcode', None)
+    if code is None:
+        # Python 3.10 lacks SQLite exception codes and SQLITE_BUSY/LOCKED.
+        # Match only SQLite's lock messages; unrelated SQL failures stay 500.
+        message = str(exc).strip().lower()
+        busy = any(message == prefix or message.startswith(prefix + ':') for prefix in (
+            'database is locked', 'database is busy',
+            'database table is locked', 'database schema is locked',
+        ))
+    else:
+        # Stable SQLite primary codes: BUSY=5, LOCKED=6, including extended codes.
+        busy = (code & 255) in (5, 6)
+    if busy:
+        raise HTTPException(status_code=503, detail="Timing cache publication is busy; retry shortly.") from exc
+    raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/output-speed/jobs/{job_id}")
+def get_output_speed_job(job_id: str):
+    from .speed_cache import job_status
+    try:
+        return job_status(job_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Timing job not found")
+
+
+@app.get("/api/output-speed/jobs/{job_id}/events")
+async def output_speed_job_events(job_id: str, request: Request):
+    """Visible-page subscription, independent of the report compute semaphore."""
+    import asyncio
+    from fastapi.responses import StreamingResponse
+    from .speed_cache import job_status
+    async def events():
+        previous = None
+        while not await request.is_disconnected():
+            try:
+                status = job_status(job_id)
+            except KeyError:
+                yield 'event: error\ndata: {"state":"error","error":"Timing job not found"}\n\n'
+                return
+            encoded = json.dumps(status, separators=(',', ':'))
+            if encoded != previous:
+                yield 'data: ' + encoded + '\n\n'
+                previous = encoded
+            if status['state'] in ('ready', 'error'):
+                return
+            await asyncio.sleep(1)
+    return StreamingResponse(events(), media_type='text/event-stream',
+                             headers={'Cache-Control':'no-store','X-Accel-Buffering':'no'})
+
+
+@app.post("/api/output-speed/ensure")
+def ensure_output_speed_sessions(body: Dict[str, Any]):
+    from .session_speed import ensure_sessions
+    try:
+        _validate_date_params(body.get('date_from'),body.get('date_to'))
+        if not body.get('date_from') or not body.get('date_to'):
+            raise ValueError('date_from and date_to are required')
+        return ensure_sessions(body.get('sessions',[]),body['date_from'],body['date_to'],bool(body.get('refresh')))
+    except ValueError as exc:
+        raise HTTPException(status_code=400,detail=str(exc))
+    except sqlite3.OperationalError as exc:
+        _raise_speed_database_error(exc)
+
+
+@app.post("/api/session-speeds")
+def get_session_speeds(body: Dict[str, Any]):
+    from .session_speed import batch_summaries
+    try:
+        _validate_date_params(body.get('date_from'), body.get('date_to'))
+        if not body.get('date_from') or not body.get('date_to'):
+            raise ValueError('date_from and date_to are required')
+        return batch_summaries(body.get('sessions', []), body['date_from'], body['date_to'])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except sqlite3.OperationalError as exc:
+        _raise_speed_database_error(exc)
+
+
+@app.get("/api/session-speed")
+def get_session_speed(tool: str, session_id: str, date_from: Optional[str] = None,
+                      date_to: Optional[str] = None, model: Optional[str] = None,
+                      measurement_kind: Optional[str] = None, token_basis: Optional[str] = None,
+                      max_points: int = 1000, refresh: bool = False, cache_only: bool = False):
+    from .session_speed import timeline
+    try:
+        _validate_date_params(date_from,date_to)
+        return timeline(tool,session_id,date_from=date_from,date_to=date_to,model=model,
+                        kind=measurement_kind,basis=token_basis,max_points=max_points,refresh=refresh,cache_only=cache_only)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except sqlite3.OperationalError as exc:
+        _raise_speed_database_error(exc)
 
 
 # NOTE: the handlers below are intentionally ``async def`` so they run on the event

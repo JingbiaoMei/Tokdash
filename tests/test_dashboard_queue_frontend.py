@@ -40,6 +40,7 @@ def _extract_js_function(src: str, signature: str) -> str:
 HARNESS = """
 // --- stand-ins for the page the function lives in ---------------------------
 let updateInFlight = false;
+const usageReportSpeedState = {active: false};
 let inFlightDashboardKey = null;
 let pendingDashboardRequest = null;
 let inFlightResultDiscarded = false;
@@ -303,6 +304,16 @@ async function main() {
     out.afterOtherRangeRefresh = log.refreshReports.length;
   }
 
+  if (scenario === 'leave-for-speed-before-overview-lands') {
+    pick('Z');
+    await settle();
+    usageReportSpeedState.active = true;
+    resolveRange('Z');
+    await settle(); await settle();
+    out.activeLoads = log.activeLoads;
+    out.updateInFlight = updateInFlight;
+  }
+
   process.stdout.write(JSON.stringify(out));
 }
 
@@ -378,6 +389,12 @@ def test_a_superseded_failure_is_not_shown(tmp_path):
     assert out["alerts"] == []
     assert out["updateInFlight"] is False
     assert out["pending"] is None
+
+
+def test_overview_completion_does_not_queue_unviewed_work_on_speed(tmp_path):
+    out = _run(tmp_path, 'leave-for-speed-before-overview-lands')
+    assert out['activeLoads'] == [], 'the obsolete Overview load queued an active-time merge on Speed'
+    assert out['updateInFlight'] is False
 
 
 def test_returning_to_a_range_whose_result_was_discarded_refetches(tmp_path):

@@ -470,8 +470,10 @@ five, sort `combined_models` client-side.
 contains `key` (`YYYY-MM-DDTHH`, `YYYY-MM-DD`, or `YYYY-MM`), `tokens`, unrounded `cost`,
 `messages`, `input` (including cache writes), `cache` (cache reads), and `models`
 (canonical model name to tokens). It uses the headline's pricing and message
-counting rules. A missing bucket at or before `timestamp` means zero recorded
-usage; a future bucket is unknown. Hourly responses also provide `keys` listing
+counting rules. Model visibility is evaluated across the selected range: a
+tokenless bucket retains its fees and messages when that model has visible
+token usage elsewhere in the range. A missing bucket at or before `timestamp`
+means zero recorded usage; a future bucket is unknown. Hourly responses also provide `keys` listing
 the clock hours that exist on that date. Repeated hours are combined; an hour
 skipped by a clock change is unavailable. Cache rate is `cache / (input + cache)`;
 no prompt input is unavailable. Monthly buckets contain only the selected portion

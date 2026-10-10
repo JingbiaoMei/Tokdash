@@ -111,6 +111,7 @@ def worker(args):
 
     sessions._active_time_window = active_window
     print(json.dumps({"ready": True, "rows": len(rows), "corpus_days": corpus_days,
+                      "repo_revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=args.repo, text=True).strip(),
                       "corpus_start": str(corpus_start), "corpus_end": str(today)}), flush=True)
     for line in sys.stdin:
         key = json.loads(line)["case"]
@@ -236,6 +237,7 @@ def main():
             log.close()
         temporary.cleanup()
     report = {"rows": results["candidate"]["rows"], "repeats": args.repeats,
+              "revisions": {label: results[label]["repo_revision"] for label in results},
               "method": "randomized paired processes; complete common calendar ranges; Usage and Active Time including previous comparison; loaded native fallback and agent intervals; complete JSON encoding; 24-hour events; 3 warmups",
               "corpus": {k: results["candidate"][k] for k in ("corpus_days", "corpus_start", "corpus_end")},
               "database_storage": str(database_dir),

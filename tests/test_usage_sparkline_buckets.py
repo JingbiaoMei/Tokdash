@@ -314,3 +314,36 @@ def test_shared_clock_and_bucket_pass_matches_independent_aggregations(granulari
     assert clock == _merged_interval_ms(raw)
     assert buckets == interval_buckets(raw, granularity, (first,last))
     assert sum(row["agent_ms"] for row in buckets["buckets"]) == sum(end-start for start,end in raw)
+
+
+@pytest.mark.parametrize("granularity,last_day,offset", [
+    ("hour", "2024-01-01", timedelta(hours=2)),
+    ("day", "2024-01-07", timedelta(days=2)),
+    ("month", "2024-12-31", timedelta(days=70)),
+])
+@pytest.mark.parametrize("source", ["codex", "openclaw"])
+def test_tokenless_buckets_keep_fees_and_messages_of_visible_models(tmp_path, granularity, last_day, offset, source):
+    since, until = parse_date_range("2024-01-01", last_day)
+    first = int(since.timestamp()*1000)
+    empty = {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "reasoning": 0}
+    base = {**entries()[0], "source": source, "model": "model-a"}
+    raw = [{**base, **empty, "timestamp": first, "cost": .03, "messageCount": 7},
+           {**base, "timestamp": int((since+offset).timestamp()*1000)},
+           {**base, **empty, "model": "unused-model", "timestamp": first, "cost": .9, "messageCount": 20}]
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    store.sync_source(source, build_source_signature(files=[[source, 1, 1]], parser={"v":1}), lambda: raw)
+    if source == "codex":
+        control = store.aggregate_entries(sources=[source], since=since, until=until)
+        actual = store.aggregate_entries(sources=[source], since=since, until=until, bucket_granularity=granularity)
+        assert {key: value for key, value in actual.items() if key != "sparkline"} == control
+    else:
+        actual = _openclaw_usage_from_store(store, since, until)
+        assert set(actual["models"]) == {"model-a"}
+    assert actual["total_messages"] == 11
+    assert actual["total_cost"] == pytest.approx(.23)
+    buckets = actual["sparkline"]["buckets"]
+    assert len(buckets) == 2
+    assert buckets[0]["tokens"] == 0
+    assert buckets[0]["messages"] == 7 and buckets[0]["cost"] == pytest.approx(.03)
+    assert sum(row["messages"] for row in buckets) == actual["total_messages"]
+    assert sum(row["cost"] for row in buckets) == pytest.approx(actual["total_cost"])

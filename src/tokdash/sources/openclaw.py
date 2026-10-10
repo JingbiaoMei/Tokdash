@@ -681,7 +681,19 @@ def _openclaw_usage_from_store(
     total_tokens_in = 0
     total_tokens_cache = 0
 
+    visible_models = None
+    if granularity:
+        # Preserve the original whole-model visibility rule after partitioning.
+        # Tokenless buckets can carry fees/messages for an otherwise used model.
+        model_tokens: dict[Any, int] = {}
+        fields = ("input_sum", "output_sum", "cache_read_sum", "cache_write_sum")
+        for row in rows:
+            model_tokens[row["model"]] = model_tokens.get(row["model"], 0) + sum(int(row[field] or 0) for field in fields)
+        visible_models = {model for model, tokens in model_tokens.items() if tokens != 0}
+
     for row in rows:
+        if visible_models is not None and row["model"] not in visible_models:
+            continue
         model = str(row["model"] or "unknown")
         input_raw = int(row["input_sum"] or 0)
         cache_write = int(row["cache_write_sum"] or 0)
@@ -691,7 +703,7 @@ def _openclaw_usage_from_store(
         tokens = tokens_in + tokens_out + tokens_cache
         cost = float(row["cost_sum"] or 0.0)
         messages = int(row["message_count_sum"] or 0)
-        if tokens == 0:
+        if tokens == 0 and visible_models is None:
             continue
 
         stats = models.setdefault(model, {"tokens": 0, "tokens_in": 0, "tokens_out": 0,

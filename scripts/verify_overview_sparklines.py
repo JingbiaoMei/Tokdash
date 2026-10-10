@@ -10,20 +10,24 @@ import json
 import math
 import os
 from pathlib import Path
+import signal
 import statistics
 import subprocess
 import time
 import threading
 from playwright.sync_api import sync_playwright
 
+PRESETS=['today','yesterday','last7days','lastWeek','last14days','last4weeks','thisMonth','lastMonth','thisYear','lastYear']
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--baseline', required=True, type=Path)
-parser.add_argument('--repeats', type=int, default=24)
+parser.add_argument('--repeats', type=int, default=32)
 parser.add_argument('--output', type=Path, default=Path('output/sparkline-validation'))
 parser.add_argument('--port', type=int, default=55791)
 parser.add_argument('--server-python', default='python3')
 parser.add_argument('--visual-only', action='store_true', help='Check every preset and responsive curves without repeated timings')
 parser.add_argument('--performance-only', action='store_true', help='Skip preset screenshots already checked by a previous run')
+parser.add_argument('--presets', nargs='+', choices=PRESETS, default=PRESETS, help='Bounded diagnostic subset; default covers all presets')
+parser.add_argument('--profile', action='store_true', help='Record synchronous dashboard function durations for diagnosis')
 args = parser.parse_args()
 if args.repeats < 1:
     parser.error('--repeats must be positive')
@@ -35,27 +39,39 @@ OUT = args.output.resolve()
 OUT.mkdir(parents=True, exist_ok=True)
 REPEATS = args.repeats
 servers=[]
+REVISIONS={label:subprocess.check_output(['git','rev-parse','HEAD'],cwd=repo,text=True).strip()
+    for label,repo in [('baseline',BASELINE),('candidate',ROOT)]}
+
+def interrupted(_signum, _frame):
+    # Run finally on an interrupted benchmark, so its isolated fixtures close.
+    raise KeyboardInterrupt
+
+signal.signal(signal.SIGTERM, interrupted)
 
 def start(repo, port, label):
     env=dict(os.environ,PYTHONPATH=str(repo/'src'),TOKDASH_DATA_DIR=str(OUT/(label+'-data')))
     proc=subprocess.Popen([args.server_python,'main.py','--no-open','--dev-fixture','dense','--dev-seed','17','--port',str(port)],cwd=repo,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
     servers.append(proc)
-    ready = threading.Event()
+    startup_done = threading.Event()
+    ready = False
     startup = []
     def drain():
+        nonlocal ready
         with (OUT / (label + '-server.log')).open('w') as log:
             for line in proc.stdout:
                 log.write(line)
                 if len(startup) < 30:
                     startup.append(line)
                 if 'Uvicorn running on' in line:
-                    ready.set()
+                    ready = True
+                    startup_done.set()
+        startup_done.set()
     threading.Thread(target=drain, daemon=True).start()
-    if not ready.wait(20):
+    if not startup_done.wait(20) or not ready:
         raise RuntimeError('Server did not become ready: ' + ''.join(startup))
     return 'http://127.0.0.1:'+str(port)
 
-PRESETS=['today','yesterday','last7days','lastWeek','last14days','last4weeks','thisMonth','lastMonth','thisYear','lastYear']
+SELECTED_PRESETS=args.presets
 METRICS=['sparklineTokens','sparklineCost','sparklineMessages','sparklineActiveTime','sparklineCacheRate','sparklineTopModel']
 SETTLED="""() => lastUsageResponse && overviewActiveTimeState.status === 'ready' && statsCache.default && !updateInFlight"""
 
@@ -85,8 +101,27 @@ try:
         context.add_init_script("""window.__sparklineLongTasks = [];
           new PerformanceObserver(list => window.__sparklineLongTasks.push(...list.getEntries().map(
             entry => ({start_ms:entry.startTime,duration_ms:entry.duration})))).observe({type:'longtask',buffered:true});""")
+        if args.profile:
+            context.add_init_script("""window.__sparklineFunctionTimes=[];
+              document.addEventListener('DOMContentLoaded',()=>{
+                for(const name of ['renderOverviewTab','renderOverviewSparklines','deriveSparklineCurves',
+                  'sparklineShape','fitKpiValue','fitOverviewKpis','renderOverviewProfilePreview',
+                  'renderOverviewActiveTime','updateTokenCompositionBar','updateToolChart','updateModelChart',
+                  'updateAppsBreakdown','updateCombinedModelsTable','updateToolsTable','renderYearHeatmap',
+                  'renderMonthHeatmap','buildOverviewProfilePreview','renderOverviewActivityInsights',
+                  'reconcileTodayProfileContribution','combineUsagePayloads']) {
+                  const original=window[name]; if(typeof original!=='function')continue;
+                  window[name]=function(...args){const start=performance.now();try{return original.apply(this,args)}
+                    finally{window.__sparklineFunctionTimes.push({name,duration_ms:performance.now()-start})}};
+                }
+              });""")
         errors=[]
         pages={key:context.new_page() for key in urls}
+        sessions={key:context.new_cdp_session(page) for key,page in pages.items()}
+        for session in sessions.values():
+            session.send('Performance.enable')
+        def browser_metrics(label):
+            return {row['name']:row['value'] for row in sessions[label].send('Performance.getMetrics')['metrics']}
         for page in pages.values():
             page.on('pageerror',lambda error:errors.append(str(error)))
         initial={};screens=[]
@@ -104,7 +139,7 @@ try:
             for width,height in [(1440,1050),(390,844)]:
                 page=pages['candidate'];page.set_viewport_size({'width':width,'height':height})
                 page.bring_to_front()
-                for selection in PRESETS:
+                for selection in SELECTED_PRESETS:
                     select(page,selection)
                     page.wait_for_function("""ids => ids.every(id=>document.getElementById(id).dataset.reason === 'drawn')""",
                         arg=METRICS,timeout=8000)
@@ -129,15 +164,15 @@ try:
             pages['candidate'].set_viewport_size({'width':1440,'height':1050})
         (OUT/'browser-visual.json').write_text(json.dumps({'screens':screens,'errors':errors,'presets':present},indent=2)+'\n')
         if not args.visual_only:
-            samples={selection:{label:[] for label in pages} for selection in PRESETS}
-            settled_samples={selection:{label:[] for label in pages} for selection in PRESETS}
+            samples={selection:{label:[] for label in pages} for selection in SELECTED_PRESETS}
+            settled_samples={selection:{label:[] for label in pages} for selection in SELECTED_PRESETS}
             requests={label:[] for label in pages}
             for label,page in pages.items():
                 page.on('request',lambda request,key=label:requests[key].append(request.url.split('/api/',1)[1]) if '/api/' in request.url else None)
-            request_sets={selection:{label:[] for label in pages} for selection in PRESETS}
-            diagnostics={selection:{label:[] for label in pages} for selection in PRESETS}
+            request_sets={selection:{label:[] for label in pages} for selection in SELECTED_PRESETS}
+            diagnostics={selection:{label:[] for label in pages} for selection in SELECTED_PRESETS}
             for i in range(REPEATS):
-                for selection in PRESETS:
+                for selection in SELECTED_PRESETS:
                     for label in (['baseline','candidate'] if i%2==0 else ['candidate','baseline']):
                         page=pages[label];page.bring_to_front()
                         # Every range change starts from a freshly loaded Today page.
@@ -146,8 +181,10 @@ try:
                         if selection!='today':
                             page.reload(wait_until='domcontentloaded');page.wait_for_function(SETTLED,timeout=15000)
                             page.wait_for_load_state('networkidle')
-                        page.evaluate("performance.clearResourceTimings();window.__sparklineLongTasks=[]")
-                        requests[label].clear();t=time.perf_counter()
+                        page.evaluate("performance.clearResourceTimings();window.__sparklineLongTasks=[];window.__sparklineFunctionTimes=[]")
+                        requests[label].clear()
+                        before_metrics=browser_metrics(label)
+                        t=time.perf_counter()
                         if selection=='today':
                             page.reload(wait_until='domcontentloaded');page.wait_for_function(SETTLED,timeout=15000)
                         else:
@@ -157,13 +194,18 @@ try:
                         samples[selection][label].append((time.perf_counter()-t)*1000)
                         settled_samples[selection][label].append(settled_ms)
                         request_sets[selection][label].append(dict(Counter(requests[label])))
-                        diagnostics[selection][label].append(page.evaluate("""settled => ({settled_ms:settled,
-                          long_tasks:window.__sparklineLongTasks,resources:performance.getEntriesByType('resource')
+                        after_metrics=browser_metrics(label)
+                        timings=page.evaluate("""settled => ({settled_ms:settled,
+                          long_tasks:window.__sparklineLongTasks,function_times:window.__sparklineFunctionTimes,resources:performance.getEntriesByType('resource')
                             .filter(entry=>entry.name.includes('/api/')).map(entry=>({path:entry.name.split('/api/')[1],
-                              start_ms:entry.startTime,duration_ms:entry.duration,bytes:entry.encodedBodySize}))})""",settled_ms))
+                              start_ms:entry.startTime,duration_ms:entry.duration,bytes:entry.encodedBodySize}))})""",settled_ms)
+                        timings['browser_cpu_ms']={key:(after_metrics[key]-before_metrics[key])*1000
+                            for key in ('TaskDuration','ScriptDuration','LayoutDuration','RecalcStyleDuration')}
+                        timings['js_heap_bytes']=after_metrics['JSHeapUsedSize']
+                        diagnostics[selection][label].append(timings)
                 print(f'Completed paired browser iteration {i+1}/{REPEATS}',flush=True)
             cases={}
-            for selection in PRESETS:
+            for selection in SELECTED_PRESETS:
                 before,after=summary(samples[selection]['baseline']),summary(samples[selection]['candidate'])
                 budget=max(10,before['p95_ms']*.1)
                 settled_before=summary(settled_samples[selection]['baseline'])
@@ -176,6 +218,7 @@ try:
                     'latency_pass':after['p95_ms']<=before['p95_ms']+budget,
                     'requests_equal':request_sets[selection]['baseline']==request_sets[selection]['candidate']}
             report={'repeats_per_range':REPEATS,'cases':cases,'samples':samples,'settled_samples':settled_samples,
+                'revisions':REVISIONS,
                 'requests':request_sets,'diagnostics':diagnostics,'errors':errors,'screens':screens,
                 'baseline':str(BASELINE),'candidate':str(ROOT),
                 'method':'alternating foreground tabs; same seed; Today reload and all nine range selections from fresh Today; latency includes network-idle, settled timings recorded separately',

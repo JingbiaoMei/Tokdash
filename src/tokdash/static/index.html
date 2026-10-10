@@ -14124,9 +14124,15 @@
       return result;
     }
 
+    function sparklineSetAttribute(node, name, value) {
+      // Usage, Stats and Agent Time settle independently. An unchanged curve
+      // should not invalidate SVG styling and painting on each completion.
+      if (node && node.getAttribute(name) !== String(value)) node.setAttribute(name, value);
+    }
+
     function sparklineSetLabel(svg, text) {
-      svg.setAttribute('aria-label', text);
-      svg.setAttribute('role', 'img');
+      sparklineSetAttribute(svg, 'aria-label', text);
+      sparklineSetAttribute(svg, 'role', 'img');
       let title = svg.__sparklineTitle;
       if (!title) {
         title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
@@ -14134,7 +14140,7 @@
         if (svg.firstChild) svg.insertBefore(title, svg.firstChild);
         else svg.appendChild(title);
       }
-      title.textContent = text;
+      if (title.textContent !== text) title.textContent = text;
     }
 
     function renderOverviewSparklines(usage = lastUsageResponse, options = {}) {
@@ -14146,13 +14152,13 @@
         const shape = sparklineShape(series.values, card.unit);
         const lineEl = document.getElementById(`${card.svg}Path`);
         const areaEl = document.getElementById(`${card.svg}Area`);
-        if (lineEl) lineEl.setAttribute('d', shape.line);
-        if (areaEl) areaEl.setAttribute('d', shape.area);
+        sparklineSetAttribute(lineEl, 'd', shape.line);
+        sparklineSetAttribute(areaEl, 'd', shape.area);
         const drawn = Boolean(shape.line) && series.points > 0;
-        svg.setAttribute('data-granularity', curves.granularity);
-        svg.setAttribute('data-metric', card.id);
-        svg.setAttribute('data-points', String(drawn ? series.points : 0));
-        svg.setAttribute('data-reason', drawn ? 'drawn' : (series.reason || 'noDaily'));
+        sparklineSetAttribute(svg, 'data-granularity', curves.granularity);
+        sparklineSetAttribute(svg, 'data-metric', card.id);
+        sparklineSetAttribute(svg, 'data-points', String(drawn ? series.points : 0));
+        sparklineSetAttribute(svg, 'data-reason', drawn ? 'drawn' : (series.reason || 'noDaily'));
         const lines = [];
         if (drawn) {
           const resolutionKey = { hour: 'sparklineResolutionHourly', day: 'sparklineResolutionDaily', month: 'sparklineResolutionMonthly' }[curves.granularity];

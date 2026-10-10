@@ -43,5 +43,12 @@ else
     printf 'Browser benchmark completed with failed checks.\n'
     status=1
 fi
+if "$python_bin" scripts/summarize_sparkline_benchmarks.py "$output_dir" --baseline "$baseline" \
+    > "$output_dir/comparison-summary.log" 2>&1; then
+    printf 'Complete JSON/CSV comparison exported; all checks passed.\n'
+else
+    printf 'Comparison contains failed checks or incomplete reports; see %s/comparison-summary.log\n' "$output_dir"
+    status=1
+fi
 printf 'Validation complete; reports in %s (exit status %s).\n' "$output_dir" "$status"
 exit "$status"

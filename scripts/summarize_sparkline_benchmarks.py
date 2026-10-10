@@ -7,6 +7,7 @@ import argparse
 import csv
 from datetime import datetime, timezone
 import json
+import math
 from pathlib import Path
 import re
 import statistics
@@ -23,10 +24,14 @@ def main():
     if bool(args.unchanged) != bool(args.unchanged_revision):
         parser.error("--unchanged and --unchanged-revision must be supplied together")
     root = args.output
+    revisions = {"baseline": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=args.baseline, text=True).strip(),
+                 "candidate": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()}
     rows = []
     datasets = {}
     for workload in ("regular", "dense"):
         report = json.loads((root / workload / "aggregation-performance.json").read_text())
+        if "revisions" in report:
+            assert report["revisions"] == revisions, "Checkout changed after backend measurement"
         assert report["repeats"] == 96, workload
         source_reports = {case: str(root / workload / "aggregation-performance.json") for case in report["cases"]}
         if args.unchanged:
@@ -58,7 +63,9 @@ def main():
                 "source_report": source_reports[case],
             })
     browser = json.loads((root / "browser/browser-performance.json").read_text())
-    assert browser["repeats_per_range"] == 32 and len(browser["cases"]) == 10
+    if "revisions" in browser:
+        assert browser["revisions"] == revisions, "Checkout changed after browser measurement"
+    assert browser["repeats_per_range"] >= 32 and len(browser["cases"]) == 10
     diagnostics = {}
     for case, values in browser["cases"].items():
         rows.append({
@@ -83,6 +90,18 @@ def main():
                 "median_api_bytes": statistics.median(
                     sum(resource["bytes"] for resource in sample["resources"]) for sample in samples),
             }
+            if all("browser_cpu_ms" in sample for sample in samples):
+                cpu = {}
+                for metric in ("TaskDuration", "ScriptDuration", "LayoutDuration", "RecalcStyleDuration"):
+                    values_ms = sorted(sample["browser_cpu_ms"][metric] for sample in samples)
+                    cpu[metric] = {"median_ms": statistics.median(values_ms),
+                                   "p95_ms": values_ms[math.ceil(len(values_ms) * .95) - 1]}
+                diagnostics[case][label]["cpu"] = cpu
+                diagnostics[case][label]["median_js_heap_bytes"] = statistics.median(
+                    sample["js_heap_bytes"] for sample in samples)
+                rows[-1][label + "_cpu_p95_ms"] = cpu["TaskDuration"]["p95_ms"]
+                rows[-1][label + "_layout_p95_ms"] = cpu["LayoutDuration"]["p95_ms"]
+                rows[-1][label + "_js_heap_bytes"] = diagnostics[case][label]["median_js_heap_bytes"]
     visual = json.loads((root / "browser/browser-visual.json").read_text())
     assert len(visual["screens"]) == 20
     assert {screen["width"] for screen in visual["screens"]} == {390, 1440}
@@ -100,11 +119,11 @@ def main():
         and row.get("settled_pass", True) and row.get("requests_equal", True) for row in rows)
     report = {
         "created_utc": datetime.now(timezone.utc).isoformat(),
-        "baseline_revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=args.baseline, text=True).strip(),
-        "candidate_revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+        "baseline_revision": revisions["baseline"],
+        "candidate_revision": revisions["candidate"],
         "tests": {"passed": int(tests[1]), "skipped": int(tests[2])},
         "visual_checks": curve_checks, "screenshots": len(visual["screens"]),
-        "backend_paired_samples": 96 * 60, "browser_paired_samples": 32 * 10,
+        "backend_paired_samples": 96 * 60, "browser_paired_samples": browser["repeats_per_range"] * 10,
         "gate": browser["gate"], "datasets": datasets,
         "unchanged_paths_revision": args.unchanged_revision,
         "campaign_note": "Usage/native results retained from the complete campaign; all Agent Time cases and browser checks rerun after the interval lifetime change." if args.unchanged else "All cases from one complete campaign.",

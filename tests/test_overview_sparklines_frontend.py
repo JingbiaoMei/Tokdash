@@ -1679,6 +1679,39 @@ def test_monthly_curves_leave_future_months_unknown_and_bound_leap_years(bucket_
     assert bucket_results["overLimit"] is None
 
 
+def test_settling_unchanged_responses_does_not_repaint_curves_but_range_changes_clear_them(tmp_path):
+    tail = r"""
+const f = weekFixture();
+scenario(f.rows, f.usage);
+const options = {today:parseDateKey('2026-09-27')};
+renderOverviewSparklines(f.usage, options);
+let writes = 0;
+for (const el of nodes.values()) {
+  const original = el.setAttribute;
+  el.setAttribute = function(...args) { writes++; return original.apply(this,args); };
+  if (el.__sparklineTitle) {
+    const title = el.__sparklineTitle;
+    let text = title.textContent;
+    Object.defineProperty(title,'textContent',{
+      get() { return text; }, set(value) { writes++; text = value; },
+    });
+  }
+}
+renderOverviewSparklines(f.usage, options);
+const repeatWrites = writes;
+currentStartDate = parseDateKey('2026-09-20');
+currentEndDate = parseDateKey('2026-09-26');
+renderOverviewSparklines(f.usage, options);
+process.stdout.write(JSON.stringify({repeatWrites,changedWrites:writes,
+  paths:SPARKLINE_CARDS.map(card=>node(card.svg+'Path').attrs.d),fetchCalls}));
+"""
+    result = _run_script(tmp_path, _harness_script(_source(), tail), "no-redundant-paint")
+    assert result["repeatWrites"] == 0
+    assert result["changedWrites"] > 0
+    assert result["paths"] == [""] * 6
+    assert result["fetchCalls"] == 0
+
+
 @pytest.mark.parametrize("first,last,granularity,points", [
     ("2026-09-21", "2026-09-21", "hour", 24),
     ("2024-01-01", "2024-12-31", "month", 12),

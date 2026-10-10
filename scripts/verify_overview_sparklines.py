@@ -117,6 +117,29 @@ try:
               });""")
         errors=[]
         pages={key:context.new_page() for key in urls}
+        pending={key:set() for key in pages}
+        last_network={key:time.perf_counter() for key in pages}
+        def request_started(label, request):
+            pending[label].add(request)
+            last_network[label]=time.perf_counter()
+        def request_finished(label, request):
+            pending[label].discard(request)
+            last_network[label]=time.perf_counter()
+        for label,page in pages.items():
+            page.on('request',lambda request,key=label:request_started(key,request))
+            page.on('requestfinished',lambda request,key=label:request_finished(key,request))
+            page.on('requestfailed',lambda request,key=label:request_finished(key,request))
+        def wait_network_quiet(label):
+            # A navigation's networkidle event can predate the delayed Stats
+            # request. Measure a fresh 500 ms quiet interval after UI readiness,
+            # using actual request completion events in both versions.
+            page=pages[label]
+            deadline=time.perf_counter()+15
+            while pending[label] or time.perf_counter()-last_network[label] < .5:
+                if time.perf_counter()>=deadline:
+                    raise RuntimeError(f'{label} did not reach network quiet')
+                delay=.05 if pending[label] else max(.001,.5-(time.perf_counter()-last_network[label]))
+                page.wait_for_timeout(delay*1000)
         sessions={key:context.new_cdp_session(page) for key,page in pages.items()}
         for session in sessions.values():
             session.send('Performance.enable')
@@ -180,7 +203,7 @@ try:
                         # menu selection after the same initial page has settled.
                         if selection!='today':
                             page.reload(wait_until='domcontentloaded');page.wait_for_function(SETTLED,timeout=15000)
-                            page.wait_for_load_state('networkidle')
+                            wait_network_quiet(label)
                         page.evaluate("performance.clearResourceTimings();window.__sparklineLongTasks=[];window.__sparklineFunctionTimes=[]")
                         requests[label].clear()
                         before_metrics=browser_metrics(label)
@@ -190,7 +213,7 @@ try:
                         else:
                             select(page,selection)
                         settled_ms=(time.perf_counter()-t)*1000
-                        page.wait_for_load_state('networkidle')
+                        wait_network_quiet(label)
                         samples[selection][label].append((time.perf_counter()-t)*1000)
                         settled_samples[selection][label].append(settled_ms)
                         request_sets[selection][label].append(dict(Counter(requests[label])))
@@ -207,6 +230,9 @@ try:
                             for key in ('TaskDuration','ScriptDuration','LayoutDuration','RecalcStyleDuration')}
                         assert all(value>=0 for value in timings['browser_cpu_ms'].values()), timings
                         timings['js_heap_bytes']=after_metrics['JSHeapUsedSize']
+                        timings['network_quiet_ms']=(time.perf_counter()-last_network[label])*1000
+                        timings['pending_requests']=len(pending[label])
+                        assert not pending[label] and timings['network_quiet_ms']>=500, timings
                         diagnostics[selection][label].append(timings)
                 print(f'Completed paired browser iteration {i+1}/{REPEATS}',flush=True)
             cases={}
@@ -226,7 +252,7 @@ try:
                 'revisions':REVISIONS,
                 'requests':request_sets,'diagnostics':diagnostics,'errors':errors,'screens':screens,
                 'baseline':str(BASELINE),'candidate':str(ROOT),
-                'method':'alternating foreground tabs; same seed; Today reload and all nine range selections from fresh Today; latency includes network-idle, settled timings recorded separately',
+                'method':'alternating foreground tabs; same seed; Today reload and all nine range selections from fresh Today; latency includes a fresh 500 ms quiet interval after the last completed request, with settled timings gated separately',
                 'browser_cpu_method':'fresh-document counters for Today navigation; counter deltas for in-document range selection',
                 'gate':'candidate p95 <= baseline p95 + max(10 ms, 10% of baseline p95)'}
             (OUT/'browser-performance.json').write_text(json.dumps(report,indent=2)+'\n')

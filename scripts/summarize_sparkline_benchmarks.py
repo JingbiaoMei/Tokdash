@@ -20,6 +20,7 @@ def main():
     parser.add_argument("--baseline", required=True, type=Path)
     parser.add_argument("--unchanged", type=Path, help="Earlier complete campaign for unchanged Usage/native paths")
     parser.add_argument("--unchanged-revision", help="Revision tested by the earlier complete campaign")
+    parser.add_argument("--backend-campaign", type=Path, help="Completed backend campaign retained after a frontend-only change; verify non-static production sources match")
     args = parser.parse_args()
     if bool(args.unchanged) != bool(args.unchanged_revision):
         parser.error("--unchanged and --unchanged-revision must be supplied together")
@@ -27,21 +28,26 @@ def main():
     revisions = {"baseline": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=args.baseline, text=True).strip(),
                  "candidate": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()}
     measured_revisions = set()
-    def validate_revision(measured):
+    def validate_revision(measured, *, backend=False):
         assert measured["baseline"] == revisions["baseline"], "Baseline changed after measurement"
         # A validation-script edit does not change the feature being measured.
         # Preserve each actual revision and prove its production/tests match.
+        paths=["src", "tests"]
+        if backend and args.backend_campaign:
+            paths=["src", "main.py", "pyproject.toml", ":(exclude)src/tokdash/static"]
         assert subprocess.run(["git", "diff", "--quiet", measured["candidate"], revisions["candidate"],
-                               "--", "src", "tests"]).returncode == 0, "Production code changed after measurement"
+                               "--", *paths]).returncode == 0, "Production code changed after measurement"
         measured_revisions.add(measured["candidate"])
     rows = []
     datasets = {}
     for workload in ("regular", "dense"):
-        report = json.loads((root / workload / "aggregation-performance.json").read_text())
+        backend_root=args.backend_campaign or root
+        report_path=backend_root / workload / "aggregation-performance.json"
+        report = json.loads(report_path.read_text())
         if "revisions" in report:
-            validate_revision(report["revisions"])
+            validate_revision(report["revisions"], backend=True)
         assert report["repeats"] == 96, workload
-        source_reports = {case: str(root / workload / "aggregation-performance.json") for case in report["cases"]}
+        source_reports = {case: str(report_path) for case in report["cases"]}
         if args.unchanged:
             prior_path = args.unchanged / workload / "aggregation-performance.json"
             prior = json.loads(prior_path.read_text())
@@ -140,7 +146,8 @@ def main():
         "backend_paired_samples": 96 * 60, "browser_paired_samples": browser["repeats_per_range"] * 10,
         "gate": browser["gate"], "datasets": datasets,
         "unchanged_paths_revision": args.unchanged_revision,
-        "campaign_note": "Usage/native results retained from the complete campaign; all Agent Time cases and browser checks rerun after the interval lifetime change." if args.unchanged else "All cases from one complete campaign.",
+        "backend_campaign": str(args.backend_campaign) if args.backend_campaign else None,
+        "campaign_note": "All 60 backend cases retained after verifying all non-static production sources match; full tests and all browser cases rerun after the frontend-only change." if args.backend_campaign else "Usage/native results retained from the complete campaign; all Agent Time cases and browser checks rerun after the interval lifetime change." if args.unchanged else "All cases from one complete campaign.",
         "all_pass": passed, "cases": rows, "browser_diagnostics": diagnostics,
         "limits": "Synthetic warm-cache workloads on this machine; native source discovery is stubbed equally. Browser fixtures isolate rendering and requests from database aggregation. Timings do not guarantee identical performance on every installation.",
     }

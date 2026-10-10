@@ -21902,10 +21902,11 @@
     }
 
     function formatProfileAggregateTooltip(aggregate, cumulative = false, milestonesEnabled = false) {
-      const range = aggregate?.startDate && aggregate?.endDate
+      const singleDate = aggregate?.startDate === aggregate?.endDate;
+      // A daily cell uses one date in its title; avoid formatting an unused range.
+      const range = (cumulative || !singleDate) && aggregate?.startDate && aggregate?.endDate
         ? `${formatShortDate(aggregate.startDate, true)} → ${formatShortDate(aggregate.endDate, true)}`
         : '—';
-      const singleDate = aggregate?.startDate === aggregate?.endDate;
       const title = cumulative
         ? `${t('cumulative')} · ${range}`
         : (singleDate ? formatShortDate(aggregate.startDate, true) : range);

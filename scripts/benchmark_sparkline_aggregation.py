@@ -123,6 +123,7 @@ def worker(args):
             hi = bisect_left(stamps, int(until.timestamp()*1000))
             native_entries = [row for row in rows[lo:hi] if row["source"] != "openclaw"]
         enabled = gc.isenabled()
+        gc_before = [generation["collections"] for generation in gc.get_stats()]
         if args.gc_mode == "isolated":
             gc.disable()
         t = time.perf_counter()
@@ -144,6 +145,8 @@ def worker(args):
         encoded_bytes = len(json.dumps(data, separators=(",", ":")).encode())
         elapsed = (time.perf_counter()-t)*1000
         cpu_elapsed = (time.process_time()-cpu)*1000
+        gc_delta = [generation["collections"] - before
+                    for generation, before in zip(gc.get_stats(), gc_before)]
         if enabled:
             gc.enable()
         oracle = None
@@ -154,7 +157,8 @@ def worker(args):
             oracle = {"current_mills": mills, "previous_mills": previous_mills,
                       "total_cost": current_cost, "cost_prev": previous_cost,
                       "cost_pct": compute.pct_change(current_cost, previous_cost)}
-        print(json.dumps({"ms": elapsed, "cpu_ms": cpu_elapsed, "bytes": encoded_bytes, "oracle": oracle,
+        print(json.dumps({"ms": elapsed, "cpu_ms": cpu_elapsed, "gc_collections": gc_delta,
+                          "bytes": encoded_bytes, "oracle": oracle,
                           "totals": {field: data[field] for field in fields}}), flush=True)
 
 
@@ -174,9 +178,14 @@ def main():
     parser.add_argument("--database-dir", help="Override temporary SQLite storage (default: OS temporary filesystem)")
     parser.add_argument("--gc-mode", choices=("normal", "isolated"), default="normal",
                         help="isolated excludes cyclic garbage collection from timed aggregation; browser verification keeps normal GC")
+    parser.add_argument("--cpu", type=int, help="Pin both workers to this available CPU for a controlled comparison (Linux)")
     args = parser.parse_args()
     if args.rows_per_day < 1 or args.repeats < 1 or (args.corpus_days is not None and args.corpus_days < 1):
         parser.error("--rows-per-day, --repeats and --corpus-days must be positive")
+    if args.cpu is not None:
+        if not hasattr(os, "sched_getaffinity") or args.cpu not in os.sched_getaffinity(0):
+            parser.error("--cpu must name an available Linux CPU")
+        os.sched_setaffinity(0, {args.cpu})
     Path(args.output).mkdir(parents=True, exist_ok=True)
     if args.worker:
         worker(args)
@@ -184,7 +193,8 @@ def main():
     if not args.baseline:
         parser.error("--baseline is required")
     cases = [f"{kind}/{window}" for kind in args.kinds for window in args.windows]
-    results = {label: {"samples": {key: [] for key in cases}, "cpu_samples": {key: [] for key in cases}, "bytes": {}, "totals": {}, "oracle": {}}
+    results = {label: {"samples": {key: [] for key in cases}, "cpu_samples": {key: [] for key in cases},
+                      "gc_collections": {key: [] for key in cases}, "bytes": {}, "totals": {}, "oracle": {}}
                for label in ("baseline", "candidate")}
     processes = {}
     logs = []
@@ -221,6 +231,7 @@ def main():
                     if iteration >= 3:
                         results[label]["samples"][key].append(result["ms"])
                         results[label]["cpu_samples"][key].append(result["cpu_ms"])
+                        results[label]["gc_collections"][key].append(result["gc_collections"])
                         results[label]["bytes"][key] = result["bytes"]
                         results[label]["oracle"][key] = result["oracle"]
                         results[label]["totals"][key] = result["totals"]
@@ -242,6 +253,7 @@ def main():
               "corpus": {k: results["candidate"][k] for k in ("corpus_days", "corpus_start", "corpus_end")},
               "database_storage": str(database_dir),
               "gc_mode": args.gc_mode,
+              "cpu_affinity": sorted(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else None,
               "active_interval_clipping": "Each revision's production sessions._clip_intervals; source discovery stubbed equally",
               "gate": "candidate p95 <= baseline p95 + max(10 ms, 10% of baseline p95)",
               "correctness_gate": "Nonmonetary fields match baseline; candidate cents match exact integer-mill oracle; baseline cost drift allowed only within one cent at an exact half-cent boundary",

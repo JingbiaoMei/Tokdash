@@ -26,12 +26,20 @@ def main():
     root = args.output
     revisions = {"baseline": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=args.baseline, text=True).strip(),
                  "candidate": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()}
+    measured_revisions = set()
+    def validate_revision(measured):
+        assert measured["baseline"] == revisions["baseline"], "Baseline changed after measurement"
+        # A validation-script edit does not change the feature being measured.
+        # Preserve each actual revision and prove its production/tests match.
+        assert subprocess.run(["git", "diff", "--quiet", measured["candidate"], revisions["candidate"],
+                               "--", "src", "tests"]).returncode == 0, "Production code changed after measurement"
+        measured_revisions.add(measured["candidate"])
     rows = []
     datasets = {}
     for workload in ("regular", "dense"):
         report = json.loads((root / workload / "aggregation-performance.json").read_text())
         if "revisions" in report:
-            assert report["revisions"] == revisions, "Checkout changed after backend measurement"
+            validate_revision(report["revisions"])
         assert report["repeats"] == 96, workload
         source_reports = {case: str(root / workload / "aggregation-performance.json") for case in report["cases"]}
         if args.unchanged:
@@ -45,6 +53,8 @@ def main():
             source_reports.update({case: str(prior_path) for case in unaffected})
         assert len(report["cases"]) == 30, workload
         datasets[workload] = {key: report[key] for key in ("rows", "corpus", "gc_mode", "method")}
+        datasets[workload]["cpu_affinity"] = report.get("cpu_affinity")
+        datasets[workload]["measured_revisions"] = report.get("revisions")
         for case, values in report["cases"].items():
             rows.append({
                 "workload": workload, "case": case,
@@ -61,10 +71,12 @@ def main():
                 "totals_equal": values["totals_equal"],
                 "legacy_half_cent_rounding": values["baseline_rounding_drift"],
                 "source_report": source_reports[case],
+                "cpu_affinity": report.get("cpu_affinity"),
+                "measured_candidate_revision": report.get("revisions", {}).get("candidate"),
             })
     browser = json.loads((root / "browser/browser-performance.json").read_text())
     if "revisions" in browser:
-        assert browser["revisions"] == revisions, "Checkout changed after browser measurement"
+        validate_revision(browser["revisions"])
     assert browser["repeats_per_range"] >= 32 and len(browser["cases"]) == 10
     diagnostics = {}
     for case, values in browser["cases"].items():
@@ -80,6 +92,7 @@ def main():
             "candidate_settled_p95_ms": values["settled_candidate"]["p95_ms"],
             "settled_budget_ms": values["settled_budget_ms"],
             "settled_pass": values["settled_pass"], "requests_equal": values["requests_equal"],
+            "measured_candidate_revision": browser.get("revisions", {}).get("candidate"),
         })
         diagnostics[case] = {}
         for label in ("baseline", "candidate"):
@@ -121,6 +134,7 @@ def main():
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "baseline_revision": revisions["baseline"],
         "candidate_revision": revisions["candidate"],
+        "measured_candidate_revisions": sorted(measured_revisions),
         "tests": {"passed": int(tests[1]), "skipped": int(tests[2])},
         "visual_checks": curve_checks, "screenshots": len(visual["screens"]),
         "backend_paired_samples": 96 * 60, "browser_paired_samples": browser["repeats_per_range"] * 10,

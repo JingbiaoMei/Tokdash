@@ -28,6 +28,7 @@ from .activity_insights import (
 )
 from .compute import cache_hit_rate, pct_change, period_to_days, previous_period_range
 from .dateutil import local_midnight, parse_date_range
+from .usage_buckets import bucket_granularity, merged_interval_buckets, local_hour_keys
 from .pricing import PricingDatabase
 from .sources.coding_tools import (
     CODEX_DEFAULT_MODEL,
@@ -700,11 +701,13 @@ def _clip_intervals(
 ) -> list[tuple[int, int]]:
     """Trim intervals to the window, dropping the ones left empty."""
     clipped: list[tuple[int, int]] = []
+    since_ms = int(since_ms) if since_ms is not None else None
+    until_ms = int(until_ms) if until_ms is not None else None
     for start, end in intervals:
-        if since_ms is not None:
-            start = max(start, int(since_ms))
-        if until_ms is not None:
-            end = min(end, int(until_ms))
+        if since_ms is not None and start < since_ms:
+            start = since_ms
+        if until_ms is not None and end > until_ms:
+            end = until_ms
         if end > start:
             clipped.append((start, end))
     return clipped
@@ -776,22 +779,21 @@ def _session_active_intervals(
     return _clip_intervals(intervals, since_ms, until_ms)
 
 
-def _merged_interval_ms(intervals: Iterable[tuple[int, int]]) -> int:
+def _merged_interval_ms(intervals: Iterable[tuple[int, int]], *, presorted: bool = False) -> int:
     """Wall-clock covered by the intervals, counting overlap once."""
+    ordered = iter(intervals if presorted else sorted(intervals))
+    first = next(ordered, None)
+    if first is None:
+        return 0
+    start, end = first
     total = 0
-    start: Optional[int] = None
-    end = 0
-    for interval_start, interval_end in sorted(intervals):
-        if start is None:
-            start, end = interval_start, interval_end
-        elif interval_start > end:
+    for interval_start, interval_end in ordered:
+        if interval_start > end:
             total += end - start
             start, end = interval_start, interval_end
         elif interval_end > end:
             end = interval_end
-    if start is not None:
-        total += end - start
-    return total
+    return total + end - start
 
 
 # How each source's raw token counts map onto PricingDatabase.get_cost. Kept as
@@ -6738,16 +6740,32 @@ def get_active_time_data(
     include_codex_review = _include_codex_review_sessions(include_review_sessions)
     cap_ms = active_gap_cap_ms()
 
+    since_ms, until_ms = _window_bounds(period, date_from, date_to)
     by_tool, unavailable, all_intervals = _active_time_window(
-        *_window_bounds(period, date_from, date_to), include_codex_review=include_codex_review
+        since_ms, until_ms, include_codex_review=include_codex_review
     )
-    active_ms = _merged_interval_ms(all_intervals)
+    granularity = bucket_granularity(
+        datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(milliseconds=since_ms) if since_ms is not None else None,
+        datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(milliseconds=until_ms) if until_ms is not None else None,
+    )
+    ordered = sorted(all_intervals)
+    if granularity:
+        active_ms, sparkline = merged_interval_buckets(ordered, granularity, (since_ms, until_ms))
+    else:
+        active_ms, sparkline = _merged_interval_ms(ordered, presorted=True), None
     active_ms_sum = sum(int(row["active_ms_sum"]) for row in by_tool.values())
+    if granularity == "hour":
+        sparkline["keys"] = local_hour_keys(datetime.fromtimestamp(since_ms / 1000).astimezone())
+
+    # The previous window allocates its own clipped intervals. Release the
+    # current window first to reduce the live heap and GC work on annual ranges.
+    del ordered, all_intervals
 
     return {
         "period": period,
         "active_ms": active_ms,
         "active_ms_sum": active_ms_sum,
+        "sparkline": sparkline,
         "comparison": _active_time_comparison(
             period,
             date_from,

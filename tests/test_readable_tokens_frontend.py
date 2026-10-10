@@ -130,6 +130,29 @@ def test_global_token_formatter_respects_readable_preference(tmp_path: Path) -> 
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_compact_formatter_reuses_current_locale_and_refreshes_on_language_change(tmp_path):
+    expression = """
+(() => {
+  const original = Intl.NumberFormat;
+  let constructions = 0;
+  Intl.NumberFormat = function(...args) { constructions++; return new original(...args); };
+  const english = Array.from({length:100}, () => formatCompactTokenCount(1249000));
+  const afterEnglish = constructions;
+  currentLang = 'pt';
+  const portuguese = Array.from({length:100}, () => formatCompactTokenCount(1249000));
+  const afterPortuguese = constructions;
+  currentLang = 'en';
+  const switchedBack = formatCompactTokenCount(842315);
+  return {english,portuguese,switchedBack,afterEnglish,afterPortuguese,constructions};
+})()
+"""
+    assert _run_readable_token_js(tmp_path, expression, None) == {
+        "english": ["1.2M"] * 100, "portuguese": ["1,2M"] * 100,
+        "switchedBack": "842.3K", "afterEnglish": 1, "afterPortuguese": 2, "constructions": 3,
+    }
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
 def test_readable_token_preference_defaults_and_fails_soft(tmp_path: Path) -> None:
     expression = """
 (() => {

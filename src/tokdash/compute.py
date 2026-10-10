@@ -8,12 +8,14 @@ import os
 import subprocess
 import tempfile
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, ROUND_HALF_EVEN
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from .dateutil import local_midnight, parse_date_range
 from .model_normalization import normalize_model_name
 from .pricing import PricingDatabase
+from .usage_buckets import add_bucket, bucket_granularity, bucket_key_resolver, local_hour_keys, merge_buckets
 from .sources.openclaw import get_usage_for_days as get_session_usage_days
 from .sources.openclaw import get_usage_for_month as get_session_usage_month
 from .sources.openclaw import get_usage_for_range as get_session_usage_range
@@ -32,6 +34,17 @@ from .usage_store import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _round_usage_cost(value: float) -> float:
+    """Round displayed dollars consistently across SQL aggregation partitions.
+
+    Binary sums can land on opposite sides of an exact half cent when grouped
+    by month. Remove sub-cent summation noise before decimal half-even
+    cent rounding; unrounded model and bucket costs remain untouched.
+    """
+    amount = Decimal(str(value)).quantize(Decimal("0.00000001"), rounding=ROUND_HALF_EVEN)
+    return float(amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN))
 
 
 # ============================================================
@@ -352,7 +365,7 @@ def _merge_parsed_usage(parts: list[Dict[str, Any]]) -> Dict[str, Any]:
 
     total_in = sum(x["tokens_in"] for x in all_models)
     total_cache = sum(x["tokens_cache"] for x in all_models)
-    return {
+    result = {
         "total_cost": sum(x["cost"] for x in all_models),
         "total_tokens": sum(x["tokens"] for x in all_models),
         "total_messages": sum(x["messages"] for x in all_models),
@@ -360,6 +373,9 @@ def _merge_parsed_usage(parts: list[Dict[str, Any]]) -> Dict[str, Any]:
         "apps": apps,
         "all_models": all_models,
     }
+    if any("sparkline" in part for part in parts):
+        result["sparkline"] = merge_buckets([part.get("sparkline") for part in parts])
+    return result
 
 
 def _merge_contribution_days(parts: list[list[dict]]) -> list[dict]:
@@ -448,13 +464,18 @@ def cache_hit_rate(tokens_in: Any, tokens_cache: Any) -> Optional[float]:
     return round(num / den, 4)
 
 
-def parse_entries_json(data: Dict[str, Any]) -> Dict[str, Any]:
+def parse_entries_json(data: Dict[str, Any], *, granularity: Optional[str] = None) -> Dict[str, Any]:
     """Parse tokscale-compatible entries JSON and aggregate by app/model."""
     entries = data.get("entries", [])
-    pricing_db = PricingDatabase()
+    # Stored-source requests usually have no live entries. Native/fixed costs
+    # also need no rate lookup; avoid loading pricing until a fallback needs it.
+    pricing_db: Optional[PricingDatabase] = None
 
+    buckets: dict[str, dict] = {}
+    resolve_bucket = bucket_key_resolver(granularity) if granularity else None
+    canonical_models = {}
     apps: Dict[str, Any] = {}
-    all_models_dict: Dict[tuple[str, str], Any] = {}
+    all_model_refs = {}
 
     for entry in entries:
         source = entry.get("source", "unknown")
@@ -493,8 +514,19 @@ def parse_entries_json(data: Dict[str, Any]) -> Dict[str, Any]:
         if entry_cost > 0 or entry.get("costAuthoritative") is True:
             cost = entry_cost
         else:
+            if pricing_db is None:
+                pricing_db = PricingDatabase()
             cost = pricing_db.get_cost(full_model_name, input_raw, tokens_out, cache_read, cache_write)
         messages = int(entry.get("messageCount", 0) or 1)
+        if granularity and source.lower() != "openclaw":
+            stamp = int(entry.get("timestamp", 0) or 0)
+            if stamp > 0:
+                canonical = canonical_models.get(full_model_name)
+                if canonical is None:
+                    canonical = canonical_models[full_model_name] = normalize_model_name(full_model_name)
+                add_bucket(buckets, resolve_bucket(stamp), tokens=total_tokens, cost=cost,
+                           messages=messages, tokens_in=tokens_in, tokens_cache=tokens_cache,
+                           model=full_model_name, canonical_model=canonical)
 
         if source not in apps:
             apps[source] = {
@@ -509,18 +541,12 @@ def parse_entries_json(data: Dict[str, Any]) -> Dict[str, Any]:
             }
 
         app_ref = apps[source]
-        app_ref["tokens"] += total_tokens
-        app_ref["tokens_in"] += tokens_in
-        app_ref["tokens_out"] += tokens_out
-        app_ref["tokens_cache"] += tokens_cache
-        app_ref.setdefault("tokens_reasoning", 0)
         app_ref["tokens_reasoning"] += reasoning
         app_ref["cost"] += cost
-        app_ref["messages"] += messages
 
-        model_ref = app_ref["models_dict"].setdefault(
-            full_model_name,
-            {
+        model_ref = app_ref["models_dict"].get(full_model_name)
+        if model_ref is None:
+            model_ref = app_ref["models_dict"][full_model_name] = {
                 "name": full_model_name,
                 "tokens": 0,
                 "tokens_in": 0,
@@ -528,8 +554,8 @@ def parse_entries_json(data: Dict[str, Any]) -> Dict[str, Any]:
                 "tokens_cache": 0,
                 "cost": 0.0,
                 "messages": 0,
-            },
-        )
+            }
+            all_model_refs[(source, full_model_name)] = model_ref
         model_ref["tokens"] += total_tokens
         model_ref["tokens_in"] += tokens_in
         model_ref["tokens_out"] += tokens_out
@@ -537,35 +563,22 @@ def parse_entries_json(data: Dict[str, Any]) -> Dict[str, Any]:
         model_ref["cost"] += cost
         model_ref["messages"] += messages
 
-        global_key = (source, full_model_name)
-        g = all_models_dict.setdefault(
-            global_key,
-            {
-                "source": source,
-                "name": full_model_name,
-                "tokens": 0,
-                "tokens_in": 0,
-                "tokens_out": 0,
-                "tokens_cache": 0,
-                "cost": 0.0,
-                "messages": 0,
-            },
-        )
-        g["tokens"] += total_tokens
-        g["tokens_in"] += tokens_in
-        g["tokens_out"] += tokens_out
-        g["tokens_cache"] += tokens_cache
-        g["cost"] += cost
-        g["messages"] += messages
-
     for app_data in apps.values():
         app_data["models"] = sorted(app_data["models_dict"].values(), key=model_rank_key)
         del app_data["models_dict"]
+        # These integer app totals are already counted in its model rows. Fold
+        # them once per model instead of allocating duplicate integers per event.
+        # Keep fees in event order above, preserving their floating-point sum.
+        for field in ("tokens", "tokens_in", "tokens_out", "tokens_cache", "messages"):
+            app_data[field] = sum(model[field] for model in app_data["models"])
         for model_ref in app_data["models"]:
             model_ref["cache_hit_rate"] = cache_hit_rate(model_ref["tokens_in"], model_ref["tokens_cache"])
         app_data["cache_hit_rate"] = cache_hit_rate(app_data["tokens_in"], app_data["tokens_cache"])
 
-    all_models = sorted(all_models_dict.values(), key=model_rank_key)
+    # The global model rows contain the same per-source counts. Copy those
+    # completed rows instead of allocating and updating a second set per event.
+    all_models = sorted(({**model, "source": source} for (source, _), model in all_model_refs.items()),
+                        key=model_rank_key)
     for m in all_models:
         m["cache_hit_rate"] = cache_hit_rate(m["tokens_in"], m["tokens_cache"])
 
@@ -573,7 +586,7 @@ def parse_entries_json(data: Dict[str, Any]) -> Dict[str, Any]:
     # weighted aggregate, kept alongside the totals for any direct consumer of this fn.
     tools_in = sum(x["tokens_in"] for x in all_models)
     tools_cache = sum(x["tokens_cache"] for x in all_models)
-    return {
+    result = {
         "total_cost": sum(x["cost"] for x in all_models),
         "total_tokens": sum(x["tokens"] for x in all_models),
         "total_messages": sum(x["messages"] for x in all_models),
@@ -581,6 +594,9 @@ def parse_entries_json(data: Dict[str, Any]) -> Dict[str, Any]:
         "apps": apps,
         "all_models": all_models,
     }
+    if granularity:
+        result["sparkline"] = {"granularity": granularity, "buckets": [buckets[key] for key in sorted(buckets)]}
+    return result
 
 
 # ~100 years: a finite stand-in for "all time" that period_to_range_args can
@@ -830,10 +846,10 @@ def _contributions_from_entries(entries: list[dict]) -> list[dict]:
 
 def get_tools_data(period: str) -> Dict[str, Any]:
     period_args = period_to_range_args(period)
+    since, until = _date_range_from_args(period_args)
     if USE_LOCAL_CODING_TOOLS_BACKEND:
-        since, until = _date_range_from_args(period_args)
         return get_tools_data_for_range(since, until)
-    return parse_entries_json(run_tokscale_json(period_args))
+    return parse_entries_json(run_tokscale_json(period_args), granularity=bucket_granularity(since, until))
 
 
 def get_tools_data_for_range(
@@ -847,6 +863,7 @@ def get_tools_data_for_range(
     just ran, and while a large log is being appended to, would find it changed
     again and parse it a second time. Never pass it for the first read.
     """
+    granularity = bucket_granularity(since, until) if sync else None
     if USE_LOCAL_CODING_TOOLS_BACKEND:
         tracker = CodingToolsUsageTracker()
         if persistent_usage_db_enabled():
@@ -855,9 +872,9 @@ def get_tools_data_for_range(
                     store, stored_sources = _sync_usage_store(tracker)
                 else:
                     store, stored_sources = UsageEntryStore(), _usage_store_sources(tracker)
-                store_data = store.aggregate_entries(sources=stored_sources, since=since, until=until)
+                store_data = store.aggregate_entries(sources=stored_sources, since=since, until=until, bucket_granularity=granularity)
                 live_entries = _collect_live_coding_entries(tracker, since, until, _usage_store_live_sources(tracker))
-                live_data = parse_entries_json({"entries": live_entries})
+                live_data = parse_entries_json({"entries": live_entries}, granularity=granularity)
                 result = _merge_parsed_usage([store_data, live_data])
                 # Only the live (non-stored) sources were just collected, so this
                 # lists the sources that failed to read — the UI/API can then show
@@ -881,13 +898,13 @@ def get_tools_data_for_range(
                     site="compute.get_tools_data_for_range",
                 )
         tracker.collect(since, until)
-        result = parse_entries_json(tracker.to_json())
+        result = parse_entries_json(tracker.to_json(), granularity=granularity)
         result["source_errors"] = [e["source"] for e in tracker.source_errors]
         return result
 
     since_str = since.astimezone().strftime("%Y-%m-%d")
     until_str = (until.astimezone() - timedelta(microseconds=1)).strftime("%Y-%m-%d")
-    return parse_entries_json(run_tokscale_json(["--since", since_str, "--until", until_str]))
+    return parse_entries_json(run_tokscale_json(["--since", since_str, "--until", until_str]), granularity=granularity)
 
 
 def get_tools_data_for_range_str(date_from: str, date_to: str) -> Dict[str, Any]:
@@ -1030,14 +1047,21 @@ def compute_usage(period: str, date_from: Optional[str] = None, date_to: Optiona
     global_in = sum(r["tokens_in"] for r in combined_models)
     global_cache = sum(r["tokens_cache"] for r in combined_models)
 
+    range_info = resolve_period(period, date_from, date_to)
+    sparkline = merge_buckets([coding_data.get("sparkline"), openclaw_data.get("sparkline")])
+    if sparkline and sparkline["granularity"] == "hour":
+        since, _ = parse_date_range(range_info["from"], range_info["to"])
+        sparkline["keys"] = local_hour_keys(since)
+
     return {
         "period": period,
+        "sparkline": sparkline,
         # The window this response actually covers. `period` echoes the caller's
         # own token, so on its own it cannot show that an unrecognised value was
         # substituted for something far wider (D1).
-        "range": resolve_period(period, date_from, date_to),
+        "range": range_info,
         "total_tokens": total_tokens,
-        "total_cost": round(total_cost, 2),
+        "total_cost": _round_usage_cost(total_cost),
         "total_messages": total_messages,
         "cache_hit_rate": cache_hit_rate(global_in, global_cache),
         "by_tool": by_tool,
@@ -1129,7 +1153,7 @@ def _compute_previous_usage(
 
     return {
         "total_tokens": total_tokens,
-        "total_cost": round(total_cost, 2),
+        "total_cost": _round_usage_cost(total_cost),
         "total_messages": total_messages,
     }
 

@@ -14,6 +14,7 @@ from tokdash.insights import DEFAULT_FACETS
 from tokdash.dev_fixtures import (
     SESSION_LABELS,
     TOOL_SPECS,
+    dense_active_time,
     dense_openclaw,
     dense_usage,
     fixture_year_days,
@@ -69,6 +70,33 @@ def test_dense_fixture_overview_is_crowded_and_consistent():
     assert payload["range"]["days"] == 7
     assert payload["response_cache"]["status"] == "fixture"
     assert payload["fixture"] == {"name": "dense", "seed": 74_019_130}
+
+
+@pytest.mark.parametrize("start,end,days,granularity", [
+    ("2026-09-21", "2026-09-21", 1, "hour"),
+    ("2026-09-21", "2026-09-27", 7, "day"),
+    ("2026-09-01", "2026-09-30", 30, "day"),
+    # A spring clock change can make elapsed whole days shorter than calendar days.
+    ("2026-03-01", "2026-04-01", 31, "month"),
+    ("2024-01-01", "2024-12-31", 366, "month"),
+    ("2025-01-01", "2025-12-31", 365, "month"),
+    ("2025-01-01", "2026-01-02", 367, None),
+])
+def test_dense_sparkline_contract_matches_usage_and_agent_headlines(start, end, days, granularity):
+    window = {"from": start, "to": end, "days": days}
+    usage = dense_usage(window, seed=17)
+    active = dense_active_time(window, seed=17)
+    if granularity is None:
+        assert usage["sparkline"] is active["sparkline"] is None
+        return
+    assert usage["sparkline"]["granularity"] == active["sparkline"]["granularity"] == granularity
+    buckets = usage["sparkline"]["buckets"]
+    assert sum(row["tokens"] for row in buckets) == usage["total_tokens"]
+    assert sum(row["messages"] for row in buckets) == usage["total_messages"]
+    assert sum(row["cost"] for row in buckets) == pytest.approx(usage["total_cost"], abs=.005)
+    assert sum(row["agent_ms"] for row in active["sparkline"]["buckets"]) == active["active_ms_sum"]
+    for model in usage["combined_models"]:
+        assert sum(row["models"].get(model["name"], 0) for row in buckets) == model["tokens"]
 
 
 def test_dense_fixture_seed_is_stable_and_changes_the_sample():

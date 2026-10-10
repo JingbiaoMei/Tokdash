@@ -199,8 +199,13 @@ try:
                           long_tasks:window.__sparklineLongTasks,function_times:window.__sparklineFunctionTimes,resources:performance.getEntriesByType('resource')
                             .filter(entry=>entry.name.includes('/api/')).map(entry=>({path:entry.name.split('/api/')[1],
                               start_ms:entry.startTime,duration_ms:entry.duration,bytes:entry.encodedBodySize}))})""",settled_ms)
-                        timings['browser_cpu_ms']={key:(after_metrics[key]-before_metrics[key])*1000
+                        # Navigation resets Chromium's document CPU counters.
+                        # A reload uses the new document's total; a range switch
+                        # stays in one document and uses the counter difference.
+                        timings['browser_cpu_ms']={key:(after_metrics[key] -
+                            (0 if selection=='today' else before_metrics[key]))*1000
                             for key in ('TaskDuration','ScriptDuration','LayoutDuration','RecalcStyleDuration')}
+                        assert all(value>=0 for value in timings['browser_cpu_ms'].values()), timings
                         timings['js_heap_bytes']=after_metrics['JSHeapUsedSize']
                         diagnostics[selection][label].append(timings)
                 print(f'Completed paired browser iteration {i+1}/{REPEATS}',flush=True)
@@ -222,6 +227,7 @@ try:
                 'requests':request_sets,'diagnostics':diagnostics,'errors':errors,'screens':screens,
                 'baseline':str(BASELINE),'candidate':str(ROOT),
                 'method':'alternating foreground tabs; same seed; Today reload and all nine range selections from fresh Today; latency includes network-idle, settled timings recorded separately',
+                'browser_cpu_method':'fresh-document counters for Today navigation; counter deltas for in-document range selection',
                 'gate':'candidate p95 <= baseline p95 + max(10 ms, 10% of baseline p95)'}
             (OUT/'browser-performance.json').write_text(json.dumps(report,indent=2)+'\n')
             print(json.dumps({'cases':cases,'errors':errors},indent=2))

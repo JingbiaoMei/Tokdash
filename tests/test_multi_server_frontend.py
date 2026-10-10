@@ -1730,6 +1730,45 @@ def test_a_failover_target_that_also_fails_is_demoted_too(tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@pytest.mark.parametrize("phase", ["fetch", "body", "failover"])
+def test_canceled_speed_read_does_not_demote_routes_or_block_session_read(tmp_path, phase):
+    body = """{
+      const hits = [], controller = new AbortController();
+      globalThis.fetch = async (url, options) => {
+        hits.push(String(url));
+        if (String(url).includes('/api/session-speed?')) {
+          if (input.phase === 'failover' && String(url).includes('http://a')) {
+            throw new TypeError('Failed to fetch');
+          }
+          const cancel = () => {
+            controller.abort();
+            throw new DOMException('Panel closed', 'AbortError');
+          };
+          if (input.phase === 'body') return { ok: true, status: 200, json: async () => cancel() };
+          return cancel();
+        }
+        return { ok: true, status: 200, json: async () => ({ session: { session_id: 'one' } }) };
+      };
+      const host = { id: 'ws', instanceId: 'WS', choice: 'auto',
+        routes: [{ id: 'a', url: 'http://a', kind: 'added' }, { id: 'b', url: 'http://b', kind: 'added' }] };
+      setRouteState('a', { state: 'ok', samples: [10], reportedInstanceId: 'WS' });
+      setRouteState('b', { state: 'ok', samples: [20], reportedInstanceId: 'WS' });
+      let canceled = null;
+      try { await fetchFromHost(host, '/api/session-speed?session_id=one', { signal: controller.signal }); }
+      catch (error) { canceled = error.name; }
+      const session = await fetchFromHost(host, '/api/session?session_id=one');
+      return { canceled, session, hits, a: routeRuntime.a.state, b: routeRuntime.b.state,
+               bBackoff: routeRuntime.b.nextTryAt || 0 };
+    }"""
+    out = _run_fetching(tmp_path, "cancel_speed", body, {"phase": phase})
+    assert out["canceled"] == "AbortError"
+    assert out["session"]["session"]["session_id"] == "one"
+    assert out["b"] == "ok" and out["bBackoff"] == 0
+    assert out["a"] == ("fail" if phase == "failover" else "ok")
+    assert len(out["hits"]) == (3 if phase == "failover" else 2)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
 def test_a_read_moves_to_the_next_route_within_the_same_call(tmp_path):
     body = """{
       let hits = [];

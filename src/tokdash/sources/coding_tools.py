@@ -30,9 +30,17 @@ import zstandard
 
 try:
     from .. import clientpaths
+    from ..output_speed import (
+        KimiStepAssociation,
+        kimi_usage_record_key,
+        omp_message_timing,
+    )
     from ..pricing import PricingDatabase
+    from ..output_speed_readers import CodexResponseAssociation, QwenTimingAssociation, native_message_timing
+    from ..speed_mode import timing_enabled
     from ..usage_store import (
         USAGE_ENTRY_FORMAT_VERSION,
+        UsageTailSliceIncomplete,
         UsageFileVanished,
         UsageFileUnreadable,
         usage_billing_fixed,
@@ -45,9 +53,17 @@ try:
 except ImportError:  # pragma: no cover
     # Allow running as a script by file path.
     import clientpaths
+    from output_speed import (
+        KimiStepAssociation,
+        kimi_usage_record_key,
+        omp_message_timing,
+    )
     from pricing import PricingDatabase
+    from output_speed_readers import CodexResponseAssociation, QwenTimingAssociation, native_message_timing
+    from speed_mode import timing_enabled
     from usage_store import (
         USAGE_ENTRY_FORMAT_VERSION,
+        UsageTailSliceIncomplete,
         UsageFileVanished,
         UsageFileUnreadable,
         usage_billing_fixed,
@@ -478,6 +494,17 @@ class BaseParser(ABC):
     # module: every parser in this file shares one source file, so a module
     # hash made an unrelated parser's edit invalidate all of them.
     persistent_parser_version: ClassVar[Optional[int]] = None
+    # Whether this source persists a per-call duration that can be paired with
+    # its own tokens. Default False: a source is measured only when it actually
+    # measures, never because a shared parser happened to run over its files.
+    _tracks_output_speed: ClassVar[bool] = False
+    # True only while the store has handed this parser the TAIL of a file rather
+    # than the whole of one (compute._collect_parser_tail sets it). A parser whose
+    # rows are self-contained never reads it. A parser that pairs records across
+    # lines has to know which it was given, because the same orphan bracket means
+    # "this call had no timing" in a whole file and "the slice was too short" in a
+    # tail -- and the second answer is a whole-file reparse, not a stored gap.
+    parsing_tail_slice: bool = False
 
     # Shared across all instances:
     #   {source_name: ((file_sigs, pricing_sig, runtime_sig), [entries])}
@@ -563,6 +590,7 @@ class BaseParser(ABC):
             self._file_signatures(),
             self._pricing_signature(),
             self.runtime_config_signature(),
+            timing_enabled(),
         )
         cached = self._entry_cache.get(self.source_name)
         if cached is not None and cached[0] == sig:
@@ -723,7 +751,10 @@ class OpenCodeParser(BaseParser):
                 if not isinstance(tokens, dict):
                     continue
                 model, provider = _opencode_model_identity(data)
-                out.append(self._build_entry(model, provider, tokens, self._i(ts_ms)))
+                entry = self._build_entry(model, provider, tokens, self._i(ts_ms))
+                if timing_enabled():
+                    entry["_speed"] = native_message_timing(data)
+                out.append(entry)
             except Exception:
                 continue
         return out
@@ -752,7 +783,7 @@ class OpenCodeParser(BaseParser):
 
         s_ms = int(self._to_utc(since_date).timestamp() * 1000) if since_date else 0
         u_ms = int(self._to_utc(until_date).timestamp() * 1000) if until_date else 9999999999999
-        cache_key = (s_ms, u_ms)
+        cache_key = (s_ms, u_ms, timing_enabled())
 
         cached = type(self)._query_cache.get(cache_key)
         if cached is not None:
@@ -1075,7 +1106,8 @@ class CodexParser(BaseParser):
     # 1: token_count deltas keyed on the stable usage-state event id, fresh
     #    input split out of Codex's cache-inclusive input_tokens, placeholder
     #    models resolved to the file's own first model signal.
-    persistent_parser_version = 1
+    # 2: explicit response-owned item clocks and verified tool interval union.
+    persistent_parser_version = 3
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
@@ -1127,6 +1159,8 @@ class CodexParser(BaseParser):
                 # the file's first append would miss it — its placeholder marker
                 # must still be resolved by THIS file's model signal.
                 file_entry_indices: set[int] = set()
+                association = CodexResponseAssociation() if timing_enabled() else None
+                pending_speed = []
 
                 for line_no, line in enumerate(_iter_jsonl_lines(session_file), start=1):
                     try:
@@ -1135,6 +1169,10 @@ class CodexParser(BaseParser):
                         continue
 
                     p = msg.get("payload") or {}
+                    if association is not None:
+                        association.observe(msg)
+                    if association is not None and msg.get("type") == "event_msg" and p.get("type") == "token_count":
+                        association.register(str(line_no), p.get("info") or {})
                     if msg.get("type") == "turn_context":
                         saw_turn_context = True
                         if p.get("model"):
@@ -1246,6 +1284,7 @@ class CodexParser(BaseParser):
                         "cost": self.pricing_db.get_cost(entry_model, input_t, output_t, cache_read, 0),
                         "timestamp": int(ts.timestamp() * 1000),
                         "entry_id": event_key or f"{session_file}:{line_no}",
+                        "_session_id": own_session_id or current_session_id or Path(session_file).stem,
                         # Codex logs no cache writes, so the billed cache-write
                         # bucket is 0 rather than the entry's cacheWrite field.
                         "_billing": usage_billing_pricing(
@@ -1255,6 +1294,8 @@ class CodexParser(BaseParser):
                             cache_read=cache_read,
                         ),
                     }
+                    if association is not None:
+                        pending_speed.append((entry, str(line_no)))
                     if model is None:
                         entry["_model_placeholder"] = True
                     if event_key and event_key in event_index_by_key:
@@ -1270,6 +1311,10 @@ class CodexParser(BaseParser):
                         event_index_by_key[event_key] = len(out)
                     file_entry_indices.add(len(out))
                     out.append(entry)
+
+                timings = association.resolve() if association is not None else {}
+                for timed_entry, identity in pending_speed:
+                    timed_entry["_speed"] = timings[identity]
 
                 if first_model_seen:
                     # Rows written before the file's first model signal (a fork's
@@ -2034,6 +2079,10 @@ class KimiParser(BaseParser):
     """
 
     source_name = "kimi"
+    # Kimi Code separates a provider-reported decode duration from its token row.
+    # The legacy StatusUpdate schema has no duration at all, so those rows find no
+    # timing and simply stay unmeasured.
+    _tracks_output_speed = True
     sync_capability = SourceSyncCapability(
         mode="file_replace",
         append_jsonl=True,
@@ -2045,7 +2094,12 @@ class KimiParser(BaseParser):
     # 1: legacy StatusUpdate rows keyed on message id and Kimi Code
     #    usage.record rows keyed on a (path, content) hash, wire model names
     #    mapped through _WIRE_MODEL_MAP.
-    persistent_parser_version = 1
+    # 2: usage.record rows carry the paired step.end decode duration, so the
+    #    stored rows gain the output-speed columns. Bumping rebuilds kimi rows
+    #    only; token and cost values are unchanged by the reparse.
+    # 3: the append fallback includes the matching window's upper boundary;
+    #    rebuild rows an earlier development build could have left untimed.
+    persistent_parser_version = 4
 
     # Wire model names emitted by Kimi Code usage.record rows, mapped to
     # canonical TokDash pricing keys. The display names in the CLI's own
@@ -2167,7 +2221,9 @@ class KimiParser(BaseParser):
         ts_ms = int(ts.timestamp() * 1000)
         return self._build_entry(model, token_usage, ts_ms, message_id)
 
-    def _entry_from_usage_record(self, record: Dict[str, Any], path_str: str, seen_message_ids: set) -> Optional[Dict[str, Any]]:
+    def _entry_from_usage_record(
+        self, record: Dict[str, Any], path_str: str, seen_message_ids: set
+    ) -> Optional[Dict[str, Any]]:
         """Parse a Kimi Code >=0.26 usage.record row; None if not applicable."""
         if record.get("type") != "usage.record":
             return None
@@ -2190,21 +2246,10 @@ class KimiParser(BaseParser):
 
         # No message id in this schema; dedup on (path, content) instead. The
         # path keeps identical rows from distinct sessions/agents countable,
-        # while duplicated lines within one file still collapse.
-        dedup_key = hashlib.sha1(
-            json.dumps(
-                [
-                    path_str,
-                    ts_ms,
-                    model,
-                    usage.get("inputOther"),
-                    usage.get("output"),
-                    usage.get("inputCacheRead"),
-                    usage.get("inputCacheCreation"),
-                ],
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()
+        # while duplicated lines within one file still collapse. Shared with the
+        # timing reader and the session drill-down (kimi_usage_record_key) so a
+        # duration can only ever land on the row that billed these tokens.
+        dedup_key = kimi_usage_record_key(getattr(self,"tail_source_path",None) or path_str, ts_ms, model, usage)
         if dedup_key in seen_message_ids:
             return None
         seen_message_ids.add(dedup_key)
@@ -2215,7 +2260,10 @@ class KimiParser(BaseParser):
             "input_cache_read": usage.get("inputCacheRead"),
             "input_cache_creation": usage.get("inputCacheCreation"),
         }
-        return self._build_entry(model, token_usage, ts_ms, dedup_key)
+        entry = self._build_entry(model, token_usage, ts_ms, dedup_key)
+        path = Path(getattr(self,'tail_source_path',None) or path_str)
+        entry['_session_id'] = path.parents[2].name if path.parent.parent.name == 'agents' else path.parent.name
+        return entry
 
     def _parse_all(self) -> List[Dict[str, Any]]:
         """Collect token usage from Kimi CLI / Kimi Code session files."""
@@ -2223,6 +2271,13 @@ class KimiParser(BaseParser):
         seen_message_ids: set[str] = set()
 
         for path_str, _, _ in self._file_signatures():
+            # One pass, not two. The usage.record rows and the step brackets that
+            # time them are different records of one file, so the association cannot
+            # be decided while reading -- but it can be *collected* while reading,
+            # which is what keeps a wire log at a single JSON parse per line. The
+            # verdict is hung on the rows below once the file is done.
+            association = KimiStepAssociation() if self._tracks_output_speed and timing_enabled() else None
+            pending_speed: List[Tuple[Dict[str, Any], str]] = []
             try:
                 with open(path_str, "r", encoding="utf-8") as f:
                     for line in f:
@@ -2233,15 +2288,51 @@ class KimiParser(BaseParser):
                             record = json.loads(line)
                         except json.JSONDecodeError:
                             continue
-
+                        if association is not None:
+                            association.observe(record)
                         entry = self._entry_from_usage_record(record, path_str, seen_message_ids)
                         if entry is None:
                             entry = self._entry_from_status_update(record, seen_message_ids)
+                        elif association is not None:
+                            # Registered under the key that billed these tokens, so a
+                            # call can never inherit another call's duration. The
+                            # verdict comes back once the file is read, by which time
+                            # the bracket it needs may not have arrived yet.
+                            association.register_usage(
+                                agent=record.get("agentId"),
+                                timestamp_ms=entry["timestamp"],
+                                usage=record["usage"],
+                                identity=entry["message_id"],
+                            )
+                            pending_speed.append((entry, entry["message_id"]))
                         if entry is not None:
+                            path = Path(getattr(self,'tail_source_path',None) or path_str)
+                            entry['_session_id'] = path.parents[2].name if path.parent.parent.name == 'agents' else path.parent.name
                             out.append(entry)
-
             except Exception:
                 continue
+
+            if association is None:
+                continue
+            timings = association.resolve()
+            # Outside the try above on purpose: this is the parser telling the store
+            # that the slice it was handed split a call from its duration, and the
+            # per-file `except Exception` would otherwise swallow that request and
+            # store an unmeasured row the file could have answered. Either half of
+            # the split counts, because the append boundary falls in the middle of a
+            # pair rather than on one of its edges: the slice can hold the step.end
+            # whose row went in earlier, or the row whose step.end went in earlier.
+            if self.parsing_tail_slice and (
+                association.claims_a_row_this_text_missed
+                or association.claims_a_bracket_this_text_missed
+            ):
+                raise UsageTailSliceIncomplete(path_str)
+            for entry, identity in pending_speed:
+                speed = timings.get(identity)
+                if speed is not None:
+                    # Not copied: the verdict is immutable, so rows that share a
+                    # status share one dict instead of minting their own.
+                    entry["_speed"] = speed
 
         return out
 
@@ -2697,7 +2788,7 @@ class PiAgentParser(BaseParser):
                                 cache_write=cache_w,
                             )
 
-                        out.append({
+                        row = {
                             "source": self.source_name,
                             "model": model,
                             "provider": provider,
@@ -2709,8 +2800,16 @@ class PiAgentParser(BaseParser):
                             "cost": cost,
                             "timestamp": int(ts.timestamp() * 1000),
                             "entry_id": event_key,
+                            "_session_id": cur_session_id,
                             "_billing": billing,
-                        })
+                        }
+                        # _parse_all is shared with pi_agent (O5), which writes no
+                        # duration/ttft at all. Gating on the class attribute keeps
+                        # omp's new timing out of pi's rows rather than letting an
+                        # inherited method silently upgrade the parent source.
+                        if self._tracks_output_speed and timing_enabled():
+                            row["_speed"] = omp_message_timing(msg)
+                        out.append(row)
             except Exception:
                 continue
 
@@ -2742,7 +2841,13 @@ class OmpParser(PiAgentParser):
     """
 
     source_name = "omp"
-    persistent_parser_version = 1
+    # omp carries duration + ttft + usage on the same assistant record, so its
+    # output window needs no association step at all. pi_agent, which shares
+    # _parse_all, writes none of those fields and stays unmeasured.
+    _tracks_output_speed = True
+    # 2: rows carry the paired duration, and a record the source itself labels
+    #    error/aborted is stored as an exclusion rather than a measurement.
+    persistent_parser_version = 3
     sync_capability = SourceSyncCapability(mode="file_replace", reason="OMP session-scoped rows.")
     use_recorded_cost = False
 
@@ -3530,7 +3635,7 @@ class MimoParser(BaseParser):
 
         s_ms = int(self._to_utc(since_date).timestamp() * 1000) if since_date else 0
         u_ms = int(self._to_utc(until_date).timestamp() * 1000) if until_date else 9999999999999
-        cache_key = (s_ms, u_ms)
+        cache_key = (s_ms, u_ms, timing_enabled())
 
         cached = type(self)._query_cache.get(cache_key)
         if cached is not None:
@@ -3567,6 +3672,8 @@ class MimoParser(BaseParser):
                             continue
                         entry = self._build_entry(data, self._i(ts_ms))
                         entry["entry_id"] = f"mimo:{msg_id}"
+                        if timing_enabled():
+                            entry["_speed"] = native_message_timing(data, source="mimo")
                         out.append(entry)
                     except Exception:
                         continue
@@ -5215,7 +5322,8 @@ class DSHParser(BaseParser):
     )
     # 1: folded usage samples keyed on dsh_sample_entry_id. The shared
     #    decoder's own versions ride along in persistent_parser_signature().
-    persistent_parser_version = 1
+    # 2: matched clean-stream speed windows; retry-contaminated steps excluded.
+    persistent_parser_version = 3
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
@@ -5269,6 +5377,8 @@ class DSHParser(BaseParser):
                     "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_r, cache_w),
                     "timestamp": int(sample["timestamp_ms"]),
                     "entry_id": dsh_sample_entry_id(session_id, sample),
+                    "_session_id": session_id,
+                    **({"_speed": sample["_speed"]} if "_speed" in sample else {}),
                     "_billing": usage_billing_pricing(
                         [model],
                         input_tokens=input_t,
@@ -6284,7 +6394,7 @@ def qwen_row_from_record(rec: Dict[str, Any]) -> Optional[Tuple[str, Dict[str, A
 
 
 def qwen_session_file(
-    path: str, unavailable: Optional[type] = None
+    path: str, unavailable: Optional[type] = None, *, tail_slice: bool = False
 ) -> Tuple[List[Tuple[str, Dict[str, Any]]], Dict[str, Any]]:
     """One chat file -> (rows, meta) with rows = [(entry_id, row), ...] and
     meta = {"session_id", "cwd", "preview"}.
@@ -6305,6 +6415,7 @@ def qwen_session_file(
     that call, because aborting the whole source (rather than syncing a
     partial corpus to the store) is Overview's shipped behavior.
     """
+    association = QwenTimingAssociation() if timing_enabled() else None
     rows: List[Tuple[str, Dict[str, Any]]] = []
     session_id = ""
     cwd = ""
@@ -6338,12 +6449,17 @@ def qwen_session_file(
                 if not preview and rec.get("type") == "user":
                     preview = _qwen_user_text(rec)
                 row_tuple = qwen_row_from_record(rec)
+                if association is not None:
+                    association.observe(rec, row_tuple[1] if row_tuple else None)
                 if row_tuple is not None:
                     rows.append(row_tuple)
     except OSError as exc:
         if unavailable is not None:
             raise unavailable(path) from exc
         raise
+    missed = association.resolve() if association is not None else False
+    if tail_slice and missed:
+        raise UsageTailSliceIncomplete("Qwen assistant parent may precede the tail slice")
     return rows, {
         "session_id": session_id or Path(path).stem,
         "cwd": cwd,
@@ -6406,8 +6522,8 @@ class QwenCodeParser(BaseParser):
     )
     # 1: assistant records with dict usageMetadata, Gemini cache-inclusive
     #    prompt split, source-global "qwen:<uuid>" key, pricing-DB cost
-    #    only.
-    persistent_parser_version = 1
+    #    only. 2 adds directly linked API telemetry to the counted settlement.
+    persistent_parser_version = 3
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
@@ -6451,8 +6567,8 @@ class QwenCodeParser(BaseParser):
         # unavailable=None keeps this call's swallow-and-return-[] behavior
         # on a failed open; qwen_session_file is the shared reader the
         # Sessions harness reaches with the caller's exception class instead.
-        rows, _meta = qwen_session_file(path_str)
-        return [self._build_entry(entry_id, row) for entry_id, row in rows]
+        rows, _meta = qwen_session_file(path_str, tail_slice=self.parsing_tail_slice)
+        return [dict(self._build_entry(entry_id, row), _session_id=str(_meta.get('session_id') or 'unknown')) for entry_id, row in rows]
 
     def _parse_all(self) -> List[Dict[str, Any]]:
         # The store's stable-key upsert keeps the earliest-timestamped

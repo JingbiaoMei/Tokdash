@@ -3690,8 +3690,10 @@ def test_usage_store_v9_adds_cost_authoritative_column(tmp_path):
             "SELECT value FROM meta WHERE key = 'schema_version'"
         ).fetchone()[0]
     assert "cost_authoritative" in columns
-    assert usage_store_module.SCHEMA_VERSION == 9
-    assert version == "9"
+    # Stamped with whatever the build considers current. The pin on the number
+    # itself lives in test_usage_store_output_speed.py, where the reason for the
+    # current bump is written down; this test is about the column.
+    assert version == str(usage_store_module.SCHEMA_VERSION)
 
 
 def test_v9_migration_backfills_fixed_billing_rows(tmp_path):

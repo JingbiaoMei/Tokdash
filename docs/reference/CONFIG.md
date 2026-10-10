@@ -86,6 +86,36 @@ TOKDASH_DATA_DIR=output/dev-data PYTHONPATH=src python3 main.py
 - `TOKDASH_USAGE_DB_WATCH` (default: `0`) — set to `1` to run a background sync loop inside `tokdash serve`
 - `TOKDASH_USAGE_DB_WATCH_INTERVAL` (default: `30` seconds) — sync interval for `tokdash db watch` and the serve-time watch loop
 
+## Output speed cache
+
+Output timing is built on demand in a separate `output_speed.sqlite3` beside the
+configured usage database. Ordinary usage, Overview and core session reads do
+not create it or start timing work. Model and session speed share one worker;
+visible views observe its progress through events. Reader versions and native
+DB/WAL identities invalidate timing independently of pricing.
+
+- `TOKDASH_SPEED_CPU_FRACTION` (default: `0.25`, clamped to `0.05`–`1`) — duty-cycle target applied between file inputs; a large file can use one CPU continuously before its balancing pause. Native projection and SQL publication use the one-CPU/niceness limits without this pause.
+- `TOKDASH_SPEED_MEMORY_MB` (default: `1024`) — worker address-space limit in MiB on platforms with resource limits. A failed build retains its last successful snapshot and reports the failure.
+
+On Linux the worker also uses nice 10 and one available CPU. These controls apply
+to the timing child, not the API process. The derived cache is disposable and
+contains scalar measurements, verdicts and session memberships, rather than
+transcripts. Primary schema migration removes old timing payloads and makes
+their pages reusable; it does not automatically shrink the physical SQLite file.
+
+Model/hour reads use a scalar covering index in the derived database. Existing
+caches receive that index through the speed worker, rather than an HTTP request
+or ordinary usage migration. Speed database connections allow a bounded 16 MiB
+SQLite page cache. This memory and index storage are separate from Overview's
+ordinary accounting path.
+
+The timing worker records a process creation identity and probes Windows without
+sending signals. Memory statistics are optional: lack of Unix `resource` support
+does not fail extraction or publication, and macOS RSS units are normalized to MiB.
+Failed input scopes do not suppress unrelated builds. Model/hour aggregate results
+use a demand-only process cache (32 entries, 8 MiB encoded results), invalidated by
+publication revision and filters; Overview does not import or access that cache.
+
 ## DB maintenance commands
 
 ```bash

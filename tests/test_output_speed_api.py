@@ -102,6 +102,40 @@ def test_unrelated_speed_sql_failure_stays_a_failure(tmp_path,monkeypatch):
     assert 'missing_table' in error.value.detail
 
 
+@pytest.mark.parametrize('message,status', [
+    ('database is locked', 503),
+    ('database table is locked: speed_responses', 503),
+    ('database schema is locked: main', 503),
+    ('database is busy', 503),
+    ('no such table: database is locked', 500),
+    ('disk I/O error', 500),
+])
+def test_speed_database_errors_without_python311_metadata(monkeypatch, message, status):
+    # Python 3.10 provides neither these constants nor sqlite_errorcode.
+    monkeypatch.delattr(sqlite3, 'SQLITE_BUSY', raising=False)
+    monkeypatch.delattr(sqlite3, 'SQLITE_LOCKED', raising=False)
+    error = sqlite3.OperationalError(message)
+    assert not hasattr(error, 'sqlite_errorcode')
+    with pytest.raises(HTTPException) as result:
+        api._raise_speed_database_error(error)
+    assert result.value.status_code == status
+    assert result.value.__cause__ is error
+
+
+@pytest.mark.parametrize('code,message,status', [
+    (5, 'different localized message', 503),
+    (5 | (2 << 8), 'different localized message', 503),
+    (6 | (1 << 8), 'different localized message', 503),
+    (1, 'database is locked', 500),
+])
+def test_speed_database_error_code_takes_precedence(code, message, status):
+    error = sqlite3.OperationalError(message)
+    error.sqlite_errorcode = code
+    with pytest.raises(HTTPException) as result:
+        api._raise_speed_database_error(error)
+    assert result.value.status_code == status
+
+
 def test_large_unmeasured_histories_keep_speed_and_availability_on_covering_indexes(tmp_path):
     with closing(speed_cache.connect(tmp_path/'speed.sqlite3')) as c:
         plan=' '.join(r[3] for r in c.execute('EXPLAIN QUERY PLAN SELECT timestamp FROM speed_responses WHERE speed_calls>0 ORDER BY timestamp LIMIT 1'))

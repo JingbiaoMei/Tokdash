@@ -2502,8 +2502,19 @@ def get_output_speed(
 
 def _raise_speed_database_error(exc: sqlite3.OperationalError):
     # A publication writer is temporary backpressure, not a failed timing read.
-    code = getattr(exc, 'sqlite_errorcode', 0) or 0
-    if (code & 255) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+    code = getattr(exc, 'sqlite_errorcode', None)
+    if code is None:
+        # Python 3.10 lacks SQLite exception codes and SQLITE_BUSY/LOCKED.
+        # Match only SQLite's lock messages; unrelated SQL failures stay 500.
+        message = str(exc).strip().lower()
+        busy = any(message == prefix or message.startswith(prefix + ':') for prefix in (
+            'database is locked', 'database is busy',
+            'database table is locked', 'database schema is locked',
+        ))
+    else:
+        # Stable SQLite primary codes: BUSY=5, LOCKED=6, including extended codes.
+        busy = (code & 255) in (5, 6)
+    if busy:
         raise HTTPException(status_code=503, detail="Timing cache publication is busy; retry shortly.") from exc
     raise HTTPException(status_code=500, detail=str(exc)) from exc
 

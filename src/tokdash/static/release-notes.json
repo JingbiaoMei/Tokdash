@@ -1,6 +1,32 @@
 {
-  "current": "2.6.12",
+  "current": "2.6.13",
   "releases": [
+    {
+      "version": "2.6.13",
+      "date": "2026-10-10",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "The Overview sparklines now match the range you picked: hours for today and yesterday, days for up to a month, months for a year. Every quick range has a curve again, including This Year and Last Year, and the points are computed under the same pricing and counting rules as the total above them, so curve and number cannot disagree. An hour or month that has not happened yet stays blank instead of being drawn as zero.",
+            "The Report tab gained a Day period. Step through today, yesterday and the recent days, each chip named with its real date, and durations under a day now read in your own language's units instead of a compact abbreviation."
+          ]
+        },
+        {
+          "type": "changed",
+          "items": [
+            "The Report tab stopped repeating itself. Sessions and Messages are summary figures now, the sentence card that restated them is gone, and the day-by-day panel hides on day and week reports, where the window has not met every day yet.",
+            "All that detail cost almost nothing in speed: pricing loads only when a figure needs it, the aggregation reuses work it has already done, and the dashboard stops redrawing a curve that has not changed. Measured against the previous release, every range reads faster or stays inside a tight margin."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "A model's fees and messages no longer vanish from a sparkline just because one of its buckets carries no token counters, and a displayed cost no longer shifts by a penny depending on whether a year was summed all at once or month by month."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.6.12",
       "date": "2026-10-09",

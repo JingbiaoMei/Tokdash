@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.6.13 - 2026-10-10
+
+### Added
+
+- The Overview sparklines follow the range you actually picked instead of flattening every range to days. Today and Yesterday read hourly buckets, a 2-31 day selection reads daily buckets, and 32-366 days reads monthly ones, so This Year draws 12 points, a rolling 366-day range can touch 13, and all ten quick-range presets carry a curve rather than only the ones #205 could fold out of a daily payload. The buckets are folded alongside the existing headline aggregation rather than computed in a second pass, so they come from the same priced aggregation and the same counting rules as the card totals they sit under: a monthly read is disjoint indexed timestamp ranges combined in one compound query, which keeps each GROUP BY inside a month and so avoids both an annual sort and a per-event calendar expression; Agent Time splits its measured intervals at local calendar boundaries during the clock-union pass it already ran, which is what keeps concurrent-agent time additive across a month edge instead of counting an overlap twice; Cache Hit Rate weights the components by input rather than averaging daily percentages; and Top Model follows the winner of the selected range rather than whichever model won each bucket. Guards keep a curve's source, range, review-session selection and snapshot consistent with the headline it belongs to, a future hour or month is unavailable rather than drawn as a zero, and a server too old to return buckets keeps the daily fallback. No extra API requests, source scans, timers, dependencies or schema migrations, and `docs/reference/API.md` documents the `sparkline` field the buckets arrive on. (#212)
+- The Report tab has a Day period. Windows are calendar-aligned single days, the chip row swaps to today, yesterday and the five days before them named from real dates so a relative word never has to mean the last one whatever that was, and durations under a day are now spoken in the active language's own units rather than a compact `5h 12m`: `Intl` does the plural and the locale, and Japanese drops the spaces its words do not carry. Single-day share cards, calendar tooltips, preview theme labels and both export layouts follow. (#213)
+
+### Changed
+
+- The Report tab stopped narrating itself. Sessions and Messages are summary figures now, so the sentence card that restated them and the project and footer prose repeating the same numbers are gone; the Days panel hides for day and week reports, neither of which has met every day of its window yet; and the KPI grid is three columns, two on mobile, with a clamped value size so a long figure widens nothing. (#213)
+- Folding the buckets in cost little enough that the extra detail is nearly free. Pricing loads only when a figure needs an estimate rather than on every aggregation; the native aggregation reuses calendar boundaries and canonical model names, copies completed model counts and folds integer app totals once per model rather than once per event; and the browser skips an SVG write when the curve did not change, reuses the current locale's compact-number formatter, and formats one activity-tooltip title instead of three, two of which were thrown away. `scripts/check_overview_sparklines.sh` and its companions run the campaign that shows it -- backend cases against a baseline checkout at 300 and 1,500 events/day over 1,014 days, per-preset browser readiness and network-quiet timings, and retained heap measured outside every timed window -- and gate a candidate at a p95 no worse than the baseline's plus max(10 ms, 10%). Against 2.6.12 all 70 cases pass and every preset's browser readiness p95 improved. (#212)
+
+### Fixed
+
+- Two accounting edges in the new buckets. A bucket whose model carries no token counters no longer loses its fees and messages when that model is hidden from the model ranking: visibility is evaluated across the selected range, and the model does have visible usage elsewhere in it. Displayed costs also stopped moving by a penny depending on how the sum was partitioned, because binary summation noise is normalised at eight decimal places before half-even cent rounding -- an exact half-cent now rounds the same whether a year arrives as one total or as twelve -- while raw model and bucket fees stay unrounded. (#212)
+
 ## 2.6.12 - 2026-10-09
 
 ### Added

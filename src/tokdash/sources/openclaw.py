@@ -16,6 +16,8 @@ try:
     from ..clientpaths import openclaw_agent_sessions_glob
     from ..dateutil import local_midnight
     from ..pricing import PricingDatabase
+    from ..model_normalization import normalize_model_name
+    from ..usage_buckets import add_bucket, bucket_granularity, bucket_key, sql_bucket_expression, sql_bucket_key, sql_monthly_query
     from ..store_logging import log_store_failure
     from ..usage_store import (
         USAGE_ENTRY_FORMAT_VERSION,
@@ -32,6 +34,8 @@ except ImportError:  # pragma: no cover
     from clientpaths import openclaw_agent_sessions_glob
     from dateutil import local_midnight
     from pricing import PricingDatabase
+    from model_normalization import normalize_model_name
+    from usage_buckets import add_bucket, bucket_granularity, bucket_key, sql_bucket_expression, sql_bucket_key, sql_monthly_query
     USAGE_ENTRY_FORMAT_VERSION = 1  # type: ignore
 
     class UsageDatabaseSchemaTooNewError(RuntimeError):  # type: ignore
@@ -642,9 +646,17 @@ def _openclaw_usage_from_store(
             SUM(message_count) AS message_count_sum
         FROM usage_entries
     """
-    if where:
-        query += " WHERE " + " AND ".join(where)
-    query += " GROUP BY model"
+    granularity = bucket_granularity(since_date, until_date)
+    if granularity == "month" and since_date is not None and until_date is not None:
+        source_where, source_args = store._where(sources=["openclaw"])
+        query, args = sql_monthly_query(query, source_where, source_args, since_date, until_date, "model")
+    else:
+        if where:
+            query += " WHERE " + " AND ".join(where)
+        if granularity:
+            expression = sql_bucket_expression(since_date, until_date, granularity)
+            query = query.replace("SELECT", f"SELECT {expression} AS bucket,", 1)
+        query += " GROUP BY model" + (", bucket" if granularity else "")
 
     # Both fetches share ONE snapshot. Read separately, they could straddle a
     # write that lands under superseded pricing, and the model totals would then
@@ -661,6 +673,7 @@ def _openclaw_usage_from_store(
 
     rows, contribution_rows = store._read_priced(_read)  # type: ignore[attr-defined]
 
+    buckets: dict[str, dict] = {}
     models: Dict[str, Any] = {}
     total_tokens = 0
     total_cost = 0.0
@@ -668,7 +681,19 @@ def _openclaw_usage_from_store(
     total_tokens_in = 0
     total_tokens_cache = 0
 
+    visible_models = None
+    if granularity:
+        # Preserve the original whole-model visibility rule after partitioning.
+        # Tokenless buckets can carry fees/messages for an otherwise used model.
+        model_tokens: dict[Any, int] = {}
+        fields = ("input_sum", "output_sum", "cache_read_sum", "cache_write_sum")
+        for row in rows:
+            model_tokens[row["model"]] = model_tokens.get(row["model"], 0) + sum(int(row[field] or 0) for field in fields)
+        visible_models = {model for model, tokens in model_tokens.items() if tokens != 0}
+
     for row in rows:
+        if visible_models is not None and row["model"] not in visible_models:
+            continue
         model = str(row["model"] or "unknown")
         input_raw = int(row["input_sum"] or 0)
         cache_write = int(row["cache_write_sum"] or 0)
@@ -678,25 +703,25 @@ def _openclaw_usage_from_store(
         tokens = tokens_in + tokens_out + tokens_cache
         cost = float(row["cost_sum"] or 0.0)
         messages = int(row["message_count_sum"] or 0)
-        if tokens == 0:
+        if tokens == 0 and visible_models is None:
             continue
 
-        models[model] = {
-            "tokens": tokens,
-            "tokens_in": tokens_in,
-            "tokens_out": tokens_out,
-            "tokens_cache": tokens_cache,
-            "cost": cost,
-            "messages": messages,
-            "cache_hit_rate": _cache_hit_rate(tokens_in, tokens_cache),
-        }
+        stats = models.setdefault(model, {"tokens": 0, "tokens_in": 0, "tokens_out": 0,
+                                          "tokens_cache": 0, "cost": 0.0, "messages": 0})
+        for field, value in (("tokens", tokens), ("tokens_in", tokens_in), ("tokens_out", tokens_out),
+                             ("tokens_cache", tokens_cache), ("cost", cost), ("messages", messages)):
+            stats[field] += value
+        stats["cache_hit_rate"] = _cache_hit_rate(stats["tokens_in"], stats["tokens_cache"])
+        if granularity:
+            add_bucket(buckets, sql_bucket_key(row["bucket"], granularity), tokens=tokens, cost=cost, messages=messages,
+                       tokens_in=tokens_in, tokens_cache=tokens_cache, model=model)
         total_tokens += tokens
         total_cost += cost
         total_messages += messages
         total_tokens_in += tokens_in
         total_tokens_cache += tokens_cache
 
-    return {
+    result = {
         "total_tokens": int(total_tokens),
         "total_cost": float(total_cost),
         "total_messages": int(total_messages),
@@ -706,6 +731,9 @@ def _openclaw_usage_from_store(
         "models": models,
         "contributions": store._contribution_days_from_rows(contribution_rows),  # type: ignore[attr-defined]
     }
+    if granularity:
+        result["sparkline"] = {"granularity": granularity, "buckets": [buckets[key] for key in sorted(buckets)]}
+    return result
 
 
 def get_session_usage(
@@ -749,7 +777,10 @@ def get_session_usage(
         }
     )
 
+    buckets: dict[str, dict] = {}
+    granularity = bucket_granularity(since_date, until_date)
     total_messages = 0
+    canonical_models = {}
 
     session_dirs = sessions_dir if isinstance(sessions_dir, list) else [sessions_dir]
     if persistent_usage_db_enabled() and UsageEntryStore is not None:
@@ -790,6 +821,14 @@ def get_session_usage(
         msg_date = msg_dt.astimezone().strftime("%Y-%m-%d")
 
         total_messages += 1
+        if granularity:
+            canonical = canonical_models.get(model)
+            if canonical is None:
+                canonical = canonical_models[model] = normalize_model_name(model)
+            key = msg_date[:7] if granularity == "month" else msg_date if granularity == "day" else bucket_key(ts_ms, granularity)
+            add_bucket(buckets, key, tokens=tokens_total, cost=cost,
+                       messages=1, tokens_in=tokens_in, tokens_cache=tokens_cache, model=model,
+                       canonical_model=canonical)
 
         stats = model_stats[model]
         stats["tokens_in"] += tokens_in
@@ -879,7 +918,7 @@ def get_session_usage(
             }
         )
 
-    return {
+    result = {
         "total_tokens": int(total_tokens),
         "total_cost": float(total_cost),
         "total_messages": int(total_messages),
@@ -889,6 +928,9 @@ def get_session_usage(
         "models": models,
         "contributions": contributions,
     }
+    if granularity:
+        result["sparkline"] = {"granularity": granularity, "buckets": [buckets[key] for key in sorted(buckets)]}
+    return result
 
 
 def get_usage_for_days(days: int) -> Dict[str, Any]:

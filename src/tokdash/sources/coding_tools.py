@@ -7930,6 +7930,11 @@ class DevinParser(BaseParser):
     # that struct under either rename convention. A miss costs one dict lookup;
     # the wrong list costs every token this source would ever report, and only
     # the tripwire in collect() would say so (Q3/Q4 settle it).
+    #
+    # The ``metadata.*`` paths come from a populated store rather than the
+    # binary docs: a real ``chat_message`` payload carries ``metadata.metrics``
+    # holding ``input_tokens``/``output_tokens``/``cache_read_tokens``/
+    # ``cache_creation_tokens`` beside ``ttft_ms`` and friends.
     _USAGE_PATHS: ClassVar[Tuple[str, ...]] = (
         "",
         "usage",
@@ -7942,6 +7947,10 @@ class DevinParser(BaseParser):
         "message.performance_metrics",
         "message.performanceMetrics",
         "message",
+        "metadata.metrics",
+        "metadata.usage",
+        "metadata.performance_metrics",
+        "metadata.performanceMetrics",
         "extensions.usage",
         "extensions.performance_metrics",
         "extensions.performanceMetrics",
@@ -7953,6 +7962,8 @@ class DevinParser(BaseParser):
         "model_id",
         "modelUid",
         "model_uid",
+        "generation_model",
+        "generationModel",
     )
     @classmethod
     def _ts_ms_sql(cls, column: str) -> str:
@@ -8164,7 +8175,12 @@ class DevinParser(BaseParser):
         return None
 
     def _model_of(self, node: Dict[str, Any], usage: Dict[str, Any]) -> str:
-        for container in (node, usage):
+        # A populated store names the model at ``metadata.generation_model``
+        # (``swe-2-high``, ``summarizer``, ...), so ``metadata`` is checked
+        # alongside the node and the usage container.
+        metadata = node.get("metadata")
+        containers = (node, usage, metadata) if isinstance(metadata, dict) else (node, usage)
+        for container in containers:
             for field in self._MODEL_FIELDS:
                 value = container.get(field)
                 if isinstance(value, str) and value.strip():
@@ -8192,7 +8208,9 @@ class DevinParser(BaseParser):
             # totals, and it is the same filter the other DB sources use.
             return None
 
-        message_id = node.get("id")
+        # Live stores name it ``message_id``; ``id`` covers the documented
+        # shape and any other writer.
+        message_id = node.get("id") or node.get("message_id")
         entry_id = (
             f"devin:{session_id}:{message_id}"
             if isinstance(message_id, str) and message_id.strip()

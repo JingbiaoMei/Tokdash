@@ -28,13 +28,8 @@ I18N_LANGS = ("en", "zh", "ja", "ko", "es", "pt")
 # Kana and Han, for the copy rules that only apply where words carry no spaces.
 CJK = r"[぀-ヿ一-鿿]"
 
-# Every line that makes a claim about one machine: whose midnight starts a day
-# and whose tokdash counted. Both take the selected server's name rather than
-# assuming local. The card's range line used to be on this list; the cosyncing
-# review cut its "on {machine}" clause. The agent table's folded "other tools"
-# row left with the fold, so it no longer makes one either.
+# The source line names the selected server whose tokdash counted the usage.
 MACHINE_KEYS = (
-    "usageReportFooterDays",
     "usageReportFooterSrc",
 )
 
@@ -257,6 +252,12 @@ def test_report_is_single_server_and_prints_which_one() -> None:
 @pytest.mark.parametrize(
     ("today", "period", "expected", "calendar"),
     [
+        (
+            "2028-02-29",
+            "day",
+            {"from": "2028-02-29", "to": "2028-02-29", "length": 1, "elapsed": 1},
+            {"first": "2028-02-29", "last": "2028-02-29"},
+        ),
         # Mid-week: the week runs back to Monday, the month to the 1st.
         (
             "2026-09-03",
@@ -351,7 +352,7 @@ def test_an_elapsed_window_never_exceeds_the_period_it_claims(tmp_path: Path) ->
     body += """
 usageReportToday = () => new Date(process.argv[2] + 'T12:00:00');
 const out = [];
-for (const period of ['week', 'month', 'year']) {
+for (const period of ['day', 'week', 'month', 'year']) {
   const windows = usageReportWindows(period);
   out.push({
     period,
@@ -365,6 +366,7 @@ process.stdout.write(JSON.stringify(out));
         _run_node(tmp_path, "usage-report-span.js", body, "2026-09-03")
     )
     assert {row["period"]: row for row in rows} == {
+        "day": {"period": "day", "elapsed": 1, "length": 1},
         "week": {"period": "week", "elapsed": 4, "length": 7},
         "month": {"period": "month", "elapsed": 3, "length": 30},
         "year": {"period": "year", "elapsed": 246, "length": 365},
@@ -381,7 +383,7 @@ def test_back_steps_whole_periods(tmp_path: Path) -> None:
     body += """
 usageReportToday = () => new Date('2026-09-07T12:00:00');
 const out = [];
-for (const period of ['week', 'month', 'year']) {
+for (const period of ['day', 'week', 'month', 'year']) {
   for (const back of [0, 1, 2]) {
     const w = usageReportWindows(period, back);
     out.push({ period, back, from: w.date_from, to: w.date_to,
@@ -393,6 +395,8 @@ process.stdout.write(JSON.stringify(out));
 """
     rows = json.loads(_run_node(tmp_path, "usage-report-back.js", body))
     by = {(row["period"], row["back"]): row for row in rows}
+    for back, day in enumerate(("2026-09-07", "2026-09-06", "2026-09-05")):
+        assert by[("day", back)] == {"period": "day", "back": back, "from": day, "to": day, "length": 1, "elapsed": 1}
     assert by[("week", 0)]["from"] == "2026-09-07" and by[("week", 0)]["to"] == "2026-09-07"
     assert (by[("week", 1)]["from"], by[("week", 1)]["to"]) == ("2026-08-31", "2026-09-06")
     assert (by[("week", 2)]["from"], by[("week", 2)]["to"]) == ("2026-08-24", "2026-08-30")
@@ -401,6 +405,67 @@ process.stdout.write(JSON.stringify(out));
     for row in rows:
         if row["back"] > 0:
             assert row["elapsed"] == row["length"], f"{row}: a past window must be the whole period"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@pytest.mark.parametrize(
+    ("today", "back", "expected"),
+    [
+        ("2026-01-01", 1, "2025-12-31"),
+        ("2028-03-01", 1, "2028-02-29"),
+        ("2026-10-26", 1, "2026-10-25"),
+        ("2026-03-30", 1, "2026-03-29"),
+    ],
+)
+def test_day_navigation_crosses_calendar_and_clock_boundaries(
+    tmp_path: Path, today: str, back: int, expected: str
+) -> None:
+    body = "process.env.TZ = 'Europe/London';\n"
+    body += "\n".join(_extract_js_function(_source(), signature) for signature in HELPERS)
+    body += f"""
+usageReportToday = () => new Date('{today}T12:00:00');
+process.stdout.write(JSON.stringify(usageReportWindows('day', {back})));
+"""
+    assert json.loads(_run_node(tmp_path, "report-day-boundary.js", body)) == {
+        "date_from": expected,
+        "date_to": expected,
+    }
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_duration_units_are_localized_across_languages_and_language_switches(tmp_path: Path) -> None:
+    source = _source()
+    locales = re.search(r"const LANG_LOCALES = \{[^\n]+\};", source)
+    assert locales
+    body = locales.group(0) + "\nlet currentLang = 'en'; const durationUnitFormatters = new Map();\n"
+    for signature in (
+        "function langLocale(lang = currentLang) {",
+        "function formatDurationUnit(unit, value) {",
+        "function formatDurationUnits(ms) {",
+    ):
+        body += _extract_js_function(source, signature) + "\n"
+    body += """
+const durations = [0, 45000, 5 * 60000, (7 * 60 + 39) * 60000, 24 * 3600000, 65 * 3600000, 8 * 86400000, 34 * 86400000];
+const out = {};
+for (const lang of Object.keys(LANG_LOCALES)) {
+  currentLang = lang;
+  out[lang] = durations.map(formatDurationUnits);
+}
+// A cached formatter must still follow the language after switching back.
+currentLang = 'en';
+out.enAgain = durations.map(formatDurationUnits);
+process.stdout.write(JSON.stringify(out));
+"""
+    report = json.loads(_run_node(tmp_path, "report-localized-time.js", body))
+    assert report.pop("enAgain") == report["en"]
+    assert report == {
+        "en": ["—", "45 seconds", "5 minutes", "7 hours 39 minutes", "1 day", "2 days 17 hours", "1 week 1 day", "1 month 4 days"],
+        "zh": ["—", "45秒钟", "5分钟", "7小时39分钟", "1天", "2天17小时", "1周1天", "1个月4天"],
+        "ja": ["—", "45秒", "5分", "7時間39分", "1日", "2日17時間", "1週間1日", "1か月4日"],
+        "ko": ["—", "45초", "5분", "7시간 39분", "1일", "2일 17시간", "1주 1일", "1개월 4일"],
+        "es": ["—", "45 segundos", "5 minutos", "7 horas 39 minutos", "1 día", "2 días 17 horas", "1 semana 1 día", "1 mes 4 días"],
+        "pt": ["—", "45 segundos", "5 minutos", "7 horas 39 minutos", "1 dia", "2 dias 17 horas", "1 semana 1 dia", "1 mês 4 dias"],
+    }
 
 
 def test_the_report_tab_swaps_quick_ranges_for_period_chips() -> None:
@@ -1368,7 +1433,6 @@ def test_the_first_paint_renders_only_what_usage_answers() -> None:
     assert "usageReportRenderHeroActivity(model)" in hero
     assert "usageReportRenderHero(model)" in full
     for absent in (
-        "usageReportRenderSentence",
         "usageReportRenderHeat",
         "usageReportRenderPodium",
         "usageReportRenderWhen",
@@ -1393,8 +1457,7 @@ def test_an_unknown_count_prints_a_dash_everywhere_it_is_read() -> None:
     hero = _extract_js_function(block, "function usageReportRenderHeroActivity(model) {")
     assert "empty || !model.streaks" in hero
     assert "String(model.streaks.active_days)" in hero, "the zero fallback is gone"
-    sentence = _extract_js_function(block, "function usageReportRenderSentence(model) {")
-    assert "sessions: usageReportFigure(model.sessions, formatNumber)" in sentence
+    assert "usageReportFigure(model.sessions, formatNumber)" in hero
     card = _extract_js_function(block, "function usageReportCardModel(model, tier, mode, overrides) {")
     assert "sessions: usageReportFigure(model.sessions, formatNumber)" in card
     assert "const streaks = model.streaks || null;" in card, "a zero-filled streak block prints 0 of N"
@@ -1445,6 +1508,17 @@ def test_report_copy_keys_are_prefixed_and_shared_across_languages() -> None:
         assert not missing, f"{language} is missing {sorted(missing)}"
 
 
+def test_report_translations_keep_the_same_placeholders() -> None:
+    source = _source()
+    english = _i18n_report_copy(source, "en")
+    for language in I18N_LANGS:
+        copy = _i18n_report_copy(source, language)
+        for key, value in english.items():
+            expected = set(re.findall(r"\{(\w+)\}", value))
+            actual = set(re.findall(r"\{(\w+)\}", copy[key]))
+            assert actual == expected, f"{language}.{key}: {actual} != {expected}"
+
+
 def test_every_line_that_names_a_machine_names_the_selected_one() -> None:
     """The report is single-server, and these lines used to be fixed strings
     about "this machine": read from a remote server, the footer and the exported
@@ -1452,7 +1526,7 @@ def test_every_line_that_names_a_machine_names_the_selected_one() -> None:
     """
     source = _source()
     block = _report_block(source)
-    assert "t('usageReportFooterDays', { machine })" in block
+    assert "t('usageReportFooterSrc', { n: sources, machine," in block
     footer = _extract_js_function(block, "function usageReportRenderFooter(model) {")
     assert "const machine = usageReportMachineName();" in footer
     # Only the nickname fallback may still spell the phrase out.
@@ -1560,11 +1634,11 @@ def test_no_night_window_is_hardcoded_in_the_page() -> None:
         assert hours not in block, hours
 
 
-def test_the_project_surface_prints_every_reconciliation_component() -> None:
-    """Spec 5.2: the facet's own unattributed bucket is not the whole gap."""
+def test_the_report_removes_the_repeated_project_and_footer_copy() -> None:
+    """The ranking keeps missing-data notices without the decorative footnotes."""
     block = _report_block(_source())
-    assert "usageReportPodiumProjectNote" in block
-    assert "usageReportProjectGroupNote" in block
+    for key in ("usageReportPodiumProjectNote", "usageReportProjectGroupNote", "usageReportFooterDays", "usageReportFooterCost", "usageReportFooterActive", "usageReportSentence"):
+        assert key not in _source()
     assert "usageReportMissingProjects" in block
 
 
@@ -1924,6 +1998,32 @@ process.stdout.write(JSON.stringify({
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_day_share_cards_use_one_date_and_omit_the_daily_map(tmp_path: Path) -> None:
+    report = _card_audit(
+        tmp_path,
+        """
+const day = { ...busy, period: 'day', range: { from: '2026-09-03', to: '2026-09-03' }, elapsed: 1,
+  cells: [{ date: '2026-09-03', tokens: 1e6, level: 7, future: false }] };
+const out = {};
+for (const tier of ['green', 'amber']) {
+  const card = usageReportBuildCard(day, tier, 'light');
+  out[tier] = {
+    overflow: card.used - card.budget,
+    texts: card.ops.filter((op) => op.k === 'text').map((op) => op.text),
+    heat: card.ops.filter((op) => op.k === 'rect' && op.w === op.h && op.w >= 8).length,
+  };
+}
+process.stdout.write(JSON.stringify(out));
+""",
+    )
+    for card in report.values():
+        assert card["overflow"] <= 0
+        assert card["heat"] == 0
+        assert card["texts"].count("2026-09-03") == 1
+        assert not any("2026-09-03 – 2026-09-03" in text for text in card["texts"])
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
 def test_the_card_range_line_is_just_the_window(tmp_path: Path) -> None:
     """Cosyncing review item 7: "Sep 1 – Sep 30 · all agent activity on
     mac-studio" restates what the page footer already says, so the card's
@@ -2091,18 +2191,18 @@ process.stdout.write(JSON.stringify(out));
     assert report["year"]["rightEdge"] == pytest.approx(336, abs=0.01), "the year map no longer reaches the content edge"
 
 
-def test_the_page_drops_the_week_grid_and_centres_the_month() -> None:
-    """Same call on the report page: the week view's day map is one stretched
-    row of seven cells, so it is dropped (legend too); the month view takes
-    the Stats presentation -- fixed 24px squares, centred, never stretched."""
+def test_the_page_hides_the_day_and_week_card_and_centres_the_month() -> None:
+    """Short windows hide the whole daily card; months retain the square grid."""
     source = _source()
     heat = _extract_js_function(source, "function usageReportRenderHeat(model) {")
     week = heat[heat.index("model.period === 'week'") :]
     assert "usageReportLegend').replaceChildren()" in week
-    assert "usageReportRenderStreak(model);" in week
+    assert "usageReportStreak'), ''" in week
     assert week.index("return;") < heat.index("model.period !== 'year'") - heat.index("model.period === 'week'"), (
         "the week branch must return before the month/year grids are built"
     )
+    controls = _extract_js_function(source, "function usageReportRenderControls() {")
+    assert "getElementById('usageReportDaysPanel').hidden = ['day', 'week'].includes(usageReportState.period)" in controls
     month_rule = next(line for line in source.splitlines() if line.strip().startswith(".usage-report-month {"))
     assert "repeat(7, 24px)" in month_rule
     assert "width: max-content" in month_rule and "margin: 0 auto" in month_rule

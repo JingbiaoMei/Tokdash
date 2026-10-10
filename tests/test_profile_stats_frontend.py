@@ -429,6 +429,32 @@ def test_profile_week_aggregates_breakdown_and_cost_across_year_boundary(
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@pytest.mark.parametrize("end,cumulative,title,date_calls", [
+    ("2026-07-20", False, "2026-07-20", 1),
+    ("2026-07-20", True, "Cumulative · 2026-07-20 → 2026-07-20", 2),
+    ("2026-07-26", False, "2026-07-20 → 2026-07-26", 2),
+    ("2026-07-26", True, "Cumulative · 2026-07-20 → 2026-07-26", 2),
+])
+def test_profile_tooltip_formats_only_dates_used_by_its_title(tmp_path, end, cumulative, title, date_calls):
+    result = _run_profile_tooltip_js(
+        tmp_path,
+        """(() => {
+          const original = formatShortDate;
+          let calls = 0;
+          formatShortDate = (...args) => { calls++; return original(...args); };
+          const models = Array.from({length:365}, () =>
+            formatProfileAggregateTooltip(payload.aggregate, payload.cumulative));
+          return {calls, titles:models.map(model=>model.title),
+            accessible:models.map(model=>model.accessibleText)};
+        })()""",
+        {"aggregate": {"startDate": "2026-07-20", "endDate": end}, "cumulative": cumulative},
+    )
+    assert result["calls"] == 365 * date_calls
+    assert result["titles"] == [title] * 365
+    assert all(value.startswith(title + ". Total:") for value in result["accessible"])
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
 def test_profile_tooltip_model_has_semantic_rows_and_accessible_text(tmp_path: Path):
     payload = {
         "aggregate": {

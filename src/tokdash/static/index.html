@@ -1992,9 +1992,10 @@
     .usage-report-panel-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
     .usage-report-panel-title { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; color: var(--color-label); }
     .usage-report-spacer { flex: 1; }
-    .usage-report-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+    .usage-report-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px 24px; }
+    @media (max-width: 640px) { .usage-report-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 14px; } }
     .usage-report-kpi-label { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; color: var(--color-label); }
-    .usage-report-kpi-value { font-size: 27px; font-weight: 800; margin-top: 6px; letter-spacing: -.02em; }
+    .usage-report-kpi-value { font-size: clamp(20px, 2.2vw, 27px); font-weight: 800; margin-top: 6px; letter-spacing: -.02em; overflow-wrap: anywhere; }
     .usage-report-kpi-sub { font-size: 12px; color: var(--color-muted); margin-top: 4px; }
     .usage-report-pill { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; vertical-align: middle; color: var(--color-cta); background: color-mix(in srgb, var(--color-cta) 16%, transparent); }
     .usage-report-delta-up { color: #16A34A; font-weight: 800; }
@@ -2008,7 +2009,6 @@
     .kpi-delta.is-down { color: #16A34A; }
     html.dark .kpi-delta.is-up { color: #F87171; }
     html.dark .kpi-delta.is-down { color: #4ADE80; }
-    .usage-report-sentence { font-size: 16px; line-height: 1.6; margin: 0; max-width: 80ch; }
     .usage-report-banner { margin-top: 14px; border: 1px solid var(--color-cta); border-radius: 12px; padding: 10px 14px; background: color-mix(in srgb, var(--color-cta) 12%, transparent); font-size: 13px; line-height: 1.5; }
     .usage-report-notice { color: var(--color-muted); font-size: 13px; margin: 0; }
     /* Day maps. The month grid takes the Stats page's presentation: fixed 24px
@@ -2537,7 +2537,10 @@
       background: transparent;
       color: var(--color-muted);
       cursor: pointer;
-      transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+      /* Density checks need the final padding immediately when labels return. */
+      transition: color 0.15s cubic-bezier(0.16, 1, 0.3, 1),
+                  background-color 0.15s cubic-bezier(0.16, 1, 0.3, 1),
+                  border-color 0.15s cubic-bezier(0.16, 1, 0.3, 1);
       display: inline-flex;
       align-items: center;
       gap: 5px;
@@ -2551,6 +2554,33 @@
       background: color-mix(in srgb, var(--color-primary, #6366f1) 16%, transparent);
       border-color: color-mix(in srgb, var(--color-primary, #6366f1) 45%, transparent);
       color: var(--color-text);
+    }
+
+    /* Harness mark + name, from the shared tool-identity system. The identity
+       defaults are sized for table rows and the chart legend, so the pill row
+       restates the square mark size rather than borrowing the table's compact
+       variant. Wordmarks (Mimo) keep their own 34x15 box: squeezed to icon size
+       the lettering turns to mush, and it is already the widest thing in the row. */
+    .modern-tool-pill .tool-identity { gap: 6px; }
+    .modern-tool-pill .tool-brand-icon { width: 18px; height: 18px; }
+    .modern-tool-pill .tool-brand-icon img { width: 16px; height: 16px; }
+    .modern-tool-pill:hover .tool-brand-icon { transform: translateY(-1px); opacity: .82; }
+    html.dark .modern-tool-pill[data-tool="mimo"] .tool-brand-icon img { filter: invert(.88); }
+
+    /* The pill row splits its toolbar with the search box. updateSessionPillDensity()
+       adds is-icon-only when the names no longer fit: the mark is the half a user
+       recognises, and every pill keeps title + aria-label so the name is still
+       there on hover and for screen readers. The all-pill glyph exists only in
+       that mode, which is why it stays display:none until the row collapses. */
+    .modern-tool-pill-icon { display: none; }
+    #sessionsQuickFilterBar.is-icon-only .modern-tool-pill { padding-inline: 9px; }
+    #sessionsQuickFilterBar.is-icon-only .tool-brand-label { display: none; }
+    #sessionsQuickFilterBar.is-icon-only .modern-tool-pill-icon {
+      display: inline-grid;
+      place-items: center;
+      flex: 0 0 auto;
+      width: 18px;
+      height: 18px;
     }
 
     /* Slide-Over Drawer Styles */
@@ -3081,7 +3111,7 @@
 
   <!-- Main Viewport -->
   <div class="flex-1 min-w-0 flex flex-col min-h-screen overflow-x-hidden dashboard-main">
-    <div class="w-full max-w-[1680px] p-4 sm:p-6 lg:p-8 space-y-4">
+    <div class="w-full max-w-[1680px] mx-auto p-4 sm:p-6 lg:p-8 space-y-4">
 
       <!-- Top bar -->
       <header class="surface p-5 sm:p-6 mb-4">
@@ -3246,7 +3276,7 @@
             <div id="totalTokensExact" class="overview-token-exact-tooltip" role="tooltip" hidden>-</div>
           </div>
           <div id="tokensDelta" class="text-xs font-semibold mt-1 kpi-delta"></div>
-          <svg id="sparklineTokens" class="kpi-sparkline text-indigo-400/60" viewBox="0 0 100 35" preserveAspectRatio="none" fill="none"><defs><linearGradient id="kpiG1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0.0"/></linearGradient></defs><path id="sparklineTokensPath" d="M0 24 Q25 18 45 14 T75 10 T100 6" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path id="sparklineTokensArea" d="M0 24 Q25 18 45 14 T75 10 T100 6 L100 35 L0 35 Z" fill="url(#kpiG1)"/></svg>
+          <svg id="sparklineTokens" class="kpi-sparkline text-indigo-400/60" viewBox="0 0 100 35" preserveAspectRatio="none" fill="none"><defs><linearGradient id="kpiG1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0.0"/></linearGradient></defs><path id="sparklineTokensPath" d="" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path id="sparklineTokensArea" d="" fill="url(#kpiG1)"/></svg>
         </div>
         <div class="surface p-5">
           <div class="flex items-center justify-between">
@@ -3254,7 +3284,7 @@
           </div>
           <div id="totalCost" class="text-3xl sm:text-4xl font-extrabold mt-1.5 font-mono text-emerald-400">$-</div>
           <div id="costDelta" class="text-xs font-semibold mt-1 kpi-delta"></div>
-          <svg id="sparklineCost" class="kpi-sparkline text-emerald-400/60" viewBox="0 0 100 35" preserveAspectRatio="none" fill="none"><defs><linearGradient id="kpiG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0.0"/></linearGradient></defs><path id="sparklineCostPath" d="M0 28 L100 28" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path id="sparklineCostArea" d="M0 28 L100 28 L100 35 L0 35 Z" fill="url(#kpiG2)"/></svg>
+          <svg id="sparklineCost" class="kpi-sparkline text-emerald-400/60" viewBox="0 0 100 35" preserveAspectRatio="none" fill="none"><defs><linearGradient id="kpiG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0.0"/></linearGradient></defs><path id="sparklineCostPath" d="" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path id="sparklineCostArea" d="" fill="url(#kpiG2)"/></svg>
         </div>
         <div class="surface p-5">
           <div class="flex items-center justify-between">
@@ -3265,7 +3295,7 @@
             <div id="totalMessagesExact" class="overview-token-exact-tooltip" role="tooltip" hidden>-</div>
           </div>
           <div id="messagesDelta" class="text-xs font-semibold mt-1 kpi-delta"></div>
-          <svg id="sparklineMessages" class="kpi-sparkline text-purple-400/60" viewBox="0 0 100 35" preserveAspectRatio="none" fill="none"><defs><linearGradient id="kpiG3" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0.0"/></linearGradient></defs><path id="sparklineMessagesPath" d="M0 22 Q30 16 50 18 T80 12 T100 8" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path id="sparklineMessagesArea" d="M0 22 Q30 16 50 18 T80 12 T100 8 L100 35 L0 35 Z" fill="url(#kpiG3)"/></svg>
+          <svg id="sparklineMessages" class="kpi-sparkline text-purple-400/60" viewBox="0 0 100 35" preserveAspectRatio="none" fill="none"><defs><linearGradient id="kpiG3" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0.0"/></linearGradient></defs><path id="sparklineMessagesPath" d="" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path id="sparklineMessagesArea" d="" fill="url(#kpiG3)"/></svg>
         </div>
         <div class="surface p-5">
           <div class="flex items-center justify-between">
@@ -3280,7 +3310,7 @@
           </div>
           <div id="overviewActiveDelta" class="text-xs font-semibold mt-1 kpi-delta"></div>
           <div id="overviewActiveMeta" class="text-xs font-semibold mt-1 kpi-delta"></div>
-          <svg id="sparklineActiveTime" class="kpi-sparkline text-sky-400/60" viewBox="0 0 100 35" preserveAspectRatio="none" fill="none"><defs><linearGradient id="kpiG4" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0.0"/></linearGradient></defs><path id="sparklineActiveTimePath" d="M0 24 Q25 18 50 16 T75 12 T100 8" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path id="sparklineActiveTimeArea" d="M0 24 Q25 18 50 16 T75 12 T100 8 L100 35 L0 35 Z" fill="url(#kpiG4)"/></svg>
+          <svg id="sparklineActiveTime" class="kpi-sparkline text-sky-400/60" viewBox="0 0 100 35" preserveAspectRatio="none" fill="none"><defs><linearGradient id="kpiG4" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0.0"/></linearGradient></defs><path id="sparklineActiveTimePath" d="" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path id="sparklineActiveTimeArea" d="" fill="url(#kpiG4)"/></svg>
         </div>
         <div class="surface p-5">
           <div class="flex items-center justify-between">
@@ -3293,7 +3323,7 @@
             <div id="avgCacheHitRate" class="text-3xl sm:text-4xl font-extrabold mt-1.5 font-mono text-cyan-400">-</div>
             <div id="avgCacheHitRateExact" class="overview-token-exact-tooltip" role="tooltip" hidden>-</div>
           </div>
-          <svg id="sparklineCacheRate" class="kpi-sparkline text-cyan-400/60" viewBox="0 0 100 35" preserveAspectRatio="none" fill="none"><defs><linearGradient id="kpiG5" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0.0"/></linearGradient></defs><path id="sparklineCacheRatePath" d="M0 20 Q30 18 55 12 T85 10 T100 6" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path id="sparklineCacheRateArea" d="M0 20 Q30 18 55 12 T85 10 T100 6 L100 35 L0 35 Z" fill="url(#kpiG5)"/></svg>
+          <svg id="sparklineCacheRate" class="kpi-sparkline text-cyan-400/60" viewBox="0 0 100 35" preserveAspectRatio="none" fill="none"><defs><linearGradient id="kpiG5" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0.0"/></linearGradient></defs><path id="sparklineCacheRatePath" d="" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path id="sparklineCacheRateArea" d="" fill="url(#kpiG5)"/></svg>
         </div>
         <div class="surface p-5">
           <div class="flex items-center justify-between">
@@ -3304,7 +3334,7 @@
             <div id="topModelExact" class="overview-token-exact-tooltip" data-wrap="true" role="tooltip" hidden>-</div>
           </div>
           <div id="topModelMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
-          <svg id="sparklineTopModel" class="kpi-sparkline text-amber-400/60" viewBox="0 0 100 35" preserveAspectRatio="none" fill="none"><defs><linearGradient id="kpiG6" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0.0"/></linearGradient></defs><path id="sparklineTopModelPath" d="M0 22 Q20 20 40 14 T70 10 T100 6" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path id="sparklineTopModelArea" d="M0 22 Q20 20 40 14 T70 10 T100 6 L100 35 L0 35 Z" fill="url(#kpiG6)"/></svg>
+          <svg id="sparklineTopModel" class="kpi-sparkline text-amber-400/60" viewBox="0 0 100 35" preserveAspectRatio="none" fill="none"><defs><linearGradient id="kpiG6" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0.0"/></linearGradient></defs><path id="sparklineTopModelPath" d="" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path id="sparklineTopModelArea" d="" fill="url(#kpiG6)"/></svg>
         </div>
       </section>
 
@@ -3490,7 +3520,7 @@
     <div id="sessions-content" class="tab-content">
       <div id="sessionsPanelToolbar" class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
         <div class="flex items-center gap-2 overflow-x-auto py-1" id="sessionsQuickFilterBar">
-          <button class="modern-tool-pill active" type="button" data-tool="all" onclick="filterSessionPanels('all', this)" data-i18n="allTools">All Tools</button>
+          <button class="modern-tool-pill active" type="button" data-tool="all" onclick="filterSessionPanels('all', this)" title="All Tools" data-i18n-title="allTools" aria-label="All Tools" data-i18n-aria="allTools"><svg class="modern-tool-pill-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg><span class="tool-brand-label" data-i18n="allTools">All Tools</span></button>
         </div>
         <div class="flex items-center gap-2 flex-shrink-0">
           <input type="text" id="sessionSearchInput" class="ui-input text-xs py-1.5 px-3 rounded-lg" data-i18n-placeholder="searchSessions" placeholder="Search sessions/projects..." oninput="filterSessionsBySearch(this.value)" />
@@ -5311,6 +5341,7 @@
               <select id="usageReportServer" class="ui-input compact-control"></select>
             </label>
             <div class="usage-report-seg" id="usageReportPeriod" role="group" data-i18n-aria="usageReportPeriod" aria-label="Report period">
+              <button type="button" data-period="day" data-i18n="usageReportPeriodDay">Day</button>
               <button type="button" data-period="week" data-i18n="usageReportPeriodWeek">Week</button>
               <button type="button" data-period="month" data-i18n="usageReportPeriodMonth">Month</button>
               <button type="button" data-period="year" data-i18n="usageReportPeriodYear">Year</button>
@@ -5339,6 +5370,14 @@
                 <div class="usage-report-kpi-value mono" id="usageReportKCost" style="color: var(--color-cost);">—</div>
               </div>
               <div>
+                <div class="usage-report-kpi-label" data-i18n="messages">Messages</div>
+                <div class="usage-report-kpi-value mono" id="usageReportKMessages">—</div>
+              </div>
+              <div>
+                <div class="usage-report-kpi-label" data-i18n="usageReportColSessions">Sessions</div>
+                <div class="usage-report-kpi-value mono" id="usageReportKSessions">—</div>
+              </div>
+              <div>
                 <div class="usage-report-kpi-label">
                   <span data-i18n="usageReportActiveTime">Active time</span>
                   <span class="usage-report-pill" data-i18n="usageReportEst">est.</span>
@@ -5354,11 +5393,7 @@
             </div>
           </section>
 
-          <section class="usage-report-panel">
-            <p class="usage-report-sentence" id="usageReportSentence"></p>
-          </section>
-
-          <section class="usage-report-panel">
+          <section class="usage-report-panel" id="usageReportDaysPanel">
             <div class="usage-report-panel-head">
               <span class="usage-report-panel-title" data-i18n="usageReportDaysTitle">Days</span>
               <span class="usage-report-spacer"></span>
@@ -5436,7 +5471,7 @@
 
             <div class="usage-report-tier-group is-amber" style="margin-top:18px">
               <p class="usage-report-tier-h" data-i18n="usageReportAmberTitle">Project detail card</p>
-              <p class="usage-report-tier-p" data-i18n="usageReportAmberBody">Everything on the overview card plus the top projects by tokens, and the reconciliation line against the period total.</p>
+              <p class="usage-report-tier-p" data-i18n="usageReportAmberBody">Overview metrics plus the top projects by tokens.</p>
               <div class="usage-report-cards" id="usageReportAmberCards"></div>
               <div class="usage-report-export-row">
                 <button type="button" class="btn btn-primary compact-control" data-export="amber" data-i18n="usageReportExportAmber">Export project detail</button>
@@ -7508,6 +7543,22 @@
         hit: 'hit',
         na: 'n/a',
         cacheHitRateHint: 'Share of prompt input served from cache (cache reads ÷ all prompt input). Cache writes count as misses; output excluded. Sources without cache data show n/a.',
+        sparklineResolutionHourly: 'Hourly recorded values in local time, joined by a smoothed line.',
+        sparklineMeasuredHours: '{n} of {total} hours measured.',
+        sparklineResolutionDaily: 'Daily recorded values, joined by a smoothed line.',
+        sparklineMeasuredDays: '{n} of {total} days measured.',
+        sparklineResolutionMonthly: 'Monthly recorded values, joined by a smoothed line.',
+        sparklineMeasuredMonths: '{n} of {total} months measured.',
+        sparklineMonthPartial: 'This month is still in progress.',
+        sparklineRangeLimit: 'Curves are available for ranges of up to 366 days.',
+        sparklineNeedsWeekRange: 'Daily curves need the seven-day range ending today.',
+        sparklineNoDailyBreakdown: 'No daily breakdown available for this selection.',
+        sparklineNoHourlyBreakdown: 'The data this page already loads has no hourly breakdown.',
+        sparklineNoDailyBuckets: 'Reported as a range total, not day by day.',
+        sparklineHeadlineMismatch: 'Daily values differ from the current total. Reload or open Stats to check again.',
+        sparklineComponentsMissing: 'The daily data is missing cache or model components.',
+        sparklineTodayPartial: 'Today is still in progress.',
+        sparklineRecordedAt: 'Recorded {date}.',
         nModels: '{n} models',
         showingTopN: 'Showing top {top} of {total} models',
         mon: 'Mon',
@@ -7534,6 +7585,9 @@
         moreTools: '+{n} more tools',
         usageReport: 'Report',
         usageReportServerLabel: 'Server',
+        usageReportPeriodDay: 'Day',
+        usageReportTitleDay: 'Today',
+        usageReportChipYesterday: 'Yesterday',
         usageReportPeriodWeek: 'Week',
         usageReportPeriodMonth: 'Month',
         usageReportPeriodYear: 'Year',
@@ -7558,15 +7612,11 @@
         usageReportDays: 'Active days',
         usageReportDaysTitle: 'Days',
         usageReportActiveSub: '{agent} of agent time in parallel',
+        usageReportVsPriorDay: 'vs the previous day',
         usageReportVsPrior: 'vs the prior {n} days',
         usageReportNoDelta: 'no prior window to compare yet',
         usageReportNoDeltaYear: 'no delta on a partial year',
         usageReportDaysSub: '{n} days in the window',
-        usageReportSentence: 'In {range} you drove {sessions} sessions and used {tokens} tokens ({cost}), {pct}% more than {prior}.',
-        usageReportSentenceLess: 'In {range} you drove {sessions} sessions and used {tokens} tokens ({cost}), {pct}% less than {prior}.',
-        usageReportSentenceFlat: 'In {range} you drove {sessions} sessions and used {tokens} tokens ({cost}).',
-        usageReportSentenceWeek: 'this week',
-        usageReportSentenceYear: 'the year to date',
         usageReportStreak: '{streak}-day streak · {a} of {n} days active · busiest day {date} ({tokens})',
         usageReportStreakLapsed: 'longest run {streak} days · {a} of {n} days active · busiest day {date} ({tokens})',
         usageReportEmptyPeriod: 'No activity recorded in this window.',
@@ -7575,8 +7625,6 @@
         usageReportTopModel: 'Top model',
         usageReportTopProject: 'Top project',
         usageReportSessionsActive: '{sessions} sessions · {hours} active',
-        usageReportPodiumProjectNote: '{n} projects · ranked by tokens · {u} unattributed · {g} from sources with no project records (OpenClaw, live tools)',
-        usageReportProjectGroupNote: 'Projects are grouped by repository remote — the same codebase under two remotes appears twice.',
         usageReportFacetCovers: 'Analytics facets cover {pct} of the period total - a different scan of the same window.',
         usageReportMissingProjects: 'project records unavailable on this server',
         usageReportWhen: 'When you work',
@@ -7595,16 +7643,13 @@
         usageReportColCost: 'Cost',
         usageReportColCostQual: 'API list price',
         usageReportColActive: 'Active',
-        usageReportFooterDays: 'Days begin at {machine}’s local midnight.',
-        usageReportFooterCost: 'Cost figures are API list-price equivalents, not billed spend.',
-        usageReportFooterActive: 'Active time is estimated from recorded event gaps (cap {cap}).',
         usageReportFooterSrc: 'data: tokdash on {machine} · {n} tool sources · v{version}',
         usageReportShareTitle: 'Share',
         usageReportSharePreamble: 'Two cards, two privacy tiers. The preview is the export: same layout, same painted pixels.',
         usageReportGreenTitle: 'Overview card · counts only',
         usageReportGreenBody: 'Tokens, sessions, days, streak, busiest day, estimated active time, top harnesses and models. Safe to post.',
         usageReportAmberTitle: 'Project detail card',
-        usageReportAmberBody: 'Everything on the overview card plus the top projects by tokens, and the reconciliation line against the period total.',
+        usageReportAmberBody: 'Overview metrics plus the top projects by tokens.',
         usageReportNickname: 'Machine nickname',
         usageReportCostToggle: 'Include cost (API list price, not your bill)',
         usageReportExportGreen: 'Export overview card',
@@ -7618,6 +7663,7 @@
         usageReportCardYearTitle: '{year} · year to date',
         usageReportCardWeekTitle: 'Week of {date}',
         usageReportCardRange: '{from} – {to}',
+        usageReportCardHeroSubDay: '{sessions} sessions · {requests} requests · {agent} agent time',
         usageReportCardHeroSub: '{days} of {total} days active · {sessions} sessions · {requests} requests · {agent} agent time',
         usageReportCardHarnesses: 'Top harnesses',
         usageReportCardModels: 'Top models',
@@ -8197,6 +8243,22 @@
         hit: '命中',
         na: '无',
         cacheHitRateHint: '提示词输入中来自缓存的比例（缓存读取 ÷ 全部提示词输入）。缓存写入计为未命中；不含输出。无缓存数据的来源显示“无”。',
+        sparklineResolutionHourly: '本地时间的每小时记录值，测量点之间以平滑线连接。',
+        sparklineMeasuredHours: '已测量 {total} 小时中的 {n} 小时。',
+        sparklineResolutionDaily: '每日记录值，测量点之间以平滑线连接。',
+        sparklineMeasuredDays: '已测量 {total} 天中的 {n} 天。',
+        sparklineResolutionMonthly: '每月记录值，以平滑曲线连接。',
+        sparklineMeasuredMonths: '已记录 {n}/{total} 个月。',
+        sparklineMonthPartial: '本月尚未结束。',
+        sparklineRangeLimit: '曲线支持最多 366 天的日期范围。',
+        sparklineNeedsWeekRange: '每日曲线需要截至今日的七天范围。',
+        sparklineNoDailyBreakdown: '当前选择没有可用的每日明细。',
+        sparklineNoHourlyBreakdown: '此页面已加载的数据不含每小时明细。',
+        sparklineNoDailyBuckets: '仅按范围总计报告，未按天拆分。',
+        sparklineHeadlineMismatch: '每日数值与当前总计不一致。请重新加载或打开统计页再次查看。',
+        sparklineComponentsMissing: '每日数据缺少缓存或模型分量。',
+        sparklineTodayPartial: '今天仍在进行中。',
+        sparklineRecordedAt: '记录于 {date}。',
         nModels: '{n} 个模型',
         showingTopN: '显示前 {top} 个，共 {total} 个模型',
         mon: '周一',
@@ -8223,6 +8285,9 @@
         moreTools: '另有 {n} 个工具',
         usageReport: '报告',
         usageReportServerLabel: '服务器',
+        usageReportPeriodDay: '日',
+        usageReportTitleDay: '今天',
+        usageReportChipYesterday: '昨天',
         usageReportPeriodWeek: '周',
         usageReportPeriodMonth: '月',
         usageReportPeriodYear: '年',
@@ -8247,15 +8312,11 @@
         usageReportDays: '活跃天数',
         usageReportDaysTitle: '每日',
         usageReportActiveSub: '并行 agent 时间合计 {agent}',
+        usageReportVsPriorDay: '较前一天',
         usageReportVsPrior: '较之前 {n} 天',
         usageReportNoDelta: '暂无可对比的前期区间',
         usageReportNoDeltaYear: '进行中的周期不做同比',
         usageReportDaysSub: '本期共 {n} 天',
-        usageReportSentence: '{range}你驱动了 {sessions} 个会话，消耗 {tokens} token（{cost}），比{prior}多 {pct}%。',
-        usageReportSentenceLess: '{range}你驱动了 {sessions} 个会话，消耗 {tokens} token（{cost}），比{prior}少 {pct}%。',
-        usageReportSentenceFlat: '{range}你驱动了 {sessions} 个会话，消耗 {tokens} token（{cost}）。',
-        usageReportSentenceWeek: '本周',
-        usageReportSentenceYear: '今年年初至今',
         usageReportStreak: '连续编程 {streak} 天 · {n} 天中 {a} 天有记录 · 最忙的一天 {date}（{tokens}）',
         usageReportStreakLapsed: '最长连续 {streak} 天 · {n} 天中 {a} 天有记录 · 最忙的一天 {date}（{tokens}）',
         usageReportEmptyPeriod: '该时段暂无记录。',
@@ -8264,8 +8325,6 @@
         usageReportTopModel: '最常用模型',
         usageReportTopProject: '投入最多的项目',
         usageReportSessionsActive: '{sessions} 个会话 · 活跃 {hours}',
-        usageReportPodiumProjectNote: '{n} 个项目 · 按 token 排序 · {u} 未归属 · {g} 来自无项目记录的来源（OpenClaw 及在线工具）',
-        usageReportProjectGroupNote: '项目按仓库 remote 分组 —— 同一代码库挂在两个 remote 下会出现两次。',
         usageReportFacetCovers: '分析分面覆盖本期总量的 {pct} —— 与总量来自同一窗口的另一次扫描。',
         usageReportMissingProjects: '该服务器无项目归属记录',
         usageReportWhen: '你的时间分布',
@@ -8284,16 +8343,13 @@
         usageReportColCost: '费用',
         usageReportColCostQual: '目录价',
         usageReportColActive: '活跃时长',
-        usageReportFooterDays: '每日按{machine}的本地零点划分。',
-        usageReportFooterCost: '费用为 API 目录价估算，非实际账单。',
-        usageReportFooterActive: '活跃时长按记录的事件间隔估算（上限 {cap}）。',
         usageReportFooterSrc: '数据来源：{machine}上的 tokdash · {n} 个工具来源 · v{version}',
         usageReportShareTitle: '分享',
         usageReportSharePreamble: '两张卡片，两种隐私级别。预览即导出：同一套排版，同一批像素。',
         usageReportGreenTitle: '概况卡片 · 仅统计数字',
         usageReportGreenBody: 'Token、会话、活跃天数、连续记录、最忙的一天、估算活跃时长、常用 harness 与模型。可以直接转发。',
         usageReportAmberTitle: '项目明细卡片',
-        usageReportAmberBody: '包含概况卡片的全部内容，另加按 token 排序的项目排行，以及与本期总量的对账说明。',
+        usageReportAmberBody: '总览指标，以及 token 用量最多的项目。',
         usageReportNickname: '机器昵称',
         usageReportCostToggle: '包含费用（按 API 目录价，非实际账单）',
         usageReportExportGreen: '导出概况卡片',
@@ -8307,6 +8363,7 @@
         usageReportCardYearTitle: '{year} 年 · 年初至今',
         usageReportCardWeekTitle: '{date} 当周',
         usageReportCardRange: '{from} – {to}',
+        usageReportCardHeroSubDay: '{sessions} 个会话 · {requests} 次请求 · agent 时间 {agent}',
         usageReportCardHeroSub: '{total} 天中 {days} 天有记录 · {sessions} 个会话 · {requests} 次请求 · Agent 时间 {agent}',
         usageReportCardHarnesses: 'Harness 排名',
         usageReportCardModels: '模型排名',
@@ -8887,6 +8944,22 @@
         hit: 'ヒット',
         na: 'N/A',
         cacheHitRateHint: 'プロンプト入力のうちキャッシュから供給された割合（キャッシュ読み取り ÷ プロンプト入力全体）。キャッシュ書き込みはミスにカウントされます。出力は除外します。キャッシュデータのないソースは N/A と表示されます。',
+        sparklineResolutionHourly: '現地時間の時間ごとの記録値を補間線で結んでいます。',
+        sparklineMeasuredHours: '{total}時間のうち{n}時間を測定。',
+        sparklineResolutionDaily: '日単位の記録値を補間線で結んでいます。',
+        sparklineMeasuredDays: '{total}日のうち{n}日を測定。',
+        sparklineResolutionMonthly: '月別の記録値を滑らかな線でつなぎます。',
+        sparklineMeasuredMonths: '{total}か月中{n}か月を記録。',
+        sparklineMonthPartial: '今月はまだ途中です。',
+        sparklineRangeLimit: '曲線は366日以内の範囲で表示できます。',
+        sparklineNeedsWeekRange: '日別曲線は本日までの7日間範囲が必要です。',
+        sparklineNoDailyBreakdown: 'この選択では日別の内訳が利用できません。',
+        sparklineNoHourlyBreakdown: 'このページが既に読み込むデータに時間別の内訳がありません。',
+        sparklineNoDailyBuckets: '日別ではなく期間合計として報告されます。',
+        sparklineHeadlineMismatch: '日別値が現在の合計と一致しません。再読み込みするか統計を開いて再確認してください。',
+        sparklineComponentsMissing: '日別データにキャッシュまたはモデルの内訳がありません。',
+        sparklineTodayPartial: '今日はまだ集計中です。',
+        sparklineRecordedAt: '{date} に記録。',
         nModels: '{n} 件のモデル',
         showingTopN: '{total} 件のうち上位 {top} 件を表示中',
         mon: '月',
@@ -8913,6 +8986,9 @@
         moreTools: '他 {n} 件のツール',
         usageReport: 'レポート',
         usageReportServerLabel: 'サーバー',
+        usageReportPeriodDay: '日',
+        usageReportTitleDay: '今日',
+        usageReportChipYesterday: '昨日',
         usageReportPeriodWeek: '週',
         usageReportPeriodMonth: '月',
         usageReportPeriodYear: '年',
@@ -8937,15 +9013,11 @@
         usageReportDays: '稼働日',
         usageReportDaysTitle: '日別',
         usageReportActiveSub: '並列エージェント時間の合計 {agent}',
+        usageReportVsPriorDay: '前日比',
         usageReportVsPrior: '前 {n} 日間比',
         usageReportNoDelta: '比較できる前期がありません',
         usageReportNoDeltaYear: '進行中の期間は増減を表示しません',
         usageReportDaysSub: '期間内 {n} 日',
-        usageReportSentence: '{range}は {sessions} セッションを動かし、{tokens} トークン（{cost}）を使いました。{prior}より {pct}% 多い。',
-        usageReportSentenceLess: '{range}は {sessions} セッションを動かし、{tokens} トークン（{cost}）を使いました。{prior}より {pct}% 少ない。',
-        usageReportSentenceFlat: '{range}は {sessions} セッションを動かし、{tokens} トークン（{cost}）を使いました。',
-        usageReportSentenceWeek: '今週',
-        usageReportSentenceYear: '年初から現在まで',
         usageReportStreak: '連続 {streak} 日 · {n} 日中 {a} 日が稼働 · 最も忙しい日 {date}（{tokens}）',
         usageReportStreakLapsed: '最長連続 {streak} 日 · {n} 日中 {a} 日が稼働 · 最も忙しい日 {date}（{tokens}）',
         usageReportEmptyPeriod: 'この期間の記録はありません。',
@@ -8954,8 +9026,6 @@
         usageReportTopModel: '最多のモデル',
         usageReportTopProject: '最多のプロジェクト',
         usageReportSessionsActive: '{sessions} セッション · 稼働 {hours}',
-        usageReportPodiumProjectNote: '{n} プロジェクト · トークン数順 · 帰属先なし {u} · プロジェクト記録のない来源（OpenClaw とライブツール）が {g}',
-        usageReportProjectGroupNote: 'プロジェクトはリポジトリの remote でグループ化しているため、同じコードベースでも remote が異なると 2 件表示されます。',
         usageReportFacetCovers: '分析ファセットは期間合計の {pct} をカバーします - 同じ期間を別系統で集計した値です。',
         usageReportMissingProjects: 'このサーバーではプロジェクト記録を利用できません',
         usageReportWhen: '作業時間帯',
@@ -8974,16 +9044,13 @@
         usageReportColCost: 'コスト',
         usageReportColCostQual: 'API 公称価格',
         usageReportColActive: '稼働時間',
-        usageReportFooterDays: '1 日の区切りは{machine}の現地時刻の午前 0 時です。',
-        usageReportFooterCost: 'コストは API 公称価格換算で、実際の請求額ではありません。',
-        usageReportFooterActive: '稼働時間は記録されたイベント間隔から推定しています（上限 {cap}）。',
         usageReportFooterSrc: 'データ出所: {machine}の tokdash · {n} 個のツールソース · v{version}',
         usageReportShareTitle: '共有',
         usageReportSharePreamble: '2 種のカード、2 段階の公開範囲。プレビューがそのまま書き出しです。同じレイアウト、同じ描画結果です。',
         usageReportGreenTitle: '概要カード · 集計数のみ',
         usageReportGreenBody: 'トークン数、セッション数、稼働日、連続日、最も多かった日、推定稼働時間、よく使うハーネスとモデル。そのまま投稿して問題ありません。',
         usageReportAmberTitle: 'プロジェクト明細カード',
-        usageReportAmberBody: '概要カードの内容に、トークン数順のプロジェクトと期間合計との対応説明を加えています。',
+        usageReportAmberBody: '概要の指標と、トークン使用量が多いプロジェクト。',
         usageReportNickname: 'マシンのニックネーム',
         usageReportCostToggle: 'コストを含める（API 公称価格、実際の請求額ではありません）',
         usageReportExportGreen: '概要カードを書き出す',
@@ -8997,6 +9064,7 @@
         usageReportCardYearTitle: '{year} 年 · 年初から',
         usageReportCardWeekTitle: '{date} 開始の週',
         usageReportCardRange: '{from} – {to}',
+        usageReportCardHeroSubDay: '{sessions} セッション · {requests} リクエスト · エージェント稼働 {agent}',
         usageReportCardHeroSub: '{total} 日中 {days} 日が稼働日 · {sessions} セッション · {requests} リクエスト · エージェント時間 {agent}',
         usageReportCardHarnesses: 'ハーネス上位',
         usageReportCardModels: 'モデル上位',
@@ -9577,6 +9645,22 @@
         hit: '적중',
         na: 'N/A',
         cacheHitRateHint: '프롬프트 입력 중 캐시로 처리된 비율 (캐시 읽기 ÷ 프롬프트 입력 전체). 캐시 쓰기는 미스로 계산되고, 출력은 제외됩니다. 캐시 데이터가 없는 소스는 N/A로 표시됩니다.',
+        sparklineResolutionHourly: '현지 시간의 시간별 기록 값을 보간선으로 연결했습니다.',
+        sparklineMeasuredHours: '{total}시간 중 {n}시간 측정됨.',
+        sparklineResolutionDaily: '일자별 기록 값이며 보간선으로 연결했습니다.',
+        sparklineMeasuredDays: '{total}일 중 {n}일 측정됨.',
+        sparklineResolutionMonthly: '월별 기록값을 부드러운 선으로 연결합니다.',
+        sparklineMeasuredMonths: '{total}개월 중 {n}개월 기록됨.',
+        sparklineMonthPartial: '이번 달은 아직 진행 중입니다.',
+        sparklineRangeLimit: '곡선은 최대 366일 범위에서 사용할 수 있습니다.',
+        sparklineNeedsWeekRange: '일간 곡선은 오늘까지 7일 범위가 필요합니다.',
+        sparklineNoDailyBreakdown: '이 선택에서는 일별 세부 정보를 사용할 수 없습니다.',
+        sparklineNoHourlyBreakdown: '이 페이지가 이미 불러온 데이터에 시간별 세부 정보가 없습니다.',
+        sparklineNoDailyBuckets: '일별이 아니라 기간 합계로 보고됩니다.',
+        sparklineHeadlineMismatch: '일별 값이 현재 합계와 다릅니다. 새로고침하거나 통계를 열어 다시 확인하세요.',
+        sparklineComponentsMissing: '일별 데이터에 캐시 또는 모델 구성 요소가 없습니다.',
+        sparklineTodayPartial: '오늘은 아직 진행 중입니다.',
+        sparklineRecordedAt: '{date} 기록됨.',
         nModels: '{n}개 모델',
         showingTopN: '{total}개 중 상위 {top}개 표시',
         mon: '월',
@@ -9603,6 +9687,9 @@
         moreTools: '나머지 {n}개 도구',
         usageReport: '리포트',
         usageReportServerLabel: '서버',
+        usageReportPeriodDay: '일',
+        usageReportTitleDay: '오늘',
+        usageReportChipYesterday: '어제',
         usageReportPeriodWeek: '주',
         usageReportPeriodMonth: '월',
         usageReportPeriodYear: '년',
@@ -9627,15 +9714,11 @@
         usageReportDays: '활동일',
         usageReportDaysTitle: '일자별',
         usageReportActiveSub: '병렬 에이전트 시간 합계 {agent}',
+        usageReportVsPriorDay: '전일 대비',
         usageReportVsPrior: '이전 {n}일 대비',
         usageReportNoDelta: '비교할 이전 기간이 없습니다',
         usageReportNoDeltaYear: '진행 중인 기간은 증감을 표시하지 않습니다',
         usageReportDaysSub: '기간 내 {n}일',
-        usageReportSentence: '{range} 동안 {sessions} 세션을 실행하고 {tokens} 토큰({cost})을 사용했습니다. {prior}보다 {pct}% 많습니다.',
-        usageReportSentenceLess: '{range} 동안 {sessions} 세션을 실행하고 {tokens} 토큰({cost})을 사용했습니다. {prior}보다 {pct}% 적습니다.',
-        usageReportSentenceFlat: '{range} 동안 {sessions} 세션을 실행하고 {tokens} 토큰({cost})을 사용했습니다.',
-        usageReportSentenceWeek: '이번 주',
-        usageReportSentenceYear: '연초부터 현재까지',
         usageReportStreak: '연속 {streak}일 · {n}일 중 {a}일 활동 · 가장 바빴던 날 {date}({tokens})',
         usageReportStreakLapsed: '최장 연속 {streak}일 · {n}일 중 {a}일 활동 · 가장 바빴던 날 {date}({tokens})',
         usageReportEmptyPeriod: '이 기간에는 기록이 없습니다.',
@@ -9644,9 +9727,7 @@
         usageReportTopModel: '최다 모델',
         usageReportTopProject: '최다 프로젝트',
         usageReportSessionsActive: '세션 {sessions}회 · 활동 {hours}',
-        usageReportPodiumProjectNote: '프로젝트 {n}개 · 토큰 순 · 미귀속 {u} · 프로젝트 기록이 없는 소스(OpenClaw, 라이브 툴) {g}',
-        usageReportProjectGroupNote: '프로젝트는 저장소 remote 기준으로 묶기 때문에, 같은 코드베이스라도 remote가 다르면 두 번 표시됩니다.',
-        usageReportFacetCovers: '분석 팩트가 기간 합계의 {pct}를 포함합니다 - 같은 기간을 다른 방식으로 집계한 값입니다.',
+        usageReportFacetCovers: '분석 데이터가 기간 합계의 {pct}를 포함합니다 - 같은 기간을 다른 방식으로 집계한 값입니다.',
         usageReportMissingProjects: '이 서버에서는 프로젝트 기록을 사용할 수 없습니다',
         usageReportWhen: '작업 시간대',
         usageReportWhenTz: '로컬 시간 · {tz}',
@@ -9664,16 +9745,13 @@
         usageReportColCost: '비용',
         usageReportColCostQual: 'API 정가',
         usageReportColActive: '활동',
-        usageReportFooterDays: '하루는 {machine}의 현지 자정을 기준으로 구분합니다.',
-        usageReportFooterCost: '비용은 API 정가 환산액이며 실제 청구액이 아닙니다.',
-        usageReportFooterActive: '활동 시간은 기록된 이벤트 간격으로 추정합니다(상한 {cap}).',
         usageReportFooterSrc: '데이터: {machine}의 tokdash · 툴 소스 {n}개 · v{version}',
         usageReportShareTitle: '공유',
         usageReportSharePreamble: '두 장의 카드, 두 단계의 공개 범위. 미리보기가 그대로 내보내기 결과입니다. 같은 배치, 같은 그려진 픽셀입니다.',
         usageReportGreenTitle: '개요 카드 · 집계만',
         usageReportGreenBody: '토큰, 세션, 활동일, 연속 기록, 가장 바빴던 날, 추정 활동 시간, 자주 쓰는 하네스와 모델. 그대로 올려도 됩니다.',
         usageReportAmberTitle: '프로젝트 상세 카드',
-        usageReportAmberBody: '개요 카드의 모든 내용에 토큰 순 프로젝트 순위와 기간 합계 대비 대응 설명을 더했습니다.',
+        usageReportAmberBody: '개요 지표에 토큰 사용량 기준 상위 프로젝트를 추가합니다.',
         usageReportNickname: '머신 별명',
         usageReportCostToggle: '비용 포함 (API 정가, 실제 청구액 아님)',
         usageReportExportGreen: '개요 카드 내보내기',
@@ -9687,6 +9765,7 @@
         usageReportCardYearTitle: '{year}년 · 연초부터',
         usageReportCardWeekTitle: '{date} 시작 주',
         usageReportCardRange: '{from} – {to}',
+        usageReportCardHeroSubDay: '세션 {sessions}회 · 요청 {requests}회 · 에이전트 시간 {agent}',
         usageReportCardHeroSub: '{total}일 중 {days}일 활동 · 세션 {sessions}회 · 요청 {requests}회 · 에이전트 시간 {agent}',
         usageReportCardHarnesses: '상위 하네스',
         usageReportCardModels: '상위 모델',
@@ -10267,6 +10346,22 @@
         hit: 'acierto',
         na: 'n/d',
         cacheHitRateHint: 'Proporción de la entrada del prompt servida desde la caché (lecturas de caché ÷ toda la entrada del prompt). Las escrituras de caché cuentan como fallas; la salida queda excluida. Los orígenes sin datos de caché muestran n/d.',
+        sparklineResolutionHourly: 'Valores registrados por hora local, unidos con una línea suavizada.',
+        sparklineMeasuredHours: '{n} de {total} horas medidas.',
+        sparklineResolutionDaily: 'Valores diarios registrados unidos con una línea suavizada.',
+        sparklineMeasuredDays: '{n} de {total} días medidos.',
+        sparklineResolutionMonthly: 'Valores mensuales registrados, unidos por una línea suavizada.',
+        sparklineMeasuredMonths: '{n} de {total} meses registrados.',
+        sparklineMonthPartial: 'Este mes sigue en curso.',
+        sparklineRangeLimit: 'Las curvas están disponibles para intervalos de hasta 366 días.',
+        sparklineNeedsWeekRange: 'Las curvas diarias necesitan el rango de siete días hasta hoy.',
+        sparklineNoDailyBreakdown: 'No hay desglose diario disponible para esta selección.',
+        sparklineNoHourlyBreakdown: 'Los datos que esta página ya carga no incluyen desglose por hora.',
+        sparklineNoDailyBuckets: 'Se informa como total del rango, no día a día.',
+        sparklineHeadlineMismatch: 'Los valores diarios difieren del total actual. Recarga o abre Estadísticas para comprobarlo de nuevo.',
+        sparklineComponentsMissing: 'A los datos diarios les faltan componentes de caché o de modelo.',
+        sparklineTodayPartial: 'Hoy aún está en curso.',
+        sparklineRecordedAt: 'Registrado el {date}.',
         nModels: '{n} modelos',
         showingTopN: 'Mostrando los {top} primeros de {total} modelos',
         mon: 'lun',
@@ -10293,6 +10388,9 @@
         moreTools: '+{n} herramientas más',
         usageReport: 'Informe',
         usageReportServerLabel: 'Servidor',
+        usageReportPeriodDay: 'Día',
+        usageReportTitleDay: 'Hoy',
+        usageReportChipYesterday: 'Ayer',
         usageReportPeriodWeek: 'Semana',
         usageReportPeriodMonth: 'Mes',
         usageReportPeriodYear: 'Año',
@@ -10317,15 +10415,11 @@
         usageReportDays: 'Días activos',
         usageReportDaysTitle: 'Días',
         usageReportActiveSub: '{agent} de tiempo de agente en paralelo',
+        usageReportVsPriorDay: 'frente al día anterior',
         usageReportVsPrior: 'frente a los {n} días anteriores',
         usageReportNoDelta: 'sin periodo anterior que comparar',
         usageReportNoDeltaYear: 'sin variación en un periodo en curso',
         usageReportDaysSub: '{n} días en la ventana',
-        usageReportSentence: 'En {range} ejecutaste {sessions} sesiones y usaste {tokens} tokens ({cost}), un {pct}% más que {prior}.',
-        usageReportSentenceLess: 'En {range} ejecutaste {sessions} sesiones y usaste {tokens} tokens ({cost}), un {pct}% menos que {prior}.',
-        usageReportSentenceFlat: 'En {range} ejecutaste {sessions} sesiones y usaste {tokens} tokens ({cost}).',
-        usageReportSentenceWeek: 'esta semana',
-        usageReportSentenceYear: 'lo que va del año',
         usageReportStreak: 'racha de {streak} días · {a} de {n} días activos · día más intenso {date} ({tokens})',
         usageReportStreakLapsed: 'mejor racha {streak} días · {a} de {n} días activos · día más intenso {date} ({tokens})',
         usageReportEmptyPeriod: 'Sin actividad registrada en este periodo.',
@@ -10333,9 +10427,7 @@
         usageReportTopHarness: 'Harness principal',
         usageReportTopModel: 'Modelo principal',
         usageReportTopProject: 'Proyecto principal',
-        usageReportSessionsActive: '{sessions} sesiones · {hours} activo',
-        usageReportPodiumProjectNote: '{n} proyectos · ordenados por tokens · {u} sin atribución · {g} de fuentes sin registros de proyecto (OpenClaw, herramientas en vivo)',
-        usageReportProjectGroupNote: 'Los proyectos se agrupan por remote del repositorio: el mismo código con dos remotes aparece dos veces.',
+        usageReportSessionsActive: '{sessions} sesiones · tiempo activo: {hours}',
         usageReportFacetCovers: 'Las facetas de análisis cubren {pct} del total del periodo: un escaneo distinto de la misma ventana.',
         usageReportMissingProjects: 'sin registros de proyecto en este servidor',
         usageReportWhen: 'Cuándo trabajas',
@@ -10354,16 +10446,13 @@
         usageReportColCost: 'Coste',
         usageReportColCostQual: 'Precio de lista API',
         usageReportColActive: 'Activo',
-        usageReportFooterDays: 'Los días empiezan a la medianoche local de {machine}.',
-        usageReportFooterCost: 'El coste equivale a los precios de lista de la API, no al importe facturado.',
-        usageReportFooterActive: 'El tiempo activo se estima con los intervalos registrados (tope {cap}).',
         usageReportFooterSrc: 'datos: tokdash en {machine} · {n} fuentes de herramientas · v{version}',
         usageReportShareTitle: 'Compartir',
         usageReportSharePreamble: 'Dos tarjetas, dos niveles de privacidad. La vista previa es la exportación: mismo diseño, mismos píxeles pintados.',
         usageReportGreenTitle: 'Tarjeta resumen · solo recuentos',
         usageReportGreenBody: 'Tokens, sesiones, días, racha, día más intenso, tiempo activo estimado, principales harness y modelos. Se puede publicar tal cual.',
         usageReportAmberTitle: 'Tarjeta de proyectos',
-        usageReportAmberBody: 'Todo lo de la tarjeta resumen más los proyectos principales por tokens y la línea de conciliación con el total del periodo.',
+        usageReportAmberBody: 'Las métricas del resumen y los proyectos principales por tokens.',
         usageReportNickname: 'Apodo de la máquina',
         usageReportCostToggle: 'Incluir coste (precio de lista de la API, no tu factura)',
         usageReportExportGreen: 'Exportar tarjeta resumen',
@@ -10377,6 +10466,7 @@
         usageReportCardYearTitle: '{year} · hasta hoy',
         usageReportCardWeekTitle: 'Semana del {date}',
         usageReportCardRange: '{from} – {to}',
+        usageReportCardHeroSubDay: '{sessions} sesiones · {requests} solicitudes · {agent} de tiempo de agente',
         usageReportCardHeroSub: '{days} de {total} días activos · {sessions} sesiones · {requests} solicitudes · {agent} de tiempo de agente',
         usageReportCardHarnesses: 'Harness principales',
         usageReportCardModels: 'Modelos principales',
@@ -10957,6 +11047,22 @@
         hit: 'acerto',
         na: 'n/d',
         cacheHitRateHint: 'Proporção da entrada do prompt atendida pelo cache (leituras de cache ÷ toda a entrada do prompt). Escritas de cache contam como falhas; a saída fica excluída. Origens sem dados de cache mostram n/d.',
+        sparklineResolutionHourly: 'Valores registrados por hora local, unidos por uma linha suavizada.',
+        sparklineMeasuredHours: '{n} de {total} horas medidas.',
+        sparklineResolutionDaily: 'Valores diarios registrados unidos por uma linha suavizada.',
+        sparklineMeasuredDays: '{n} de {total} dias medidos.',
+        sparklineResolutionMonthly: 'Valores mensais registrados, unidos por uma linha suavizada.',
+        sparklineMeasuredMonths: '{n} de {total} meses registrados.',
+        sparklineMonthPartial: 'Este mês ainda está em andamento.',
+        sparklineRangeLimit: 'As curvas estão disponíveis para intervalos de até 366 dias.',
+        sparklineNeedsWeekRange: 'As curvas diárias precisam do intervalo de sete dias até hoje.',
+        sparklineNoDailyBreakdown: 'Não há detalhe diário disponível para esta seleção.',
+        sparklineNoHourlyBreakdown: 'Os dados que esta página já carrega não incluem detalhe por hora.',
+        sparklineNoDailyBuckets: 'Informado como total do intervalo, não dia a dia.',
+        sparklineHeadlineMismatch: 'Os valores diários diferem do total atual. Recarregue ou abra Estatísticas para conferir novamente.',
+        sparklineComponentsMissing: 'Faltam nos dados diários os componentes de cache ou de modelo.',
+        sparklineTodayPartial: 'Hoje ainda está em curso.',
+        sparklineRecordedAt: 'Registrado em {date}.',
         nModels: '{n} modelos',
         showingTopN: 'Mostrando os {top} primeiros de {total} modelos',
         mon: 'seg',
@@ -10983,6 +11089,9 @@
         moreTools: '+{n} ferramentas a mais',
         usageReport: 'Relatório',
         usageReportServerLabel: 'Servidor',
+        usageReportPeriodDay: 'Dia',
+        usageReportTitleDay: 'Hoje',
+        usageReportChipYesterday: 'Ontem',
         usageReportPeriodWeek: 'Semana',
         usageReportPeriodMonth: 'Mês',
         usageReportPeriodYear: 'Ano',
@@ -11007,15 +11116,11 @@
         usageReportDays: 'Dias ativos',
         usageReportDaysTitle: 'Dias',
         usageReportActiveSub: '{agent} de tempo de agente em paralelo',
-        usageReportVsPrior: 'vs. os {n} dias anteriores',
+        usageReportVsPriorDay: 'em relação ao dia anterior',
+        usageReportVsPrior: 'em relação aos {n} dias anteriores',
         usageReportNoDelta: 'sem período anterior para comparar',
         usageReportNoDeltaYear: 'sem variação em um período em andamento',
         usageReportDaysSub: '{n} dias na janela',
-        usageReportSentence: 'Em {range} você rodou {sessions} sessões e usou {tokens} tokens ({cost}), {pct}% mais que {prior}.',
-        usageReportSentenceLess: 'Em {range} você rodou {sessions} sessões e usou {tokens} tokens ({cost}), {pct}% menos que {prior}.',
-        usageReportSentenceFlat: 'Em {range} você rodou {sessions} sessões e usou {tokens} tokens ({cost}).',
-        usageReportSentenceWeek: 'esta semana',
-        usageReportSentenceYear: 'até agora neste ano',
         usageReportStreak: 'sequência de {streak} dias · {a} de {n} dias ativos · dia mais ocupado {date} ({tokens})',
         usageReportStreakLapsed: 'melhor sequência {streak} dias · {a} de {n} dias ativos · dia mais ocupado {date} ({tokens})',
         usageReportEmptyPeriod: 'Nenhuma atividade registrada neste período.',
@@ -11023,10 +11128,8 @@
         usageReportTopHarness: 'Harness principal',
         usageReportTopModel: 'Modelo principal',
         usageReportTopProject: 'Projeto principal',
-        usageReportSessionsActive: '{sessions} sessões · {hours} ativo',
-        usageReportPodiumProjectNote: '{n} projetos · ordenados por tokens · {u} sem atribuição · {g} de fontes sem registros de projeto (OpenClaw, ferramentas ao vivo)',
-        usageReportProjectGroupNote: 'Os projetos são agrupados pelo remote do repositório: o mesmo código com dois remotes aparece duas vezes.',
-        usageReportFacetCovers: 'Os facets de análise cobrem {pct} do total do período: outra leitura da mesma janela.',
+        usageReportSessionsActive: '{sessions} sessões · tempo ativo: {hours}',
+        usageReportFacetCovers: 'Os dados da análise cobrem {pct} do total do período: outra leitura da mesma janela.',
         usageReportMissingProjects: 'sem registros de projeto neste servidor',
         usageReportWhen: 'Quando você trabalha',
         usageReportWhenTz: 'Hora local · {tz}',
@@ -11044,16 +11147,13 @@
         usageReportColCost: 'Custo',
         usageReportColCostQual: 'Preço de lista da API',
         usageReportColActive: 'Ativo',
-        usageReportFooterDays: 'Os dias começam à meia-noite local marcada por {machine}.',
-        usageReportFooterCost: 'Os valores de custo equivalem aos preços de lista da API, não à fatura.',
-        usageReportFooterActive: 'O tempo ativo é estimado pelos intervalos registrados (limite {cap}).',
         usageReportFooterSrc: 'dados: tokdash · {machine} · {n} fontes de ferramentas · v{version}',
         usageReportShareTitle: 'Compartilhar',
         usageReportSharePreamble: 'Dois cartões, dois níveis de privacidade. A prévia é a exportação: mesmo layout, mesmos pixels pintados.',
         usageReportGreenTitle: 'Cartão de visão geral · só contagens',
         usageReportGreenBody: 'Tokens, sessões, dias, sequência, dia mais intenso, tempo ativo estimado, principais harness e modelos. Pode publicar sem medo.',
         usageReportAmberTitle: 'Cartão de projetos',
-        usageReportAmberBody: 'Tudo do cartão de visão geral mais os principais projetos por tokens e a linha de conciliação com o total do período.',
+        usageReportAmberBody: 'As métricas da visão geral e os principais projetos por tokens.',
         usageReportNickname: 'Apelido da máquina',
         usageReportCostToggle: 'Incluir custo (preço de lista da API, não sua fatura)',
         usageReportExportGreen: 'Exportar cartão de visão geral',
@@ -11067,6 +11167,7 @@
         usageReportCardYearTitle: '{year} · ano até agora',
         usageReportCardWeekTitle: 'Semana de {date}',
         usageReportCardRange: '{from} – {to}',
+        usageReportCardHeroSubDay: '{sessions} sessões · {requests} solicitações · {agent} de tempo de agente',
         usageReportCardHeroSub: '{days} de {total} dias ativos · {sessions} sessões · {requests} solicitações · {agent} de tempo de agente',
         usageReportCardHarnesses: 'Principais harness',
         usageReportCardModels: 'Principais modelos',
@@ -11204,10 +11305,17 @@
         rounded = Math.round((tokens / scale.divisor) * 10) / 10;
       }
       const locale = langLocale();
-      const compact = rounded.toLocaleString(locale, {
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 1,
-      });
+      // Overview's annual activity tooltips format thousands of token values.
+      // Reuse one formatter for the current locale instead of allocating one
+      // per value; changing the language replaces it immediately.
+      let cached = formatCompactTokenCount.formatter;
+      if (!cached || cached.locale !== locale) {
+        cached = formatCompactTokenCount.formatter = { locale, number: new Intl.NumberFormat(locale, {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 1,
+        }) };
+      }
+      const compact = cached.number.format(rounded);
       return `${compact}${scale.suffix}`;
     }
 
@@ -13241,11 +13349,11 @@
       zed: { icon: '/static/icons/agents/zed.svg', color: '#111111', fallback: 'Z', darkInvert: true },
       qwen_code: { icon: '/static/icons/agents/qwen_code.svg', color: '#6D44E8', fallback: 'Q' },
       crush: { icon: '/static/icons/agents/crush.png', color: '#6B50FF', fallback: 'C' },
-      muse: { icon: null, color: '#0668E1', fallback: 'M' },
+      muse: { icon: null, color: '#0064E0', fallback: 'M' },
       minimax: { icon: '/static/icons/agents/minimax.png', color: '#E11580', fallback: 'M' },
       commandcode: { icon: '/static/icons/agents/commandcode.png', color: '#111111', fallback: 'C' },
       devin: { icon: '/static/icons/agents/devin.png', color: '#3F4756', fallback: 'D' },
-      freebuff: { icon: '/static/icons/agents/freebuff.svg', color: '#00C26E', fallback: 'F' },
+      freebuff: { icon: '/static/icons/agents/freebuff.svg', color: '#22c55e', fallback: 'F', darkInvert: true },
     });
     const toolBrandIconPromises = new Map();
 
@@ -13919,6 +14027,890 @@
       else region.removeAttribute('aria-busy');
     }
 
+    // ===== Overview sparklines: honest curves from responses already loaded =====
+    // Bucket series travel with the headline that produced them. Rendering adds
+    // no requests or timers; older servers can still use their loaded Stats rows.
+    const SPARKLINE_WEEK_LENGTH = 7;
+    const SPARKLINE_VIEW = { width: 100, top: 4, baseline: 34 };
+    const SPARKLINE_TOKEN_FIELDS = ['input', 'output', 'cacheRead', 'cacheWrite', 'reasoning'];
+    // Money prints two decimals and the cache card's exact readout prints two decimals
+    // of a percent, so a curve may only claim what those printed digits can carry.
+    const SPARKLINE_COST_TOLERANCE = 0.005 + 1e-9;
+    const SPARKLINE_RATE_TOLERANCE = 0.00005 + 1e-12;
+    const SPARKLINE_CARDS = [
+      { id: 'tokens', svg: 'sparklineTokens', labelKey: 'totalTokens', unit: 'count' },
+      { id: 'cost', svg: 'sparklineCost', labelKey: 'totalCost', unit: 'usd' },
+      { id: 'messages', svg: 'sparklineMessages', labelKey: 'totalMessages', unit: 'count' },
+      { id: 'agent_time', svg: 'sparklineActiveTime', labelKey: 'agentTime', unit: 'ms' },
+      { id: 'cache_hit_rate', svg: 'sparklineCacheRate', labelKey: 'avgCacheHitRate', unit: 'ratio' },
+      { id: 'top_model', svg: 'sparklineTopModel', labelKey: 'topModel', unit: 'count' },
+    ];
+    const SPARKLINE_REASON_KEYS = {
+      rangeNotWeek: 'sparklineNeedsWeekRange',
+      rangeTooLong: 'sparklineRangeLimit',
+      noDaily: 'sparklineNoDailyBreakdown',
+      selection: 'sparklineNoDailyBreakdown',
+      intraday: 'sparklineNoHourlyBreakdown',
+      noBuckets: 'sparklineNoDailyBuckets',
+      components: 'sparklineComponentsMissing',
+      mismatch: 'sparklineHeadlineMismatch',
+    };
+    // Two references, each one request wide. No history, no persistence, no map of
+    // every range the browser has ever seen.
+    let sparklineUsageRef = null;
+    let sparklineStatsRef = null;
+    // Stats reads share one reference between the foreground load and the warm load,
+    // so each read is stamped with the generation it was issued in and only commits
+    // while nothing newer has already been accepted. Without this an older response
+    // that merely arrived last would replace the reference the accepted read earned.
+    let sparklineStatsIssued = 0;
+    let sparklineStatsAccepted = 0;
+
+    // A payload field that is absent, null, blank or a boolean is an unavailable
+    // answer, not a zero, so it is rejected before any coercion: Number(null),
+    // Number('') and Number(false) are all zero, which would let an unavailable
+    // field be drawn as a measured one.
+    function sparklineNumber(value) {
+      const number = typeof value === 'number' ? value : (
+        typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN
+      );
+      return Number.isFinite(number) && number >= 0 ? number : null;
+    }
+
+    // Sum of what the response actually measured. Nulls are dates this metric
+    // cannot answer (outside the response's own coverage, or a missing field) and
+    // are left out; an answer with nothing measured is no answer at all.
+    function sparklineMeasuredSum(values) {
+      let total = 0;
+      let measured = 0;
+      for (const value of values) {
+        if (value === null) continue;
+        if (!Number.isFinite(value)) return null;
+        total += value;
+        measured += 1;
+      }
+      return measured ? total : null;
+    }
+
+    function sparklineSum(values) {
+      let total = 0;
+      for (const value of values) {
+        if (value === null || !Number.isFinite(value)) return null;
+        total += value;
+      }
+      return total;
+    }
+
+    // Week means the rolling seven local calendar dates ending today. Null for any
+    // other selection, because the headline parity check below is what proves the
+    // daily rows describe the same usage this card totals -- and that only holds when
+    // the card's own range is exactly this window.
+    function sparklineWeekDates(startDate, endDate, today = new Date()) {
+      if (!(startDate instanceof Date) || !(endDate instanceof Date)) return null;
+      if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
+      const reference = today instanceof Date && !Number.isNaN(today.getTime()) ? today : new Date();
+      if (formatDateKey(endDate) !== formatDateKey(reference)) return null;
+      const cursor = parseDateKey(formatDateKey(startDate));
+      const stop = parseDateKey(formatDateKey(endDate));
+      if (Number.isNaN(cursor.getTime()) || Number.isNaN(stop.getTime())) return null;
+      const dates = [];
+      while (cursor.getTime() <= stop.getTime()) {
+        dates.push(formatDateKey(cursor));
+        if (dates.length > SPARKLINE_WEEK_LENGTH) return null;
+        cursor.setDate(cursor.getDate() + 1);
+      }
+      return dates.length === SPARKLINE_WEEK_LENGTH ? dates : null;
+    }
+
+    // Captured before combineUsagePayloads folds the servers together: the per-server
+    // payloads are what a per-server parity check needs, and a retained or partial
+    // read is not a known successful response for this window.
+    function sparklineCaptureUsageRows(rows, combined, context = {}) {
+      const clean = (Array.isArray(rows) ? rows : [])
+        .filter((row) => row
+          && !row._retained
+          && !row._partial
+          && row.server && row.server.id
+          && row.payload && typeof row.payload === 'object')
+        .map((row) => ({ serverId: String(row.server.id), payload: row.payload }));
+      sparklineUsageRef = {
+        combined: combined || null,
+        windowKey: context.windowKey || null,
+        serverKey: context.serverKey || null,
+        rows: clean,
+        complete: clean.length > 0
+          && clean.length === Number(context.expectedServers || 0)
+          && !Number(context.retained || 0)
+          && !Number(context.unavailable || 0),
+        at: Date.now(),
+      };
+    }
+
+    // Raw Stats contributions, ahead of combineStatsPayloads (which drops server
+    // identity), fillMissingDays and fillYearDays (which invent calendar rows) and
+    // reconcileTodayProfileContribution (which replaces today's row).
+    function sparklineCaptureStatsRows(rows, context = {}) {
+      // Each server keeps its own provenance next to its own payload: coverage is
+      // per-response, and one stale host cannot borrow another host's freshness.
+      const usable = (Array.isArray(rows) ? rows : [])
+        .filter((row) => row && row.server && row.server.id && row.payload && typeof row.payload === 'object')
+        .map((row) => Object.assign(
+          { serverId: String(row.server.id), payload: row.payload },
+          sparklineStatsProvenance(row.payload),
+        ));
+      const distinct = new Set(usable.map((row) => row.serverId));
+      if (!usable.length || distinct.size !== usable.length) {
+        sparklineStatsRef = null;
+        return;
+      }
+      const days = usable.map((row) => row.generatedOn).filter(Boolean);
+      const instants = usable.map((row) => row.generatedAt).filter(Boolean);
+      const ages = usable.map((row) => row.cacheAgeSeconds);
+      sparklineStatsRef = {
+        serverKey: context.serverKey || null,
+        rows: usable,
+        // Oldest generation date and longest cache age across the selected servers:
+        // the label has to describe the payload that is holding the curve, not the
+        // freshest one in the room.
+        generatedOn: days.length ? days.reduce((a, b) => (a < b ? a : b)) : null,
+        // Same rule one level finer. Timestamps are same-format local stamps, so the
+        // oldest is also the lexicographically smallest.
+        generatedAt: instants.length ? instants.reduce((a, b) => (a < b ? a : b)) : null,
+        cacheAgeSeconds: ages.reduce((a, b) => (b > a ? b : a), 0),
+        at: Date.now(),
+      };
+    }
+
+    // Stats supplies its computation timestamp, even when served from cache. Dates
+    // after that snapshot are unknown rather than zero. Cache metadata is optional;
+    // the current Stats route does not supply it, so labels use the timestamp itself.
+    function sparklineStatsProvenance(payload) {
+      const generatedOn = sparklinePayloadDate(payload);
+      const generatedAt = sparklinePayloadInstant(payload);
+      let listedThrough = null;
+      let listed = false;
+      (Array.isArray(payload && payload.contributions) ? payload.contributions : []).forEach((day) => {
+        const key = String((day && day.date) || '');
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return;
+        listed = true;
+        if (listedThrough === null || key > listedThrough) listedThrough = key;
+      });
+      const cache = payload && payload.response_cache;
+      const servedFromCache = !!(cache && (cache.served_from_cache === true
+        || (typeof cache.status === 'string' && cache.status !== 'fresh' && cache.status !== 'computed')));
+      return {
+        generatedOn,
+        generatedAt,
+        listedThrough: listed ? listedThrough : null,
+        // With no generation stamp the listed rows are the only honest coverage: the
+        // response cannot claim anything past its own newest date.
+        coverageThrough: generatedOn && listedThrough ? (generatedOn > listedThrough ? generatedOn : listedThrough)
+          : (generatedOn || listedThrough),
+        cacheAgeSeconds: servedFromCache ? sparklineCacheAgeSeconds(payload) : null,
+      };
+    }
+
+    function sparklinePayloadDate(payload) {
+      const stamp = String((payload && payload.timestamp) || '').slice(0, 10);
+      return /^\d{4}-\d{2}-\d{2}$/.test(stamp) ? stamp : null;
+    }
+
+    // The same stamp to the minute, for labelling a curve whose inputs are a snapshot
+    // taken earlier in the day. Null when the payload has no usable stamp at all.
+    function sparklinePayloadInstant(payload) {
+      const stamp = String((payload && payload.timestamp) || '');
+      return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(stamp) ? stamp.slice(0, 16).replace('T', ' ') : null;
+    }
+
+    // "This answer was computed just now", proved by the response and by nothing else.
+    // Absent cache metadata is not proof: the Stats route answers with no response_cache
+    // at all, so a payload from this morning and one recomputed a second ago look alike.
+    function sparklineProvesCurrent(payload) {
+      const cache = payload && payload.response_cache;
+      if (!cache || cache.served_from_cache !== false) return false;
+      return sparklineNumber(cache.age_seconds) === 0;
+    }
+
+    function sparklineCacheAgeSeconds(payload) {
+      const cache = payload && payload.response_cache;
+      const age = cache ? sparklineNumber(cache.age_seconds) : null;
+      return age === null ? 0 : age;
+    }
+
+    // Only the read the current load committed may move the shared reference.
+    function sparklineAcceptStatsRows(rows, context = {}) {
+      const generation = Number(context.generation);
+      if (Number.isFinite(generation)) {
+        if (generation < sparklineStatsAccepted) return false;
+        sparklineStatsAccepted = generation;
+      }
+      sparklineCaptureStatsRows(rows, context);
+      return true;
+    }
+
+    function sparklineIssueStatsGeneration() {
+      sparklineStatsIssued += 1;
+      return sparklineStatsIssued;
+    }
+
+    function sparklineResetReferences() {
+      sparklineUsageRef = null;
+      sparklineStatsRef = null;
+    }
+
+    function sparklineDailyIndex(payload) {
+      const byDate = new Map();
+      (Array.isArray(payload && payload.contributions) ? payload.contributions : []).forEach((day) => {
+        const key = String((day && day.date) || '');
+        if (key && !byDate.has(key)) byDate.set(key, day);
+      });
+      return byDate;
+    }
+
+    // A date the response does not list inside parity-proven coverage is a recorded
+    // zero; a date it lists without the field is unknown. Never the other way round.
+    function sparklineDayTotal(day, field) {
+      if (!day) return 0;
+      const totals = day.totals;
+      if (!totals || !Object.prototype.hasOwnProperty.call(totals, field)) return null;
+      return sparklineNumber(totals[field]);
+    }
+
+    function sparklineCacheParts(day) {
+      if (!day) return { numerator: 0, denominator: 0 };
+      const breakdown = day.tokenBreakdown;
+      if (!breakdown || typeof breakdown !== 'object') return null;
+      if (!Object.prototype.hasOwnProperty.call(breakdown, 'input')) return null;
+      if (!Object.prototype.hasOwnProperty.call(breakdown, 'cacheRead')) return null;
+      // The Stats shape in use folds cache writes into `input` and leaves cacheWrite
+      // at zero. Any other shape needs a denominator that cannot be derived here, so
+      // the day is unknown rather than guessed -- including a cacheWrite the response
+      // carries as null, which is an unavailable figure rather than a zero.
+      if (breakdown.cacheWrite !== undefined) {
+        const writes = sparklineNumber(breakdown.cacheWrite);
+        if (writes === null || writes !== 0) return null;
+      }
+      const input = sparklineNumber(breakdown.input);
+      const cacheRead = sparklineNumber(breakdown.cacheRead);
+      if (input === null || cacheRead === null) return null;
+      return { numerator: cacheRead, denominator: input + cacheRead };
+    }
+
+    function sparklineSourceTokens(source) {
+      const tokens = source && source.tokens;
+      if (!tokens || typeof tokens !== 'object') return null;
+      return sparklineSum(SPARKLINE_TOKEN_FIELDS.map((field) => (
+        Object.prototype.hasOwnProperty.call(tokens, field) ? sparklineNumber(tokens[field]) : null
+      )));
+    }
+
+    function sparklineModelDaily(day, canonical) {
+      if (!day) return 0;
+      if (!Array.isArray(day.sources)) return null;
+      let total = 0;
+      for (const source of day.sources) {
+        if (normalizeModelName((source && (source.modelId || source.model)) || '') !== canonical) continue;
+        const tokens = sparklineSourceTokens(source);
+        if (tokens === null) return null;
+        total += tokens;
+      }
+      return total;
+    }
+
+    // Absence from a server's own model array is unknown, not zero: that array can
+    // stop at the server's local top N.
+    function sparklineModelHeadline(payload, canonical) {
+      const arrays = [payload && payload.combined_models, payload && payload.top_models];
+      for (const entries of arrays) {
+        if (!Array.isArray(entries)) continue;
+        const matches = entries.filter((entry) => (
+          normalizeModelName((entry && (entry.name || entry.model)) || '') === canonical
+        ));
+        if (matches.length) {
+          return sparklineSum(matches.map((entry) => sparklineNumber(
+            entry.tokens !== undefined ? entry.tokens : entry.total_tokens,
+          )));
+        }
+      }
+      return null;
+    }
+
+    function sparklineEndpointSlope(h0, h1, d0, d1) {
+      let slope = ((2 * h0 + h1) * d0 - h0 * d1) / (h0 + h1);
+      if (Math.sign(slope) !== Math.sign(d0)) slope = 0;
+      else if (Math.sign(d0) !== Math.sign(d1) && Math.abs(slope) > Math.abs(3 * d0)) slope = 3 * d0;
+      return slope;
+    }
+
+    // Monotone cubic through the measured anchors: Fritsch-Carlson tangents, then each
+    // segment's control points clamped to that segment's own value range. The result
+    // keeps the smooth look the cards have today while never crossing a neighbour and
+    // never leaving the zero baseline.
+    function sparklineSegmentPath(run) {
+      const round = (value) => Number(value.toFixed(3));
+      const count = run.length;
+      const slopes = new Array(count).fill(0);
+      const h = [];
+      const delta = [];
+      for (let i = 0; i < count - 1; i += 1) {
+        h[i] = run[i + 1].x - run[i].x;
+        delta[i] = h[i] > 0 ? (run[i + 1].y - run[i].y) / h[i] : 0;
+      }
+      if (count === 2) {
+        slopes[0] = delta[0];
+        slopes[1] = delta[0];
+      } else if (count > 2) {
+        slopes[0] = sparklineEndpointSlope(h[0], h[1], delta[0], delta[1]);
+        slopes[count - 1] = sparklineEndpointSlope(h[count - 2], h[count - 3], delta[count - 2], delta[count - 3]);
+        for (let i = 1; i < count - 1; i += 1) {
+          if (delta[i - 1] === 0 || delta[i] === 0 || Math.sign(delta[i - 1]) !== Math.sign(delta[i])) {
+            slopes[i] = 0;
+          } else {
+            const w1 = 2 * h[i] + h[i - 1];
+            const w2 = h[i] + 2 * h[i - 1];
+            slopes[i] = (w1 + w2) / (w1 / delta[i - 1] + w2 / delta[i]);
+          }
+        }
+      }
+      let line = `M${round(run[0].x)} ${round(run[0].y)}`;
+      // One anchor alone is a measurement, not a trend: a zero-length subpath with a
+      // round cap draws the point without claiming anything between two moments.
+      if (count === 1) line += ` L${round(run[0].x)} ${round(run[0].y)}`;
+      for (let i = 0; i < count - 1; i += 1) {
+        const a = run[i];
+        const b = run[i + 1];
+        const dx = (b.x - a.x) / 3;
+        const low = Math.min(a.y, b.y);
+        const high = Math.max(a.y, b.y);
+        const clamp = (value) => Math.max(low, Math.min(high, value));
+        line += ` C${round(a.x + dx)} ${round(clamp(a.y + slopes[i] * dx))}`
+          + ` ${round(b.x - dx)} ${round(clamp(b.y - slopes[i + 1] * dx))}`
+          + ` ${round(b.x)} ${round(b.y)}`;
+      }
+      const area = count > 1 && run.some((point) => point.value > 0)
+        ? `${line} L${round(run[count - 1].x)} ${round(SPARKLINE_VIEW.baseline)}`
+          + ` L${round(run[0].x)} ${round(SPARKLINE_VIEW.baseline)} Z`
+        : '';
+      return { line, area };
+    }
+
+    function sparklineShape(values, unit) {
+      const rows = Array.isArray(values) ? values : [];
+      const usable = rows.filter((value) => Number.isFinite(value) && value >= 0 && (unit !== 'ratio' || value <= 1));
+      if (!usable.length) return { line: '', area: '' };
+      // Cache rate keeps a fixed 0-100% scale; the rest scale to their own maximum
+      // against the same zero baseline the decorative path sat on.
+      const scale = unit === 'ratio' ? 1 : Math.max(0, ...usable);
+      const divisor = scale > 0 ? scale : 1;
+      const span = rows.length > 1 ? SPARKLINE_VIEW.width / (rows.length - 1) : 0;
+      const built = [];
+      let run = [];
+      const flush = () => {
+        if (run.length) built.push(sparklineSegmentPath(run));
+        run = [];
+      };
+      rows.forEach((value, index) => {
+        if (!Number.isFinite(value) || value < 0 || (unit === 'ratio' && value > 1)) {
+          flush();
+          return;
+        }
+        run.push({
+          x: span * index,
+          y: SPARKLINE_VIEW.baseline - (value / divisor) * (SPARKLINE_VIEW.baseline - SPARKLINE_VIEW.top),
+          value,
+        });
+      });
+      flush();
+      return {
+        line: built.map((segment) => segment.line).filter(Boolean).join(' '),
+        area: built.map((segment) => segment.area).filter(Boolean).join(' '),
+      };
+    }
+
+    // False only when the payload states a window that is not exactly these dates;
+    // an unstated window is undefined and judged by whatever else proves it.
+    function sparklineRangeMatches(range, dates) {
+      if (!range || typeof range !== 'object') return undefined;
+      return String(range.from || '') === dates[0]
+        && String(range.to || '') === dates[dates.length - 1];
+    }
+
+    // A failed source makes the daily answer an unknown for whichever server saw it.
+    // The response contract reports failures as `source_errors`, the list every other
+    // reader on this page goes through usageSourceErrors() for; a response that also
+    // carries a numeric `source_error_count` has to agree that nothing failed. An
+    // absent list is a clean scan, not an unproven one -- the same reading the
+    // dashboard's own banner uses.
+    function sparklineHasFailedSource(payload) {
+      if (usageSourceErrors(payload).length) return true;
+      return (sparklineNumber(payload && payload.source_error_count) || 0) > 0;
+    }
+
+    function sparklineUsagePayloads(usage) {
+      return sparklineUsageRef && sparklineUsageRef.combined === usage
+        ? sparklineUsageRef.rows.map((row) => row.payload)
+        : [usage];
+    }
+
+    // The cutoff the curve's own inputs describe. The card prints Usage and the anchors
+    // come from Stats, so the honest cutoff is the older of the two.
+    function sparklineRecordedOn(usage, statsRef, today) {
+      const todayKey = formatDateKey(today);
+      const usagePayloads = sparklineUsagePayloads(usage);
+      const known = usagePayloads.map(sparklinePayloadDate)
+        .concat(statsRef ? statsRef.generatedOn : null).filter(Boolean);
+      if (!known.length) return null;
+      const oldest = known.reduce((a, b) => (a < b ? a : b));
+      if (oldest < todayKey) return sparklineCutoffLabel(usage, statsRef, oldest);
+      if (oldest > todayKey) return null;
+      // Same day. "Today" is only current if every payload behind the curve says it was
+      // computed just now; Stats answers with no cache metadata at all, and a reference
+      // this page has been holding can be hours older than anything on the server, so the
+      // everyday same-day case is a morning snapshot and gets labelled as one.
+      const statsCurrent = !!statsRef && statsRef.rows.length > 0
+        && statsRef.rows.every((row) => sparklineProvesCurrent(row.payload));
+      if (statsCurrent && usagePayloads.every(sparklineProvesCurrent)) return null;
+      return sparklineCutoffLabel(usage, statsRef, oldest);
+    }
+
+    // Day granularity reads as a completed day; a snapshot taken earlier today needs the
+    // hour it stopped at, or "Recorded today" says nothing the card has not already said.
+    function sparklineCutoffLabel(usage, statsRef, oldest) {
+      const instants = sparklineUsagePayloads(usage).map(sparklinePayloadInstant)
+        .concat(statsRef ? statsRef.generatedAt : null)
+        .filter((stamp) => stamp && stamp.slice(0, 10) === oldest);
+      return instants.length ? instants.reduce((a, b) => (a < b ? a : b)) : oldest;
+    }
+
+    function deriveLegacySparklineCurves(usage, options = {}) {
+      const today = options.today instanceof Date ? options.today : new Date();
+      const startDate = options.startDate !== undefined ? options.startDate : currentStartDate;
+      const endDate = options.endDate !== undefined ? options.endDate : currentEndDate;
+      const dates = sparklineWeekDates(startDate, endDate, today);
+      const empty = () => ({ values: [], reason: 'noDaily', points: 0, total: SPARKLINE_WEEK_LENGTH });
+      const metrics = {};
+      SPARKLINE_CARDS.forEach((card) => { metrics[card.id] = empty(); });
+      // Active Time answers with window totals, never bucket intervals.
+      metrics.agent_time.reason = 'noBuckets';
+      const reject = (reason) => {
+        SPARKLINE_CARDS.forEach((card) => {
+          if (card.id !== 'agent_time') metrics[card.id] = { values: [], reason, points: 0, total: SPARKLINE_WEEK_LENGTH };
+        });
+        return { dates: null, granularity: 'day', recordedOn: null, metrics };
+      };
+      if (!dates) return reject('rangeNotWeek');
+
+      const usageRef = sparklineUsageRef;
+      // Pair only the reads that produced the numbers on screen. A superseded range,
+      // a different server set, or a scan that kept an older server's rows cannot
+      // lend a curve to this headline.
+      if (!usage || !usageRef || usageRef.combined !== usage) return reject('noDaily');
+      if (!usageRef.complete) return reject('selection');
+      const range = usage.range || {};
+      if (String(range.from || '') !== dates[0] || String(range.to || '') !== dates[dates.length - 1]) {
+        return reject('selection');
+      }
+      // One failed source anywhere -- combined or per server -- and the daily split
+      // cannot be proved to add up to the headline on the card.
+      if (sparklineHasFailedSource(usage)
+        || usageRef.rows.some((row) => sparklineHasFailedSource(row.payload))) {
+        return reject('selection');
+      }
+      const statsRef = sparklineStatsRef;
+      if (!statsRef || statsRef.serverKey !== usageRef.serverKey) return reject('noDaily');
+      if (statsRef.rows.length !== usageRef.rows.length) return reject('selection');
+      const indexed = new Map(statsRef.rows.map((row) => [row.serverId, sparklineDailyIndex(row.payload)]));
+      if (indexed.size !== statsRef.rows.length) return reject('selection');
+      if (usageRef.rows.some((row) => !indexed.has(row.serverId))) return reject('selection');
+
+      // Every server's own Usage window has to be the selected seven dates. The
+      // combined range is copied from the first server, so a second server reporting
+      // another window would otherwise ride along on the first one's word.
+      if (usageRef.rows.some((row) => sparklineRangeMatches(row.payload && row.payload.range, dates) === false)) {
+        return reject('rangeNotWeek');
+      }
+      const servers = usageRef.rows.map((row) => {
+        const statsRow = statsRef.rows.find((candidate) => candidate.serverId === row.serverId);
+        const through = (statsRow && statsRow.coverageThrough) || null;
+        return {
+          usage: row.payload,
+          days: dates.map((date) => indexed.get(row.serverId).get(date) || null),
+          // A date this response cannot have seen is unknown for the whole card, not
+          // a recorded zero, and coverage is the intersection across the selection.
+          covered: dates.map((date) => Boolean(through) && date <= through),
+        };
+      });
+      const covered = dates.map((_, index) => servers.every((server) => server.covered[index]));
+      // Nothing the response has seen falls inside the card's window.
+      const nothingCovered = covered.every((value) => !value);
+
+      // Every selected server has to reconcile to its own headline before the metric
+      // is drawn for any of them; a metric that fails somewhere is dropped everywhere
+      // rather than drawn from part of the answer. The merged daily values are then
+      // proved against the headline the card prints as well: each response rounds on
+      // its own, so two answers inside tolerance can add up to one outside it.
+      const totalsMetric = (field, headlineField, tolerance) => {
+        const agrees = (total, expected) => (tolerance
+          ? Math.abs(total - expected) <= tolerance
+          : total === expected);
+        const absent = { reason: nothingCovered ? 'noDaily' : 'components' };
+        const perServer = [];
+        for (const server of servers) {
+          const values = server.days.map((day, index) => (covered[index] ? sparklineDayTotal(day, field) : null));
+          if (values.some((value, index) => covered[index] && value === null)) return { reason: 'components' };
+          const total = sparklineMeasuredSum(values);
+          const expected = sparklineNumber(server.usage && server.usage[headlineField]);
+          if (total === null || expected === null) return absent;
+          if (!agrees(total, expected)) return { reason: 'mismatch' };
+          perServer.push(values);
+        }
+        const values = dates.map((_, index) => sparklineMeasuredSum(perServer.map((row) => row[index])));
+        const combined = sparklineMeasuredSum(values);
+        const headline = sparklineNumber(usage && usage[headlineField]);
+        if (combined === null || headline === null) return absent;
+        if (!agrees(combined, headline)) return { reason: 'mismatch' };
+        return { values };
+      };
+
+      // cacheRead / (input + cacheRead), summed before the divide: a 1/1 day beside a
+      // 0/9 day is 10%, not the 50% an average of daily rates would draw.
+      const cacheMetric = () => {
+        let numerator = 0;
+        let denominator = 0;
+        const perServer = [];
+        const absent = { reason: nothingCovered ? 'noDaily' : 'components' };
+        for (const server of servers) {
+          const parts = server.days.map((day, index) => (covered[index] ? sparklineCacheParts(day) : null));
+          if (parts.some((part, index) => covered[index] && part === null)) return { reason: 'components' };
+          const serverNumerator = sparklineMeasuredSum(parts.map((part) => (part === null ? null : part.numerator)));
+          const serverDenominator = sparklineMeasuredSum(parts.map((part) => (part === null ? null : part.denominator)));
+          if (serverNumerator === null || serverDenominator === null) return absent;
+          const headline = server.usage ? server.usage.cache_hit_rate : null;
+          if (serverDenominator > 0) {
+            const expected = sparklineNumber(headline);
+            if (expected === null
+              || Math.abs(serverNumerator / serverDenominator - expected) > SPARKLINE_RATE_TOLERANCE) {
+              return { reason: 'mismatch' };
+            }
+          } else if (headline !== null && headline !== undefined) {
+            return { reason: 'mismatch' };
+          }
+          numerator += serverNumerator;
+          denominator += serverDenominator;
+          perServer.push(parts);
+        }
+        // No prompt input anywhere is unavailable, not a flat 0%.
+        if (denominator <= 0) return absent;
+        // The combined headline is read the same strict way: a null rate is an answer
+        // the card does not have, not a 0% it can be matched against.
+        const combinedRate = sparklineNumber(usage ? usage.cache_hit_rate : null);
+        if (combinedRate === null
+          || Math.abs(numerator / denominator - combinedRate) > SPARKLINE_RATE_TOLERANCE) {
+          return { reason: 'mismatch' };
+        }
+        return {
+          values: dates.map((_, index) => {
+            if (!covered[index]) return null;
+            const dayNumerator = sparklineSum(perServer.map((parts) => parts[index].numerator));
+            const dayDenominator = sparklineSum(perServer.map((parts) => parts[index].denominator));
+            if (dayNumerator === null || dayDenominator === null || dayDenominator <= 0) return null;
+            const ratio = dayNumerator / dayDenominator;
+            return ratio <= 1 ? ratio : null;
+          }),
+        };
+      };
+
+      // The model already winning this card, held fixed across every date: never each
+      // day's own winner, never the Stats favourite, never a per-server local top five.
+      const modelMetric = () => {
+        const winner = Array.isArray(usage.top_models) ? usage.top_models[0] : null;
+        const canonical = winner ? normalizeModelName(winner.name || winner.model || '') : '';
+        if (!canonical || canonical === 'unknown') return { reason: 'components' };
+        const absent = { reason: nothingCovered ? 'noDaily' : 'components' };
+        const perServer = [];
+        for (const server of servers) {
+          const values = server.days.map((day, index) => (covered[index] ? sparklineModelDaily(day, canonical) : null));
+          if (values.some((value, index) => covered[index] && value === null)) return { reason: 'components' };
+          const total = sparklineMeasuredSum(values);
+          const expected = sparklineModelHeadline(server.usage, canonical);
+          if (total === null || expected === null) return absent;
+          if (total !== expected) return { reason: 'mismatch' };
+          perServer.push(values);
+        }
+        const values = dates.map((_, index) => sparklineMeasuredSum(perServer.map((row) => row[index])));
+        const combined = sparklineMeasuredSum(values);
+        const headline = sparklineModelHeadline(usage, canonical);
+        if (combined === null || headline === null) return absent;
+        if (combined !== headline) return { reason: 'mismatch' };
+        return { values };
+      };
+
+      const collect = (id, result) => {
+        const values = result.values || [];
+        metrics[id] = result.reason
+          ? { values: [], reason: result.reason, points: 0, total: SPARKLINE_WEEK_LENGTH }
+          : {
+            values,
+            reason: values.some((value) => value !== null) ? '' : 'noDaily',
+            points: values.filter((value) => value !== null).length,
+            total: SPARKLINE_WEEK_LENGTH,
+          };
+      };
+      collect('tokens', totalsMetric('tokens', 'total_tokens', 0));
+      collect('cost', totalsMetric('cost', 'total_cost', SPARKLINE_COST_TOLERANCE));
+      collect('messages', totalsMetric('messages', 'total_messages', 0));
+      collect('cache_hit_rate', cacheMetric());
+      collect('top_model', modelMetric());
+
+      return {
+        dates,
+        granularity: 'day',
+        recordedOn: sparklineRecordedOn(usage, statsRef, today),
+        metrics,
+      };
+    }
+
+    function sparklineWindowKeys(start, end) {
+      if (!(start instanceof Date) || !(end instanceof Date)
+        || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+      const first = formatDateKey(start);
+      const last = formatDateKey(end);
+      const rangeDates = [first, last];
+      const dayCount = Math.round((Date.UTC(end.getFullYear(), end.getMonth(), end.getDate())
+        - Date.UTC(start.getFullYear(), start.getMonth(), start.getDate())) / 86400000) + 1;
+      if (dayCount < 1 || dayCount > 366) return null;
+      if (first === last) return {
+        granularity: 'hour', dates: Array.from({ length: 24 }, (_, hour) => `${first}T${String(hour).padStart(2, '0')}`),
+        rangeDates,
+      };
+      if (dayCount > 31) {
+        const dates = [];
+        const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+        while (formatDateKey(cursor).slice(0, 7) <= last.slice(0, 7)) {
+          dates.push(formatDateKey(cursor).slice(0, 7));
+          cursor.setMonth(cursor.getMonth() + 1);
+        }
+        return { granularity: 'month', dates, rangeDates };
+      }
+      const dates = [];
+      const cursor = parseDateKey(first);
+      while (formatDateKey(cursor) <= last && dates.length < 32) {
+        dates.push(formatDateKey(cursor));
+        cursor.setDate(cursor.getDate() + 1);
+      }
+      return dates.length > 1 && dates.length <= 31 ? { granularity: 'day', dates, rangeDates } : null;
+    }
+
+    function sparklineCoverageKey(payload, granularity) {
+      const stamp = new Date(payload && payload.timestamp);
+      if (Number.isNaN(stamp.getTime())) return null;
+      const date = formatDateKey(stamp);
+      if (granularity === 'month') return date.slice(0, 7);
+      return granularity === 'hour' ? `${date}T${String(stamp.getHours()).padStart(2, '0')}` : date;
+    }
+
+    function sparklineBucketRows(payload, window) {
+      const split = payload && payload.sparkline;
+      if (!split || split.granularity !== window.granularity || !Array.isArray(split.buckets)) return null;
+      const rows = new Map();
+      for (const row of split.buckets) {
+        if (!row || typeof row.key !== 'string' || rows.has(row.key) || !window.dates.includes(row.key)) return null;
+        rows.set(row.key, row);
+      }
+      const through = sparklineCoverageKey(payload, window.granularity);
+      if (!through) return null;
+      const keys = Array.isArray(split.keys) ? new Set(split.keys) : null;
+      return window.dates.map((key) => key > through || (keys && !keys.has(key)) ? null : (rows.get(key) || {
+        key, tokens: 0, cost: 0, messages: 0, input: 0, cache: 0, models: {}, agent_ms: 0,
+      }));
+    }
+
+    function sparklineBucketModelHeadline(payload, canonical) {
+      const value = sparklineModelHeadline(payload, canonical);
+      if (value !== null) return value;
+      // The complete model list can prove a server used none of the combined
+      // winner. A truncated top-model list cannot establish that zero.
+      const models = payload && payload.combined_models;
+      if (!Array.isArray(models)) return null;
+      const total = sparklineSum(models.map((row) => sparklineNumber(
+        row.tokens !== undefined ? row.tokens : row.total_tokens,
+      )));
+      return total !== null && total === sparklineNumber(payload.total_tokens) ? 0 : null;
+    }
+
+    function deriveSparklineCurves(usage, options = {}) {
+      // Compatibility for hosts predating bucket support. Never use an old Stats
+      // snapshot to replace buckets an upgraded host explicitly could not supply.
+      if (!usage || !sparklineUsageRef || !sparklineUsageRef.rows.every((row) =>
+        Object.prototype.hasOwnProperty.call(row.payload, 'sparkline'))) {
+        return deriveLegacySparklineCurves(usage, options);
+      }
+      const window = sparklineWindowKeys(
+        options.startDate !== undefined ? options.startDate : currentStartDate,
+        options.endDate !== undefined ? options.endDate : currentEndDate,
+      );
+      const metrics = {};
+      const absent = (reason) => ({ values: [], reason, points: 0, total: window ? window.dates.length : 0 });
+      SPARKLINE_CARDS.forEach((card) => { metrics[card.id] = absent('noDaily'); });
+      const result = { dates: window ? window.dates : null, granularity: window ? window.granularity : 'day',
+        recordedOn: null, metrics };
+      const ref = sparklineUsageRef;
+      const reject = (reason) => {
+        SPARKLINE_CARDS.forEach((card) => { metrics[card.id] = absent(reason); });
+        return result;
+      };
+      if (!window) return reject('rangeTooLong');
+      const rangeDates = window.rangeDates;
+      if (!ref || ref.combined !== usage || !ref.complete) return reject('selection');
+      if (sparklineHasFailedSource(usage) || ref.rows.some((row) => sparklineHasFailedSource(row.payload)
+        || sparklineRangeMatches(row.payload.range, rangeDates) !== true)) return reject('selection');
+      if (sparklineRangeMatches(usage.range, rangeDates) !== true) return reject('selection');
+      const servers = ref.rows.map((row) => ({ payload: row.payload, rows: sparklineBucketRows(row.payload, window) }));
+      if (servers.some((server) => !server.rows)) return reject(window.granularity === 'hour' ? 'intraday' : 'components');
+      const covered = window.dates.map((_, i) => servers.every((server) => server.rows[i] !== null));
+      const collect = (id, values, reason = '') => {
+        metrics[id] = reason ? absent(reason) : { values, reason: '',
+          points: values.filter((value) => value !== null).length, total: window.dates.length };
+      };
+      const winner = Array.isArray(usage.top_models) ? usage.top_models[0] : null;
+      const canonical = winner ? normalizeModelName(winner.name || winner.model || '') : '';
+      for (const [id, field, headline, tolerance] of [
+        ['tokens', 'tokens', 'total_tokens', 0], ['cost', 'cost', 'total_cost', SPARKLINE_COST_TOLERANCE],
+        ['messages', 'messages', 'total_messages', 0], ['top_model', 'model', null, 0],
+      ]) {
+        let reason = id === 'top_model' && (!canonical || canonical === 'unknown') ? 'components' : '';
+        const perServer = [];
+        for (const server of servers) {
+          const values = server.rows.map((row) => row === null ? null : field === 'model'
+            ? (row.models && typeof row.models === 'object'
+              ? (Object.prototype.hasOwnProperty.call(row.models, canonical) ? sparklineNumber(row.models[canonical]) : 0) : null)
+            : sparklineNumber(row[field]));
+          const expected = field === 'model' ? sparklineBucketModelHeadline(server.payload, canonical) : sparklineNumber(server.payload[headline]);
+          const total = sparklineMeasuredSum(values);
+          if (values.some((v, i) => server.rows[i] !== null && v === null) || expected === null || total === null) reason = 'components';
+          else if (Math.abs(total - expected) > tolerance) reason = 'mismatch';
+          perServer.push(values);
+        }
+        const values = window.dates.map((_, i) => covered[i] ? sparklineSum(perServer.map((rows) => rows[i])) : null);
+        const expected = field === 'model' ? sparklineBucketModelHeadline(usage, canonical) : sparklineNumber(usage[headline]);
+        const total = sparklineMeasuredSum(values);
+        // Combined cost adds independently rounded server headlines.
+        const combinedTolerance = id === 'cost' ? tolerance * servers.length : tolerance;
+        if (!reason && (expected === null || total === null || Math.abs(total - expected) > combinedTolerance)) reason = 'mismatch';
+        collect(id, values, reason);
+      }
+      let cacheReason = '';
+      const parts = servers.map((server) => {
+        const rows = server.rows.map((row) => row === null ? null : {
+          numerator: sparklineNumber(row.cache), input: sparklineNumber(row.input),
+        });
+        if (rows.some((row) => row && (row.numerator === null || row.input === null))) cacheReason = 'components';
+        const num = sparklineMeasuredSum(rows.map((row) => row ? row.numerator : null));
+        const input = sparklineMeasuredSum(rows.map((row) => row ? row.input : null));
+        const den = num + input;
+        const expected = sparklineNumber(server.payload.cache_hit_rate);
+        if (num === null || input === null || (den > 0 ? expected === null
+          || Math.abs(num / den - expected) > SPARKLINE_RATE_TOLERANCE : expected !== null)) cacheReason = 'mismatch';
+        return rows;
+      });
+      const cacheValues = window.dates.map((_, i) => {
+        if (!covered[i]) return null;
+        const num = sparklineSum(parts.map((rows) => rows[i].numerator));
+        const input = sparklineSum(parts.map((rows) => rows[i].input));
+        return num !== null && input !== null && num + input > 0 ? num / (num + input) : null;
+      });
+      const numerator = sparklineMeasuredSum(parts.flatMap((rows) => rows.map((row) => row ? row.numerator : null)));
+      const input = sparklineMeasuredSum(parts.flatMap((rows) => rows.map((row) => row ? row.input : null)));
+      const headline = sparklineNumber(usage.cache_hit_rate);
+      if (!cacheReason && (numerator + input <= 0 || headline === null
+        || Math.abs(numerator / (numerator + input) - headline) > SPARKLINE_RATE_TOLERANCE)) cacheReason = 'components';
+      collect('cache_hit_rate', cacheValues, cacheReason);
+
+      metrics.agent_time = absent('noBuckets');
+      const active = typeof overviewActiveTimeState !== 'undefined' ? overviewActiveTimeState.data : null;
+      const activePayloads = active && active._sparklinePayloads;
+      if (activePayloads && active._sparklineServerKey === ref.serverKey && activePayloads.length === ref.rows.length
+        && typeof activeTimeRequestKey === 'function'
+        && overviewActiveTimeState.key === activeTimeRequestKey(null, rangeDates[0], rangeDates[1])) {
+        const buckets = activePayloads.map((payload) => sparklineRangeMatches(payload.range, rangeDates) === true
+          && !(payload.unavailable_tools || []).length ? sparklineBucketRows(payload, window) : null);
+        if (buckets.every(Boolean)) {
+          const perServer = buckets.map((rows) => rows.map((row) => row === null ? null : sparklineNumber(row.agent_ms)));
+          let valid = perServer.every((values, i) => !values.some((v, n) => buckets[i][n] && v === null)
+            && sparklineMeasuredSum(values) === sparklineNumber(activePayloads[i].active_ms_sum));
+          const values = window.dates.map((_, i) => perServer.every((rows) => rows[i] !== null)
+            ? sparklineSum(perServer.map((rows) => rows[i])) : null);
+          valid = valid && sparklineMeasuredSum(values) === sparklineNumber(active.active_ms_sum);
+          collect('agent_time', values, valid ? '' : 'mismatch');
+        }
+      }
+      const instants = ref.rows.map((row) => sparklinePayloadInstant(row.payload)).filter(Boolean);
+      result.recordedOn = instants.length ? instants.sort()[0] : null;
+      return result;
+    }
+
+    function sparklineSetAttribute(node, name, value) {
+      // Usage, Stats and Agent Time settle independently. An unchanged curve
+      // should not invalidate SVG styling and painting on each completion.
+      if (node && node.getAttribute(name) !== String(value)) node.setAttribute(name, value);
+    }
+
+    function sparklineSetLabel(svg, text) {
+      sparklineSetAttribute(svg, 'aria-label', text);
+      sparklineSetAttribute(svg, 'role', 'img');
+      let title = svg.__sparklineTitle;
+      if (!title) {
+        title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+        svg.__sparklineTitle = title;
+        if (svg.firstChild) svg.insertBefore(title, svg.firstChild);
+        else svg.appendChild(title);
+      }
+      if (title.textContent !== text) title.textContent = text;
+    }
+
+    function renderOverviewSparklines(usage = lastUsageResponse, options = {}) {
+      const curves = deriveSparklineCurves(usage, options);
+      SPARKLINE_CARDS.forEach((card) => {
+        const svg = document.getElementById(card.svg);
+        if (!svg) return;
+        const series = curves.metrics[card.id] || { values: [], reason: 'noDaily', points: 0 };
+        const shape = sparklineShape(series.values, card.unit);
+        const lineEl = document.getElementById(`${card.svg}Path`);
+        const areaEl = document.getElementById(`${card.svg}Area`);
+        sparklineSetAttribute(lineEl, 'd', shape.line);
+        sparklineSetAttribute(areaEl, 'd', shape.area);
+        const drawn = Boolean(shape.line) && series.points > 0;
+        sparklineSetAttribute(svg, 'data-granularity', curves.granularity);
+        sparklineSetAttribute(svg, 'data-metric', card.id);
+        sparklineSetAttribute(svg, 'data-points', String(drawn ? series.points : 0));
+        sparklineSetAttribute(svg, 'data-reason', drawn ? 'drawn' : (series.reason || 'noDaily'));
+        const lines = [];
+        if (drawn) {
+          const resolutionKey = { hour: 'sparklineResolutionHourly', day: 'sparklineResolutionDaily', month: 'sparklineResolutionMonthly' }[curves.granularity];
+          const measuredKey = { hour: 'sparklineMeasuredHours', day: 'sparklineMeasuredDays', month: 'sparklineMeasuredMonths' }[curves.granularity];
+          lines.push(t(resolutionKey));
+          lines.push(t(measuredKey, { n: series.points, total: series.total || SPARKLINE_WEEK_LENGTH }));
+          // Today's anchor is a real value over a day that has not finished yet.
+          const todayKey = formatDateKey(options.today || new Date());
+          if (curves.dates && (curves.granularity === 'month'
+            ? curves.dates[curves.dates.length - 1] === todayKey.slice(0, 7)
+            : curves.dates[curves.dates.length - 1].slice(0, 10) === todayKey)
+            && (curves.granularity === 'hour' ? series.values.some((value) => value !== null)
+              : series.values[series.values.length - 1] !== null)) {
+            lines.push(t(curves.granularity === 'month' ? 'sparklineMonthPartial' : 'sparklineTodayPartial'));
+          }
+          if (curves.recordedOn) lines.push(t('sparklineRecordedAt', { date: curves.recordedOn }));
+        } else {
+          lines.push(t(SPARKLINE_REASON_KEYS[series.reason] || SPARKLINE_REASON_KEYS.noDaily));
+          if (series.reason === 'mismatch' && curves.recordedOn) {
+            lines.push(t('sparklineRecordedAt', { date: curves.recordedOn }));
+          }
+        }
+        sparklineSetLabel(svg, [t(card.labelKey)].concat(lines).join(' \u00b7 '));
+      });
+      return curves;
+    }
+
     function renderOverviewTab(data) {
       if (!data) return;
       // Emptiness is decided once for the whole range so every card in the row
@@ -14054,6 +15046,7 @@
       }
       renderOverviewProfilePreview();
       if (typeof updateTokenCompositionBar === 'function') updateTokenCompositionBar(data);
+      if (typeof renderOverviewSparklines === 'function') renderOverviewSparklines(data);
     }
 
     // Window key for the data currently displayed, so deferred session loads
@@ -14247,6 +15240,15 @@
             combined._has_incomplete_server_rows = reconciliation.unavailable.length > 0;
             combined._scan_reconciliation = reconciliation;
             combined._stalest_server = reconciliation.rows.slice().sort((a, b) => String(a.payload.timestamp || '').localeCompare(String(b.payload.timestamp || '')))[0]?.server || null;
+            if (typeof sparklineCaptureUsageRows === 'function') {
+              sparklineCaptureUsageRows(reconciliation.rows, combined, {
+                windowKey,
+                serverKey: usageServerKey,
+                expectedServers: usageServers.length,
+                retained: reconciliation.retained.length,
+                unavailable: reconciliation.unavailable.length,
+              });
+            }
             return combined;
           });
         // Held locally until this load is known to still be the current one.
@@ -14451,8 +15453,8 @@
     }
 
     /* Big figures in unit words, two units at most: 25 hours reads as "1 day
-       1 hour", 34 days as "1 month 4 days". Below a day the compact h/m form
-       above stays. Intl does the plural and the locale; the joiner drops the
+       1 hour", 34 days as "1 month 4 days". Intl does the plural and the locale;
+       sub-day figures use the same localized units. The joiner drops the
        space where the locale's words carry none. */
     const durationUnitFormatters = new Map();
 
@@ -14467,16 +15469,20 @@
         }
         durationUnitFormatters.set(key, formatter);
       }
-      return formatter.format(value);
+      const formatted = formatter.format(value);
+      return currentLang === 'ja' ? formatted.replace(/\s+/g, '') : formatted;
     }
 
     function formatDurationUnits(ms) {
       const seconds = Math.max(0, Math.round(Number(ms || 0) / 1000));
-      if (seconds < 86400) return formatDuration(ms);
+      if (!seconds) return '—';
       const joiner = currentLang === 'zh' || currentLang === 'ja' ? '' : ' ';
       const pair = (headUnit, head, tailUnit, tail) =>
         (tail ? `${formatDurationUnit(headUnit, head)}${joiner}${formatDurationUnit(tailUnit, tail)}`
           : formatDurationUnit(headUnit, head));
+      if (seconds < 60) return formatDurationUnit('second', seconds);
+      if (seconds < 3600) return formatDurationUnit('minute', Math.floor(seconds / 60));
+      if (seconds < 86400) return pair('hour', Math.floor(seconds / 3600), 'minute', Math.floor((seconds % 3600) / 60));
       let days = Math.floor(seconds / 86400);
       if (days < 7) {
         let remHours = Math.round((seconds - days * 86400) / 3600);
@@ -14518,6 +15524,7 @@
         active_time_estimated: true,
         active_time_method: 'capped-inter-event-gap',
         _server_count: payloads.length,
+        _sparklinePayloads: payloads,
       };
       let prevActiveMs = 0;
       let prevAgentMs = 0;
@@ -14608,6 +15615,7 @@
       // the new range opens on "Load failed" before it has asked for anything.
       overviewActiveTimeState.status = 'loading';
       renderOverviewActiveTime();
+      if (typeof renderOverviewSparklines === 'function') renderOverviewSparklines();
       return true;
     }
 
@@ -14636,6 +15644,7 @@
         if (requestId !== overviewActiveTimeState.requestId) return;
         if (!rows.length) throw new Error(t('loadFailed'));
         overviewActiveTimeState.data = combineActiveTimePayloads(rows.map((row) => row.payload));
+        overviewActiveTimeState.data._sparklineServerKey = rows.map((row) => String(row.server.id)).sort().join(',');
         overviewActiveTimeState.key = requestKey;
         overviewActiveTimeState.status = 'ready';
       } catch (error) {
@@ -14646,6 +15655,7 @@
         overviewActiveTimeState.status = overviewActiveTimeState.data ? 'ready' : 'error';
       }
       renderOverviewActiveTime();
+      if (typeof renderOverviewSparklines === 'function') renderOverviewSparklines();
     }
 
     function buildCombinedSessionsData(responses) {
@@ -19256,7 +20266,7 @@
     let preserveStatsNavigationOnNextActivation = false;
 
     /* ---- Usage report (Report tab) --------------------------------------
-       A calendar-aligned week / month / year report, scoped to one server:
+       A calendar-aligned day / week / month / year report, scoped to one server:
        insights facets (streaks, peaks, day maps, projects) have no defined
        merge semantics across servers, so a merged report is not offered
        rather than being offered and wrong. Three requests per period switch:
@@ -19274,11 +20284,11 @@
     // the scan again for nothing.
     const USAGE_REPORT_FACETS = 'daily,streaks,firsts,hourly,weekday,tools,models,projects';
     const USAGE_REPORT_HEAT_FACETS = 'daily,streaks,firsts';
-    const USAGE_REPORT_PERIODS = ['week', 'month', 'year'];
+    const USAGE_REPORT_PERIODS = ['day', 'week', 'month', 'year'];
     const USAGE_REPORT_PREFS_KEY = 'tokdash-usage-report-prefs';
     const usageReportState = {
       period: 'month',
-      // How many periods back the window sits: 0 is the current week/month/year,
+      // How many periods back the window sits: 0 is the current day/week/month/year,
       // 1 the one before it. Picked from the top-bar chips the report swaps in.
       back: 0,
       serverId: 'local',
@@ -20385,6 +21395,11 @@
 
     function usageReportWindows(period, back = 0) {
       const today = usageReportToday();
+      if (period === 'day') {
+        const day = new Date(today.getFullYear(), today.getMonth(), today.getDate() - back);
+        const key = formatDateKey(day);
+        return { date_from: key, date_to: key };
+      }
       if (period === 'week') {
         const start = startOfWeekMonday(today);
         start.setDate(start.getDate() - 7 * back);
@@ -20404,6 +21419,7 @@
 
     function usageReportPeriodLength(period, fromKey) {
       const start = parseDateKey(fromKey);
+      if (period === 'day') return 1;
       if (period === 'week') return 7;
       if (period === 'month') return new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate();
       const year = start.getFullYear();
@@ -20425,6 +21441,7 @@
     // The calendar span the grid needs, which is wider than the window: a month
     // that started on Thursday still draws its Monday column, blank.
     function usageReportCalendar(period, fromKey, toKey) {
+      if (period === 'day') return usageReportDayKeys(fromKey, toKey);
       const from = parseDateKey(fromKey);
       const to = parseDateKey(toKey);
       let start;
@@ -21125,6 +22142,7 @@
       // The current window gets the familiar title; a past window names itself,
       // the same way the share card does.
       if (model.range.to === formatDateKey(usageReportToday())) {
+        if (model.period === 'day') return t('usageReportTitleDay');
         if (model.period === 'week') return t('usageReportTitleWeek');
         if (model.period === 'month') return t('usageReportTitleMonth');
         return t('usageReportTitleYear');
@@ -21138,6 +22156,17 @@
     function usageReportChipDefs() {
       const today = usageReportToday();
       const period = usageReportState.period;
+      if (period === 'day') {
+        return [0, 1, 2, 3, 4, 5, 6].map((back) => {
+          const date = parseDateKey(usageReportWindows('day', back).date_from);
+          return {
+            back,
+            label: back === 0 ? t('usageReportTitleDay')
+              : back === 1 ? t('usageReportChipYesterday')
+              : formatShortDate(date, date.getFullYear() !== today.getFullYear()),
+          };
+        });
+      }
       if (period === 'week') {
         return [0, 1, 2, 3].map((back) => ({
           back,
@@ -21216,21 +22245,22 @@
       document.querySelectorAll('#usageReportPeriod button').forEach((button) => {
         button.setAttribute('aria-pressed', String(button.dataset.period === usageReportState.period));
       });
+      document.getElementById('usageReportDaysPanel').hidden = ['day', 'week'].includes(usageReportState.period);
       usageReportRenderPeriodChips();
     }
 
     function usageReportRenderLoading() {
       document.getElementById('usageReportStatePanel').hidden = true;
       document.getElementById('usageReportBanner').hidden = true;
-      ['usageReportKTokens', 'usageReportKCost', 'usageReportKActive', 'usageReportKDays'].forEach((id) => {
+      ['usageReportKTokens', 'usageReportKCost', 'usageReportKMessages', 'usageReportKSessions', 'usageReportKActive', 'usageReportKDays'].forEach((id) => {
         renderLoadingPlaceholder(document.getElementById(id));
       });
       ['usageReportKTokensSub', 'usageReportKActiveSub', 'usageReportKDaysSub',
-        'usageReportSentence', 'usageReportHeat', 'usageReportStreak', 'usageReportLegend',
+        'usageReportHeat', 'usageReportStreak', 'usageReportLegend',
         'usageReportRange', 'usageReportProgress',
         'usageReportPodium', 'usageReportGroupNote', 'usageReportWhen', 'usageReportTz',
         'usageReportAgentsBody', 'usageReportAgentsNote', 'usageReportFooter'].forEach((id) => usageReportText(document.getElementById(id), ''));
-      usageReportText(document.getElementById('usageReportTitle'), t(usageReportState.period === 'year' ? 'usageReportTitleYear' : usageReportState.period === 'week' ? 'usageReportTitleWeek' : 'usageReportTitleMonth'));
+      usageReportText(document.getElementById('usageReportTitle'), t({ day: 'usageReportTitleDay', week: 'usageReportTitleWeek', month: 'usageReportTitleMonth', year: 'usageReportTitleYear' }[usageReportState.period]));
       usageReportClearShare();
     }
 
@@ -21259,7 +22289,8 @@
     function usageReportRenderHead(model) {
       usageReportText(document.getElementById('usageReportTitle'), usageReportPeriodTitle(model));
       usageReportText(document.getElementById('usageReportRange'),
-        `${formatShortDate(model.range.from, true)} – ${formatShortDate(model.range.to, true)}`);
+        model.period === 'day' ? formatShortDate(model.range.from, true)
+          : `${formatShortDate(model.range.from, true)} – ${formatShortDate(model.range.to, true)}`);
       usageReportText(document.getElementById('usageReportProgress'),
         model.elapsed < model.periodLength ? t('usageReportInProgress', { d: model.elapsed, n: model.periodLength }) : '');
     }
@@ -21310,7 +22341,7 @@
       if (!empty) {
         if (usageReportShowDelta(model)) {
           tokensSub.append(usageReportDeltaSpan(model.comparison.tokens_pct));
-          tokensSub.append(document.createTextNode(` ${t('usageReportVsPrior', { n: model.elapsed })}`));
+          tokensSub.append(document.createTextNode(` ${model.elapsed === 1 ? t('usageReportVsPriorDay') : t('usageReportVsPrior', { n: model.elapsed })}`));
         } else {
           // Two different silences: a year in progress is not compared by rule,
           // while a missing prior window is a fact about the data.
@@ -21318,12 +22349,14 @@
         }
       }
       usageReportText(document.getElementById('usageReportKCost'), empty ? '—' : formatCurrency(model.cost));
+      usageReportText(document.getElementById('usageReportKMessages'), usageReportFigure(model.messages, formatNumber));
     }
 
     // The half that waits: runtime comes from /api/active-time, the active-day
     // count from the insights streaks facet.
     function usageReportRenderHeroActivity(model) {
       const empty = model.isEmpty;
+      usageReportText(document.getElementById('usageReportKSessions'), usageReportFigure(model.sessions, formatNumber));
       usageReportText(document.getElementById('usageReportKActive'), empty || !model.activeMs ? '—' : formatDurationUnits(model.activeMs));
       usageReportText(document.getElementById('usageReportKActiveSub'), empty || !model.agentMs ? '' : t('usageReportActiveSub', { agent: formatDurationUnits(model.agentMs) }));
       const daysEl = document.getElementById('usageReportKDays');
@@ -21339,41 +22372,7 @@
         total.textContent = `/${model.elapsed}`;
         daysEl.append(total);
       }
-      usageReportText(document.getElementById('usageReportKDaysSub'), empty ? '' : t('usageReportDaysSub', { n: model.elapsed }));
-    }
-
-    // The sentence reads "In {range}", so it needs the phrase the head cannot
-    // supply: a bare month name, and a phrase that survives the preposition.
-    function usageReportSentenceRange(model) {
-      if (model.period === 'month') {
-        return parseDateKey(model.range.from).toLocaleDateString(langLocale(), { month: 'long' });
-      }
-      if (model.period === 'week') return t('usageReportSentenceWeek');
-      return t('usageReportSentenceYear');
-    }
-
-    function usageReportRenderSentence(model) {
-      const priorEnd = parseDateKey(model.range.from);
-      priorEnd.setDate(priorEnd.getDate() - 1);
-      const priorStart = new Date(priorEnd);
-      priorStart.setDate(priorStart.getDate() - (model.elapsed - 1));
-      const vars = {
-        range: usageReportSentenceRange(model),
-        sessions: usageReportFigure(model.sessions, formatNumber),
-        tokens: formatTokenCount(model.tokens),
-        cost: formatCurrency(model.cost),
-        prior: `${formatShortDate(priorStart, true)} – ${formatShortDate(priorEnd, true)}`,
-      };
-      if (model.isEmpty) {
-        usageReportText(document.getElementById('usageReportSentence'), t('usageReportEmptyPeriod'));
-        return;
-      }
-      if (!usageReportShowDelta(model)) {
-        usageReportText(document.getElementById('usageReportSentence'), t('usageReportSentenceFlat', vars));
-        return;
-      }
-      vars.pct = Math.abs(model.comparison.tokens_pct).toFixed(1);
-      usageReportText(document.getElementById('usageReportSentence'), t(model.comparison.tokens_pct < 0 ? 'usageReportSentenceLess' : 'usageReportSentence', vars));
+      usageReportText(document.getElementById('usageReportKDaysSub'), empty || model.period === 'day' ? '' : t('usageReportDaysSub', { n: model.elapsed }));
     }
 
     function usageReportCell(day) {
@@ -21393,7 +22392,7 @@
       }
       cell.style.background = heatColor(day.level);
       cell.dataset.token = '1';
-      cell.title = `${day.date} · ${formatTokenCount(day.tokens)} tokens · ${formatNumber(day.messages)} messages`;
+      cell.title = `${day.date} · ${formatTokenCount(day.tokens)} ${t('usageReportTokens')} · ${formatNumber(day.messages)} ${t('messages')}`;
       return cell;
     }
 
@@ -21415,20 +22414,16 @@
 
     function usageReportRenderHeat(model) {
       const host = document.getElementById('usageReportHeat');
-      usageReportRenderLegend();
       host.replaceChildren();
-      if (!model.dailyAvailable || !model.cells.length) {
-        usageReportText(host, t('usageReportFacetsMissing', { facets: USAGE_REPORT_HEAT_FACETS }));
+      if (model.period === 'day' || model.period === 'week') {
+        document.getElementById('usageReportLegend').replaceChildren();
         usageReportText(document.getElementById('usageReportStreak'), '');
         return;
       }
-
-      if (model.period === 'week') {
-        // One stretched row of seven cells reads as a loading artifact, not a
-        // map -- the week view drops the day grid (and its legend) and keeps
-        // the streak line beneath it.
-        document.getElementById('usageReportLegend').replaceChildren();
-        usageReportRenderStreak(model);
+      usageReportRenderLegend();
+      if (!model.dailyAvailable || !model.cells.length) {
+        usageReportText(host, t('usageReportFacetsMissing', { facets: USAGE_REPORT_HEAT_FACETS }));
+        usageReportText(document.getElementById('usageReportStreak'), '');
         return;
       }
 
@@ -21531,6 +22526,7 @@
        and tool names are all data that arrives over the wire. */
     function usageReportFillNote(el, entries) {
       if (!el) return;
+      el.hidden = !entries.some((entry) => entry && String(entry.text || '') !== '');
       const fragment = document.createDocumentFragment();
       entries
         .filter((entry) => entry && String(entry.text || '') !== '')
@@ -21627,27 +22623,8 @@
       ];
       host.replaceChildren(...tiles);
 
-      if (!model.projectsAvailable) {
-        usageReportFillNote(note, [
-          { text: t('usageReportMissingProjects') },
-          { text: t('usageReportProjectGroupNote'), faint: true },
-        ]);
-        return;
-      }
-      // Every project surface prints all three reconciliation components (5.2):
-      // the ranked rows, the facet's own unattributed bucket, and the share the
-      // facet never sees at all.
-      const entries = [
-        {
-          text: t('usageReportPodiumProjectNote', {
-            n: model.projectCount,
-            u: usageReportShare(model.unattrShare),
-            g: usageReportShare(model.gapShare),
-          }),
-        },
-        { text: t('usageReportProjectGroupNote'), faint: true },
-      ];
-      if (usageReportShowFacetCoverage(model)) {
+      const entries = model.projectsAvailable ? [] : [{ text: t('usageReportMissingProjects') }];
+      if (model.projectsAvailable && usageReportShowFacetCoverage(model)) {
         entries.push({ text: t('usageReportFacetCovers', { pct: usageReportShare(model.facetTotal / model.tokens) }), faint: true });
       }
       usageReportFillNote(note, entries);
@@ -21690,10 +22667,10 @@
       const strip = document.createElement('div');
       strip.className = 'usage-report-hbars';
       let buckets = model.hourly.buckets || [];
-      const isToday = model.isToday || model.period === 'today' || (typeof usageReportState !== 'undefined' && usageReportState && usageReportState.period === 'today');
+      const isToday = model.period === 'day' && model.range.to === formatDateKey(usageReportToday());
       if (isToday) {
-        const currentHour = new Date().getHours();
-        buckets = buckets.filter((row) => Number(row.hour) <= currentHour);
+        const currentHour = usageReportToday().getHours();
+        buckets = buckets.map((row) => Number(row.hour) > currentHour ? { ...row, tokens: 0 } : row);
       }
       const maxHour = Math.max(1, ...buckets.map((row) => Number(row.tokens) || 0));
       const nightHours = new Set((model.hourly.night_hours || []).map(Number));
@@ -21734,7 +22711,7 @@
       // A week or a month has not met every weekday yet. A weekday it never met
       // prints an empty bar and an em dash, not a zero: "no Thursday has
       // happened" is not "Thursday used nothing".
-      const weekdays = model.weekday.buckets || [];
+      const weekdays = model.period === 'day' ? [] : model.weekday.buckets || [];
       const maxWeekday = Math.max(1, ...weekdays.map((row) => Number(row.tokens) || 0));
       const labels = getDayLabels();
       weekdays.forEach((row) => {
@@ -21757,7 +22734,7 @@
         side.append(line);
       });
 
-      if (model.weekday.peak_weekday !== null && model.weekday.peak_weekday !== undefined) {
+      if (model.period !== 'day' && model.weekday.peak_weekday !== null && model.weekday.peak_weekday !== undefined) {
         const peak = document.createElement('p');
         peak.className = 'usage-report-notice';
         peak.style.marginTop = '8px';
@@ -21833,13 +22810,9 @@
     function usageReportRenderFooter(model) {
       const host = document.getElementById('usageReportFooter');
       if (!host) return;
-      // Both of these are claims about one machine -- whose midnight starts a
-      // day, and whose tokdash did the counting -- so they name the server the
-      // report was read from rather than assuming it is the local one.
+      // The source line names the server the report was read from.
       const machine = usageReportMachineName();
-      const lines = [t('usageReportFooterDays', { machine }), t('usageReportFooterCost')];
-      if (model.gapCapMs) lines.push(t('usageReportFooterActive', { cap: formatDuration(model.gapCapMs) }));
-      if (model.projectsAvailable) lines.push(t('usageReportProjectGroupNote'));
+      const lines = [];
       if (model.coverage) {
         const sources = (model.coverage.stored_sources || []).length + (model.coverage.live_sources || []).length;
         lines.push(t('usageReportFooterSrc', { n: sources, machine, version: usageReportState.version || USAGE_REPORT_EM }));
@@ -22028,6 +23001,7 @@
 
     function usageReportCardTitle(model) {
       const from = parseDateKey(model.range.from);
+      if (model.period === 'day') return formatShortDate(model.range.from, true);
       if (model.period === 'year') {
         // A completed year is just its number; "year to date" only fits the
         // one still running.
@@ -22083,14 +23057,16 @@
       // its eyebrow and its manifest, and dropping it buys back line length.
       line(t(tier === 'green' ? 'usageReportTierGreen' : 'usageReportTierAmber'), 9, { weight: 800, fill: accent, lh: 12 });
       line(usageReportClipText(usageReportCardTitle(model), usageReportCardFont(20, 800), contentW), 20, { weight: 800, lh: 24 });
-      usageReportWrapText(
-        t('usageReportCardRange', {
-          from: formatShortDate(model.range.from, true),
-          to: formatShortDate(model.range.to, true),
-        }),
-        usageReportCardFont(10, 400),
-        contentW,
-      ).forEach((row) => line(row, 10, { fill: pal.muted, lh: 13 }));
+      if (model.period !== 'day') {
+        usageReportWrapText(
+          t('usageReportCardRange', {
+            from: formatShortDate(model.range.from, true),
+            to: formatShortDate(model.range.to, true),
+          }),
+          usageReportCardFont(10, 400),
+          contentW,
+        ).forEach((row) => line(row, 10, { fill: pal.muted, lh: 13 }));
+      }
       top += 5;
 
       let heroSize = 34;
@@ -22110,7 +23086,7 @@
       // estimate -- a shared card claims what the agents did, and "est." on an
       // artifact nobody can hover is noise).
       usageReportWrapText(
-        t('usageReportCardHeroSub', {
+        t(model.period === 'day' ? 'usageReportCardHeroSubDay' : 'usageReportCardHeroSub', {
           days: streaks ? String(streaks.active_days) : USAGE_REPORT_EM,
           total: model.elapsed,
           sessions: usageReportFigure(model.sessions, formatNumber),
@@ -22135,7 +23111,7 @@
         day.future ? pal.border : null,
       );
       let heatH = 0;
-      if (model.period === 'week') {
+      if (model.period === 'day' || model.period === 'week') {
         // Dropped on purpose; see above.
       } else if (days.length <= 42) {
         // Month: the report page's presentation -- square cells on the weekday
@@ -22353,7 +23329,7 @@
           chip.textContent = t(tier === 'green' ? 'usageReportTierGreen' : 'usageReportTierAmber');
           const themeLabel = document.createElement('span');
           themeLabel.className = 'mono';
-          themeLabel.textContent = mode;
+          themeLabel.textContent = t(mode === 'light' ? 'themeLight' : 'themeDark');
           caption.append(chip, themeLabel);
           const box = document.createElement('div');
           box.className = 'usage-report-cardbox';
@@ -22508,7 +23484,6 @@
       usageReportRenderHead(model);
       usageReportRenderBanner(model);
       usageReportRenderHero(model);
-      usageReportRenderSentence(model);
       usageReportRenderHeat(model);
       usageReportRenderPodium(model);
       usageReportRenderWhen(model);
@@ -22881,11 +23856,17 @@
       const withData = SESSION_TOOL_KEYS.filter((tool) => (lastSessionsResponses?.[tool]?.sessions?.length || 0) > 0);
       const frag = document.createDocumentFragment();
       withData.forEach((tool) => {
+        const name = formatToolName(tool);
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'modern-tool-pill';
         btn.dataset.tool = tool;
-        btn.textContent = formatToolName(tool);
+        // Harness mark + name, the same identity the Overview and the panel
+        // headers wear. A collapsed pill shows the mark alone, so the name rides
+        // along as the pill's accessible name and tooltip.
+        btn.title = name;
+        btn.setAttribute('aria-label', name);
+        btn.appendChild(createToolIdentity(tool));
         btn.addEventListener('click', () => filterSessionPanels(tool, btn));
         frag.appendChild(btn);
       });
@@ -22905,6 +23886,48 @@
         allBtn?.classList.add('active');
         if (previous !== 'all') filterSessionPanels('all', allBtn);
       }
+      scheduleSessionPillDensity();
+    }
+
+    // The pill row and the search box share one toolbar, so a wide range with a
+    // dozen harnesses in it pushes the row into a sideways scroll. Measure the row
+    // with its names visible; when they cannot all fit, keep the marks and drop the
+    // names. is-icon-only never removes a pill, and every pill keeps its title and
+    // aria-label, so a collapsed row is still hoverable, focusable and readable.
+    function updateSessionPillDensity() {
+      const bar = document.getElementById('sessionsQuickFilterBar');
+      if (!bar) return;
+      // Measure the labelled layout first: the decision then depends only on the
+      // width available, never on the state the previous measurement left behind.
+      bar.classList.remove('is-icon-only');
+      if (bar.scrollWidth - bar.clientWidth > 1) bar.classList.add('is-icon-only');
+    }
+
+    let sessionPillDensityFrame = 0;
+    function scheduleSessionPillDensity() {
+      if (sessionPillDensityFrame) cancelAnimationFrame(sessionPillDensityFrame);
+      sessionPillDensityFrame = requestAnimationFrame(() => {
+        sessionPillDensityFrame = 0;
+        updateSessionPillDensity();
+      });
+    }
+
+    function initSessionPillDensity() {
+      const bar = document.getElementById('sessionsQuickFilterBar');
+      if (!bar) return;
+      // Watch the toolbar, not the pill row: collapsing re-sizes the row itself, and
+      // a ResizeObserver on the element its own edit resized fires once per edit,
+      // forever. The toolbar's width does not depend on how wide the row is.
+      const watched = document.getElementById('sessionsPanelToolbar') || bar.parentElement;
+      updateSessionPillDensity();
+      if (watched && typeof ResizeObserver !== 'undefined') {
+        new ResizeObserver(scheduleSessionPillDensity).observe(watched);
+      } else {
+        window.addEventListener('resize', scheduleSessionPillDensity);
+      }
+      // Webfonts land after first paint, and a face that turns out wider than the
+      // fallback is exactly what makes the names stop fitting.
+      if (document.fonts?.ready) document.fonts.ready.then(() => scheduleSessionPillDensity());
     }
 
     function filterSessionPanels(toolName, btn) {
@@ -23051,6 +24074,7 @@
       if (event.key === 'Escape') closeSessionModal();
     });
     initSessionPanels();
+    initSessionPillDensity();
 
     // Stats
     const statsCache = {
@@ -23485,10 +24509,11 @@
     }
 
     function formatProfileAggregateTooltip(aggregate, cumulative = false, milestonesEnabled = false) {
-      const range = aggregate?.startDate && aggregate?.endDate
+      const singleDate = aggregate?.startDate === aggregate?.endDate;
+      // A daily cell uses one date in its title; avoid formatting an unused range.
+      const range = (cumulative || !singleDate) && aggregate?.startDate && aggregate?.endDate
         ? `${formatShortDate(aggregate.startDate, true)} → ${formatShortDate(aggregate.endDate, true)}`
         : '—';
-      const singleDate = aggregate?.startDate === aggregate?.endDate;
       const title = cumulative
         ? `${t('cumulative')} · ${range}`
         : (singleDate ? formatShortDate(aggregate.startDate, true) : range);
@@ -24234,12 +25259,21 @@
       const preserveNavigation = !!options.preserveNavigation;
       loadActivityInsights().catch(() => {});
       const seq = ++statsLoadSeq;
+      const sparklineServerKey = typeof usageServerKeyFor === 'function' ? usageServerKeyFor() : null;
+      // Issued now, committed only below: a read that this load gave up on must not
+      // leave its own numbers behind as the sparkline's reference.
+      const sparklineGeneration = typeof sparklineIssueStatsGeneration === 'function'
+        ? sparklineIssueStatsGeneration()
+        : null;
       if (!statsLoaded) setStatsStatus('loading');
       try {
         const rows = await fetchSelectedServers('/api/stats');
         if (!rows.length) throw new Error(t('statsLoadFailed'));
         const data = combineStatsPayloads(rows.map((row) => row.payload));
         if (seq !== statsLoadSeq) return; // a newer load superseded this one
+        if (typeof sparklineAcceptStatsRows === 'function') {
+          sparklineAcceptStatsRows(rows, { serverKey: sparklineServerKey, generation: sparklineGeneration });
+        }
 
         const stats = data.stats || {};
         document.getElementById('statFavoriteModel').textContent = stats.favorite_model || '—';
@@ -24265,6 +25299,7 @@
         setStatsStatus('ok');
         renderCalendar(filledContributions, { preserveNavigation });
         contributionsData = filledContributions;
+        if (typeof renderOverviewSparklines === 'function' && isOverviewActive()) renderOverviewSparklines();
         if (calendarState.view === 'year') {
           ensureYearStatsLoaded(calendarState.yearCursor.getFullYear());
         }
@@ -24282,9 +25317,18 @@
       statsWarmScheduled = true;
       setTimeout(() => {
         scheduleIdle(() => {
+          const sparklineServerKey = typeof usageServerKeyFor === 'function' ? usageServerKeyFor() : null;
+          // Same acceptance rule as the foreground load: whichever Stats read was
+          // issued first cannot overwrite one issued after it but answered earlier.
+          const sparklineGeneration = typeof sparklineIssueStatsGeneration === 'function'
+            ? sparklineIssueStatsGeneration()
+            : null;
           fetchSelectedServers('/api/stats', {}, { attempts: 2, baseDelayMs: 600 })
             .then((rows) => {
               if (!rows.length) throw new Error(t('statsLoadFailed'));
+              if (typeof sparklineAcceptStatsRows === 'function') {
+                sparklineAcceptStatsRows(rows, { serverKey: sparklineServerKey, generation: sparklineGeneration });
+              }
               const data = combineStatsPayloads(rows.map((row) => row.payload));
               const filledContributions = reconcileTodayProfileContribution(
                 fillMissingDays(data.contributions || []),
@@ -24294,6 +25338,7 @@
               );
               statsCache.default = filledContributions;
               if (isOverviewActive()) renderOverviewProfilePreview(filledContributions);
+              if (typeof renderOverviewSparklines === 'function' && isOverviewActive()) renderOverviewSparklines();
             })
             .catch(() => {
               if (isOverviewActive()) setOverviewProfileState('error');

@@ -52,6 +52,49 @@ daemon poll cycles. Set `TOKDASH_QUOTA_BOUNDARY_POLL=0` to disable it,
 the default 120-second leads with `TOKDASH_QUOTA_BOUNDARY_PRE_SECONDS` and
 `TOKDASH_QUOTA_BOUNDARY_POST_SECONDS`.
 
+## Background poll and reset-boundary sequence
+
+The daemon in `cli.py` schedules regular polls and consults the quota boundary planner for earlier provider-scoped samples. Credential readers use the disclosed local CLI configuration and auth files; successful collection is persisted as quota snapshots in the usage database.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Daemon as Quota poll daemon (cli.py)
+    participant Planner as _plan_next_quota_poll
+    participant Boundary as Boundary planner (quota/__init__.py)
+    participant Store as UsageEntryStore (SQLite)
+    participant Poll as poll_quota (quota/__init__.py)
+    participant Creds as credential_sources.py
+    participant Config as Local CLI configs and auth stores
+    participant Codex as Local Codex session files
+    participant Collectors as Provider collectors
+    participant Providers as Provider quota APIs
+
+    Daemon->>Store: Read latest quota snapshots
+    Store-->>Daemon: Current fixed-window reset timestamps
+    Daemon->>Planner: Plan next wake with current time and snapshots
+    Planner->>Planner: Calculate jittered regular interval
+    Planner->>Boundary: plan_boundary_poll(..., minimum 300-second delay)
+    Boundary->>Boundary: _boundary_candidate_details computes pre-reset and post-reset candidates
+    Note over Boundary: RESET_JITTER_SECONDS filters near-now candidates
+    Boundary-->>Planner: Earliest coalesced boundary and provider set, if sooner
+    Planner-->>Daemon: Sleep duration and optional boundary target
+    Daemon->>Daemon: Sleep, then recheck tracking and consent
+    Daemon->>Poll: _quota_poll_once
+    Poll->>Codex: collect_local_snapshots
+    Codex-->>Poll: Local Codex quota snapshots
+    Poll->>Creds: Read credentials
+    Creds->>Config: Read local CLI credential/config files
+    Config-->>Creds: Credentials and provider settings
+    Creds-->>Poll: Credentials and provider settings
+    Poll->>Collectors: collect_network_snapshots
+    Collectors->>Providers: Request quota
+    Providers-->>Collectors: Quota windows and reset timestamps
+    Collectors-->>Poll: Network quota snapshots
+    Poll->>Store: Insert quota snapshots and update poll metadata
+    Note over Store: Snapshot writes use SQLite transactions, local Codex snapshots and their watermarks commit atomically
+```
+
 ## Consent semantics
 
 Live polling requires two separate decisions: `quota.credential_scan` permits

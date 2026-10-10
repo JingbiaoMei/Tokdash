@@ -39,11 +39,11 @@ class TokdashArgumentParser(argparse.ArgumentParser):
 def _port_type(value: str) -> int:
     try:
         port = int(value)
-    except Exception:
-        raise argparse.ArgumentTypeError(f"Invalid port {value!r}. Must be an integer in 1..65535.")
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"Port must be an integer in 1..65535, got {value!r}.")
 
     if not (1 <= port <= 65535):
-        raise argparse.ArgumentTypeError(f"Invalid port {port}. Valid range is 1..65535.")
+        raise argparse.ArgumentTypeError(f"Port must be an integer in 1..65535, got {port}.")
 
     return port
 
@@ -575,6 +575,12 @@ def _verify_usage_database(period: str) -> dict:
             attempts.append(result)
             time.sleep(2)
         result["attempts"] = attempts[:-1]
+        result["guidance"] = (
+            "The stored usage database does not match the live source data. "
+            "Run `tokdash db resync` to rebuild the database from source files. "
+            "If the database is corrupted, run `tokdash db resync` after "
+            "backing up the database file."
+        )
         return result
     finally:
         if old is None:
@@ -922,7 +928,8 @@ def db_command(action: str, pretty: bool, output: str | None, verify_period: str
         return 0 if result.get("ok") else 1
     if action == "watch":
         return _watch_usage_database(pretty, output)
-    raise SystemExit(f"Unknown db action: {action}")
+    valid_actions = ["status", "sync", "resync", "verify", "repair", "watch"]
+    raise SystemExit(f"Unknown db action: {action!r}. Valid actions: {', '.join(valid_actions)}.")
 
 
 def _parse_onoff(value: str | None) -> bool | None:

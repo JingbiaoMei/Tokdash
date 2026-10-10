@@ -1,6 +1,6 @@
 {
-  "version": "2.0.33",
-  "lastUpdated": "2026-09-30T00:00:00Z",
+  "version": "2.0.34",
+  "lastUpdated": "2026-10-08T11:05:09Z",
   "note": "Comprehensive pricing database with all Moonshot, MiniMax, GLM, and OpenAI models from OpenRouter. Cache pricing estimated at 10% of input for cache_read, 100% of input for cache_write.",
   "aliases": {
     "Qwen/Qwen3.8-Flash-Next": "qwen3.8-flash",
@@ -1137,6 +1137,15 @@
       "source": "developers.openai.com/api/docs/pricing",
       "note": "Official OpenAI standard pricing (approval-gated Daybreak Red model), verified 2026-09-23."
     },
+    "gpt-6.1-sol-pro": {
+      "provider": "openai",
+      "input": 2.0,
+      "output": 10.0,
+      "cache_read": 0.1,
+      "cache_write": 2.5,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-6.1-sol-pro"
+    },
     "_comment_anthropic": "=== Anthropic Claude Models ===",
     "claude-fable-5": {
       "provider": "anthropic",
@@ -1391,6 +1400,15 @@
       "cache_write": 2.5,
       "unit": "per_million_tokens",
       "source": "openrouter.ai/anthropic/claude-sonnet-5.5"
+    },
+    "claude-haiku-5.5": {
+      "provider": "anthropic",
+      "input": 0.1,
+      "output": 0.5,
+      "cache_read": 0.01,
+      "cache_write": 0.125,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/anthropic/claude-haiku-5.5"
     },
     "_comment_deepseek": "=== DeepSeek Models ===",
     "deepseek-chat": {
@@ -2928,6 +2946,15 @@
       "unit": "per_million_tokens",
       "source": "openrouter.ai/mistralai/ministral-8b"
     },
+    "mistral-large-4-0": {
+      "provider": "mistral",
+      "input": 0.68,
+      "output": 2.09,
+      "cache_read": 0.07,
+      "cache_write": 0.68,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/mistralai/mistral-large-4-0"
+    },
     "_comment_cohere": "=== Cohere Models ===",
     "command-a": {
       "provider": "cohere",
@@ -3167,6 +3194,15 @@
       "cache_write": 0.041667,
       "unit": "per_million_tokens",
       "source": "openrouter.ai/google/gemini-3.8-flash"
+    },
+    "gemini-nano-banana-2.1": {
+      "provider": "google",
+      "input": 1.5,
+      "output": 7.5,
+      "cache_read": 0.375,
+      "cache_write": 1.5,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/google/gemini-nano-banana-2.1"
     },
     "_comment_meta": "=== Meta Models ===",
     "llama-3.1-70b-instruct": {

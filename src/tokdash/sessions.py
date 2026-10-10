@@ -37,6 +37,7 @@ from .output_speed import (
 from .output_speed_readers import CodexResponseAssociation, request_window_timing, native_message_timing
 from .speed_mode import timing_enabled, collect_timings
 from .dateutil import local_midnight, parse_date_range
+from .usage_buckets import bucket_granularity, merged_interval_buckets, local_hour_keys
 from .pricing import PricingDatabase
 from .sources.coding_tools import (
     CODEX_DEFAULT_MODEL,
@@ -728,11 +729,13 @@ def _clip_intervals(
 ) -> list[tuple[int, int]]:
     """Trim intervals to the window, dropping the ones left empty."""
     clipped: list[tuple[int, int]] = []
+    since_ms = int(since_ms) if since_ms is not None else None
+    until_ms = int(until_ms) if until_ms is not None else None
     for start, end in intervals:
-        if since_ms is not None:
-            start = max(start, int(since_ms))
-        if until_ms is not None:
-            end = min(end, int(until_ms))
+        if since_ms is not None and start < since_ms:
+            start = since_ms
+        if until_ms is not None and end > until_ms:
+            end = until_ms
         if end > start:
             clipped.append((start, end))
     return clipped
@@ -804,22 +807,21 @@ def _session_active_intervals(
     return _clip_intervals(intervals, since_ms, until_ms)
 
 
-def _merged_interval_ms(intervals: Iterable[tuple[int, int]]) -> int:
+def _merged_interval_ms(intervals: Iterable[tuple[int, int]], *, presorted: bool = False) -> int:
     """Wall-clock covered by the intervals, counting overlap once."""
+    ordered = iter(intervals if presorted else sorted(intervals))
+    first = next(ordered, None)
+    if first is None:
+        return 0
+    start, end = first
     total = 0
-    start: Optional[int] = None
-    end = 0
-    for interval_start, interval_end in sorted(intervals):
-        if start is None:
-            start, end = interval_start, interval_end
-        elif interval_start > end:
+    for interval_start, interval_end in ordered:
+        if interval_start > end:
             total += end - start
             start, end = interval_start, interval_end
         elif interval_end > end:
             end = interval_end
-    if start is not None:
-        total += end - start
-    return total
+    return total + end - start
 
 
 # How each source's raw token counts map onto PricingDatabase.get_cost. Kept as
@@ -6853,16 +6855,32 @@ def get_active_time_data(
     include_codex_review = _include_codex_review_sessions(include_review_sessions)
     cap_ms = active_gap_cap_ms()
 
+    since_ms, until_ms = _window_bounds(period, date_from, date_to)
     by_tool, unavailable, all_intervals = _active_time_window(
-        *_window_bounds(period, date_from, date_to), include_codex_review=include_codex_review
+        since_ms, until_ms, include_codex_review=include_codex_review
     )
-    active_ms = _merged_interval_ms(all_intervals)
+    granularity = bucket_granularity(
+        datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(milliseconds=since_ms) if since_ms is not None else None,
+        datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(milliseconds=until_ms) if until_ms is not None else None,
+    )
+    ordered = sorted(all_intervals)
+    if granularity:
+        active_ms, sparkline = merged_interval_buckets(ordered, granularity, (since_ms, until_ms))
+    else:
+        active_ms, sparkline = _merged_interval_ms(ordered, presorted=True), None
     active_ms_sum = sum(int(row["active_ms_sum"]) for row in by_tool.values())
+    if granularity == "hour":
+        sparkline["keys"] = local_hour_keys(datetime.fromtimestamp(since_ms / 1000).astimezone())
+
+    # The previous window allocates its own clipped intervals. Release the
+    # current window first to reduce the live heap and GC work on annual ranges.
+    del ordered, all_intervals
 
     return {
         "period": period,
         "active_ms": active_ms,
         "active_ms_sum": active_ms_sum,
+        "sparkline": sparkline,
         "comparison": _active_time_comparison(
             period,
             date_from,
@@ -7107,6 +7125,189 @@ def _antigravity_rich_session_detail(session_id: str, raw: Dict[str, Any], sessi
     return detail_data
 
 
+def _opencode_rich_session_detail(session_id: str, raw: Dict[str, Any], session: Dict[str, Any]) -> Dict[str, Any]:
+    """Return privacy-filtered message/tool metadata from OpenCode's local DB."""
+    def valid_ms(value: Any) -> Optional[str]:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        if (isinstance(value, float) and (not math.isfinite(value) or not value.is_integer())) or value < 0:
+            return None
+        try:
+            return _ms_to_iso(int(value))
+        except (OverflowError, OSError, ValueError):
+            return None
+
+    def text_length(value: Any) -> int:
+        return len(value) if isinstance(value, str) else 0
+
+    def safe_string(value: Any) -> Optional[str]:
+        return value if isinstance(value, str) else None
+
+    def token_value(value: Any) -> int:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return 0
+        if (isinstance(value, float) and (not math.isfinite(value) or not value.is_integer())) or value < 0:
+            return 0
+        return int(value)
+
+    # Do not use connect_sqlite_readonly here: its RW fallback can create a missing DB.
+    db_path = clientpaths.opencode_db_path()
+    conn = sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True)
+    try:
+        conn.execute("BEGIN")
+        table = _opencode_message_table(conn)
+        if table == "session_message":
+            rows = conn.execute(
+                "SELECT id,type,seq,time_created,data FROM session_message "
+                "WHERE session_id=? AND type IN ('user','assistant','system') ORDER BY seq,id",
+                (session_id,),
+            ).fetchall()
+            parsed = []
+            for row in rows:
+                mid, role, _seq, created, encoded = row
+                try:
+                    data = json.loads(encoded) if isinstance(encoded, str) else encoded
+                    if not isinstance(data, dict):
+                        raise ValueError
+                except (ValueError, TypeError, json.JSONDecodeError):
+                    logger.warning("OpenCode detail: malformed message row id=%s", mid)
+                    continue
+                parsed.append((mid, role, created, data))
+        else:
+            rows = conn.execute(
+                "SELECT id,time_created,data FROM message WHERE session_id=? ORDER BY time_created,id",
+                (session_id,),
+            ).fetchall()
+            parsed = []
+            for row in rows:
+                mid, created, encoded = row
+                try:
+                    data = json.loads(encoded) if isinstance(encoded, str) else encoded
+                    if not isinstance(data, dict):
+                        raise ValueError
+                except (ValueError, TypeError, json.JSONDecodeError):
+                    logger.warning("OpenCode detail: malformed message row id=%s", mid)
+                    continue
+                role = data.get("role")
+                if role in ("user", "assistant", "system"):
+                    parsed.append((mid, role, created, data))
+
+        needs_parts = any(
+            (role == "assistant" and not isinstance(data.get("content"), list))
+            or (role in ("user", "system") and not isinstance(data.get("text"), str))
+            for _mid, role, _created, data in parsed
+        )
+        parts_by_message: Dict[Any, list] = {}
+        if needs_parts:
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            if "part" in tables:
+                for part_id, message_id, part_created, encoded in conn.execute(
+                    "SELECT id,message_id,time_created,data FROM part WHERE session_id=? ORDER BY time_created,id",
+                    (session_id,),
+                ).fetchall():
+                    try:
+                        part_data = json.loads(encoded) if isinstance(encoded, str) else encoded
+                        if not isinstance(part_data, dict):
+                            raise ValueError
+                    except (ValueError, TypeError, json.JSONDecodeError):
+                        logger.warning("OpenCode detail: malformed part row id=%s", part_id)
+                        continue
+                    parts_by_message.setdefault(message_id, []).append((part_id, part_created, part_data))
+
+        messages = []
+        tool_calls = []
+        for mid, role, created, data in parsed:
+            message_id = safe_string(mid)
+            if message_id is None:
+                logger.warning("OpenCode detail: malformed message row id=%s", mid)
+                continue
+            row_timestamp = valid_ms(created)
+            item = {
+                "id": message_id,
+                "role": role,
+                "content_chars": 0,
+                "has_reasoning": False,
+                "has_tool_calls": False,
+            }
+            if row_timestamp is not None:
+                item["timestamp"] = row_timestamp
+            source = []
+            inline = data.get("content")
+            if role == "assistant" and isinstance(inline, list):
+                source = [(entry, None, None, index) for index, entry in enumerate(inline) if isinstance(entry, dict)]
+            elif role == "assistant":
+                source = [(part, part_id, part_created, index) for index, (part_id, part_created, part) in enumerate(parts_by_message.get(mid, []))]
+            elif role in ("user", "system") and not isinstance(data.get("text"), str):
+                source = [(part, part_id, part_created, index) for index, (part_id, part_created, part) in enumerate(parts_by_message.get(mid, []))]
+
+            if role in ("user", "system"):
+                if isinstance(data.get("text"), str):
+                    item["content_chars"] = len(data["text"])
+                else:
+                    item["content_chars"] = sum(text_length(entry.get("text")) for entry, _pid, _pt, _index in source if entry.get("type") == "text")
+            else:
+                item["content_chars"] = sum(text_length(entry.get("text")) for entry, _pid, _pt, _index in source if entry.get("type") == "text")
+            item["has_reasoning"] = any(entry.get("type") == "reasoning" for entry, _pid, _pt, _index in source)
+            tools = [(entry, index, part_id, part_created) for entry, part_id, part_created, index in source if entry.get("type") == "tool"]
+            item["has_tool_calls"] = bool(tools)
+
+            if role == "assistant":
+                identity = {}
+                for key in ("modelID", "providerID"):
+                    value = safe_string(data.get(key))
+                    if value:
+                        identity[key] = value
+                nested = data.get("model")
+                if isinstance(nested, dict):
+                    clean_nested = {key: value for key in ("id", "providerID") if (value := safe_string(nested.get(key)))}
+                    if clean_nested:
+                        identity["model"] = clean_nested
+                model_id = identity.get("modelID") or (identity.get("model", {}).get("id"))
+                if model_id:
+                    model, _provider = _opencode_model_identity(identity)
+                    item["model"] = model
+                tokens = data.get("tokens")
+                if isinstance(tokens, dict):
+                    cache = tokens.get("cache") if isinstance(tokens.get("cache"), dict) else {}
+                    item["token_count"] = sum(token_value(tokens.get(key)) for key in ("input", "output")) + sum(token_value(cache.get(key)) for key in ("read", "write"))
+
+            for entry, index, part_id, part_created in tools:
+                state = entry.get("state") if isinstance(entry.get("state"), dict) else {}
+                if part_id is None:
+                    tool_id = safe_string(entry.get("id")) or f"{message_id}:tool:{index}"
+                    name = safe_string(entry.get("name")) or "tool"
+                    status = safe_string(state.get("status")) or "unknown"
+                    time_obj = entry.get("time") if isinstance(entry.get("time"), dict) else {}
+                    timestamp = valid_ms(time_obj.get("created")) or row_timestamp
+                else:
+                    tool_id = safe_string(entry.get("callID")) or safe_string(part_id) or f"{message_id}:tool:{index}"
+                    name = safe_string(entry.get("tool")) or "tool"
+                    status = safe_string(state.get("status")) or "unknown"
+                    state_time = state.get("time") if isinstance(state.get("time"), dict) else {}
+                    timestamp = valid_ms(state_time.get("start")) or valid_ms(part_created)
+                tool = {"id": tool_id, "name": name, "tool_name": name, "status": status, "has_args": "input" in state and state.get("input") is not None}
+                if timestamp is not None:
+                    tool["timestamp"] = timestamp
+                tool_calls.append(tool)
+            messages.append(item)
+        result = {"messages": messages, "tool_calls": tool_calls, "tool_executions": list(tool_calls)}
+    except BaseException:
+        try:
+            conn.rollback()
+        except BaseException:
+            pass
+        try:
+            conn.close()
+        except BaseException:
+            pass
+        raise
+    try:
+        conn.rollback()
+    finally:
+        conn.close()
+    return result
+
+
 def get_session_detail(tool: str, session_id: str) -> Dict[str, Any]:
     key = str(tool or "").strip().lower()
     if key not in SESSION_TOOLS:
@@ -7136,6 +7337,16 @@ def get_session_detail(tool: str, session_id: str) -> Dict[str, Any]:
         res.update(_hermes_rich_session_detail(str(session_id), raw, session))
     elif key in ("antigravity_cli", "antigravity"):
         res.update(_antigravity_rich_session_detail(str(session_id), raw, session))
+    elif key == "opencode":
+        # The session and turns above come from the cached loader; this is a fresh
+        # read of OpenCode's store on every open. If it fails, return the session
+        # without its message timeline instead of failing the whole detail, as the
+        # Hermes and Antigravity readers do.
+        try:
+            res.update(_opencode_rich_session_detail(str(session_id), raw, session))
+        except (OSError, sqlite3.Error, ValueError) as error:
+            logger.warning("OpenCode detail: message metadata unavailable for session %s: %s", session_id, error)
+            res.update({"messages": [], "tool_calls": [], "tool_executions": []})
     return res
 
 

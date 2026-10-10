@@ -1,0 +1,405 @@
+{
+  "provenance": {
+    "capturedAt": "2026-10-06T17:33:46+01:00",
+    "capturedFrom": "tokdash 2.6.11 serving the discussion169 synthetic Codex rollout tree, single 'local' server",
+    "note": "This is the response contract the dashboard actually receives. It carries source_errors (a list) and no source_error_count; a fixture that invents the count is what let a real payload draw nothing.",
+    "requests": [
+      "GET /api/usage?date_from=2026-09-30&date_to=2026-10-06&refresh=1",
+      "GET /api/stats?refresh=1"
+    ],
+    "trimmed": "response fields the Overview sparklines read, kept under one week; top_models/combined_models cut to the first five entries. Key names are verbatim."
+  },
+  "stats": {
+    "contributions": [
+      {
+        "date": "2026-09-30",
+        "intensity": 4,
+        "sources": [
+          {
+            "cost": 0.8956594999999999,
+            "messages": 7,
+            "modelId": "gpt-5.5",
+            "providerId": "openai",
+            "source": "codex",
+            "tokens": {
+              "cacheRead": 478489,
+              "cacheWrite": 0,
+              "input": 34053,
+              "output": 16205,
+              "reasoning": 2149
+            }
+          },
+          {
+            "cost": 0.3405844,
+            "messages": 4,
+            "modelId": "gpt-5.6-sol",
+            "providerId": "openai",
+            "source": "codex",
+            "tokens": {
+              "cacheRead": 242661,
+              "cacheWrite": 0,
+              "input": 12480,
+              "output": 9680,
+              "reasoning": 2324
+            }
+          }
+        ],
+        "tokenBreakdown": {
+          "cacheRead": 721150,
+          "cacheWrite": 0,
+          "input": 46533,
+          "output": 25885,
+          "reasoning": 4473
+        },
+        "totals": {
+          "cost": 1.2362438999999998,
+          "messages": 11,
+          "tokens": 798041
+        }
+      },
+      {
+        "date": "2026-10-01",
+        "intensity": 4,
+        "sources": [
+          {
+            "cost": 0.7756395,
+            "messages": 7,
+            "modelId": "gpt-5.5",
+            "providerId": "openai",
+            "source": "codex",
+            "tokens": {
+              "cacheRead": 482039,
+              "cacheWrite": 0,
+              "input": 37756,
+              "output": 11528,
+              "reasoning": 3604
+            }
+          },
+          {
+            "cost": 0.35553840000000003,
+            "messages": 4,
+            "modelId": "gpt-5.6-sol",
+            "providerId": "openai",
+            "source": "codex",
+            "tokens": {
+              "cacheRead": 289106,
+              "cacheWrite": 0,
+              "input": 16799,
+              "output": 8635,
+              "reasoning": 2563
+            }
+          }
+        ],
+        "tokenBreakdown": {
+          "cacheRead": 771145,
+          "cacheWrite": 0,
+          "input": 54555,
+          "output": 20163,
+          "reasoning": 6167
+        },
+        "totals": {
+          "cost": 1.1311779,
+          "messages": 11,
+          "tokens": 852030
+        }
+      },
+      {
+        "date": "2026-10-02",
+        "intensity": 4,
+        "sources": [
+          {
+            "cost": 1.0713245,
+            "messages": 7,
+            "modelId": "gpt-5.5",
+            "providerId": "openai",
+            "source": "codex",
+            "tokens": {
+              "cacheRead": 538119,
+              "cacheWrite": 0,
+              "input": 36913,
+              "output": 20590,
+              "reasoning": 3587
+            }
+          },
+          {
+            "cost": 0.36669599999999997,
+            "messages": 4,
+            "modelId": "gpt-5.6-sol",
+            "providerId": "openai",
+            "source": "codex",
+            "tokens": {
+              "cacheRead": 265060,
+              "cacheWrite": 0,
+              "input": 15333,
+              "output": 9967,
+              "reasoning": 2725
+            }
+          }
+        ],
+        "tokenBreakdown": {
+          "cacheRead": 803179,
+          "cacheWrite": 0,
+          "input": 52246,
+          "output": 30557,
+          "reasoning": 6312
+        },
+        "totals": {
+          "cost": 1.4380205,
+          "messages": 11,
+          "tokens": 892294
+        }
+      },
+      {
+        "date": "2026-10-03",
+        "intensity": 4,
+        "sources": [
+          {
+            "cost": 0.7926085,
+            "messages": 7,
+            "modelId": "gpt-5.5",
+            "providerId": "openai",
+            "source": "codex",
+            "tokens": {
+              "cacheRead": 488157,
+              "cacheWrite": 0,
+              "input": 27542,
+              "output": 13694,
+              "reasoning": 3183
+            }
+          },
+          {
+            "cost": 0.3392188,
+            "messages": 4,
+            "modelId": "gpt-5.6-sol",
+            "providerId": "openai",
+            "source": "codex",
+            "tokens": {
+              "cacheRead": 282707,
+              "cacheWrite": 0,
+              "input": 20354,
+              "output": 7236,
+              "reasoning": 1044
+            }
+          }
+        ],
+        "tokenBreakdown": {
+          "cacheRead": 770864,
+          "cacheWrite": 0,
+          "input": 47896,
+          "output": 20930,
+          "reasoning": 4227
+        },
+        "totals": {
+          "cost": 1.1318273,
+          "messages": 11,
+          "tokens": 843917
+        }
+      },
+      {
+        "date": "2026-10-04",
+        "intensity": 4,
+        "sources": [
+          {
+            "cost": 0.9125065,
+            "messages": 7,
+            "modelId": "gpt-5.5",
+            "providerId": "openai",
+            "source": "codex",
+            "tokens": {
+              "cacheRead": 515083,
+              "cacheWrite": 0,
+              "input": 38593,
+              "output": 15400,
+              "reasoning": 4300
+            }
+          },
+          {
+            "cost": 0.352572,
+            "messages": 4,
+            "modelId": "gpt-5.6-sol",
+            "providerId": "openai",
+            "source": "codex",
+            "tokens": {
+              "cacheRead": 280040,
+              "cacheWrite": 0,
+              "input": 20004,
+              "output": 8027,
+              "reasoning": 1511
+            }
+          }
+        ],
+        "tokenBreakdown": {
+          "cacheRead": 795123,
+          "cacheWrite": 0,
+          "input": 58597,
+          "output": 23427,
+          "reasoning": 5811
+        },
+        "totals": {
+          "cost": 1.2650785,
+          "messages": 11,
+          "tokens": 882958
+        }
+      },
+      {
+        "date": "2026-10-05",
+        "intensity": 4,
+        "sources": [
+          {
+            "cost": 5.011436,
+            "messages": 40,
+            "modelId": "gpt-5.5",
+            "providerId": "openai",
+            "source": "codex",
+            "tokens": {
+              "cacheRead": 2741002,
+              "cacheWrite": 0,
+              "input": 199209,
+              "output": 88163,
+              "reasoning": 18306
+            }
+          },
+          {
+            "cost": 1.7731012,
+            "messages": 20,
+            "modelId": "gpt-5.6-sol",
+            "providerId": "openai",
+            "source": "codex",
+            "tokens": {
+              "cacheRead": 1312493,
+              "cacheWrite": 0,
+              "input": 112751,
+              "output": 39855,
+              "reasoning": 9835
+            }
+          }
+        ],
+        "tokenBreakdown": {
+          "cacheRead": 4053495,
+          "cacheWrite": 0,
+          "input": 311960,
+          "output": 128018,
+          "reasoning": 28141
+        },
+        "totals": {
+          "cost": 6.7845372,
+          "messages": 60,
+          "tokens": 4521614
+        }
+      },
+      {
+        "date": "2026-10-06",
+        "intensity": 4,
+        "sources": [
+          {
+            "cost": 16.758866,
+            "messages": 144,
+            "modelId": "gpt-5.5",
+            "providerId": "openai",
+            "source": "codex",
+            "tokens": {
+              "cacheRead": 9484832,
+              "cacheWrite": 0,
+              "input": 718208,
+              "output": 280847,
+              "reasoning": 65074
+            }
+          },
+          {
+            "cost": 11.14094,
+            "messages": 125,
+            "modelId": "gpt-5.6-sol",
+            "providerId": "openai",
+            "source": "codex",
+            "tokens": {
+              "cacheRead": 8097770,
+              "cacheWrite": 0,
+              "input": 609618,
+              "output": 273168,
+              "reasoning": 58920
+            }
+          }
+        ],
+        "tokenBreakdown": {
+          "cacheRead": 17582602,
+          "cacheWrite": 0,
+          "input": 1327826,
+          "output": 554015,
+          "reasoning": 123994
+        },
+        "totals": {
+          "cost": 27.899806,
+          "messages": 269,
+          "tokens": 19588437
+        }
+      }
+    ],
+    "timestamp": "2026-10-06T17:25:54.875094"
+  },
+  "usage": {
+    "cache_hit_rate": 0.9307,
+    "combined_models": [
+      {
+        "cache_hit_rate": 0.931,
+        "cost": 26.2180405,
+        "messages": 219,
+        "name": "gpt-5.5",
+        "tokens": 16366625,
+        "tokens_cache": 14727721,
+        "tokens_in": 1092274,
+        "tokens_out": 446427
+      },
+      {
+        "cache_hit_rate": 0.9303,
+        "cost": 14.6686508,
+        "messages": 165,
+        "name": "gpt-5.6-sol",
+        "tokens": 12012666,
+        "tokens_cache": 10769837,
+        "tokens_in": 807339,
+        "tokens_out": 356568
+      }
+    ],
+    "period": "today",
+    "range": {
+      "days": 7,
+      "from": "2026-09-30",
+      "period_requested": "today",
+      "period_resolved": "custom",
+      "recognized": true,
+      "to": "2026-10-06"
+    },
+    "response_cache": {
+      "age_seconds": 0.0,
+      "served_from_cache": false,
+      "status": "recomputed"
+    },
+    "source_errors": [],
+    "timestamp": "2026-10-06T17:33:46.909826",
+    "top_models": [
+      {
+        "cache_hit_rate": 0.931,
+        "cost": 26.2180405,
+        "messages": 219,
+        "name": "gpt-5.5",
+        "tokens": 16366625,
+        "tokens_cache": 14727721,
+        "tokens_in": 1092274,
+        "tokens_out": 446427
+      },
+      {
+        "cache_hit_rate": 0.9303,
+        "cost": 14.6686508,
+        "messages": 165,
+        "name": "gpt-5.6-sol",
+        "tokens": 12012666,
+        "tokens_cache": 10769837,
+        "tokens_in": 807339,
+        "tokens_out": 356568
+      }
+    ],
+    "total_cost": 40.89,
+    "total_messages": 384,
+    "total_tokens": 28379291
+  }
+}

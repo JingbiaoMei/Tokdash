@@ -19,15 +19,23 @@ Thanks for considering a contribution!
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate   # Windows: .venv\Scripts\activate.bat (cmd) or .venv\Scripts\Activate.ps1 (PowerShell)
 pip install -U pip
 pip install -e .
-pip install pytest
+pip install -r requirements-dev.txt
 ```
 
-Run from source:
+`requirements-dev.txt` adds what the tests need beyond the runtime: `pytest`, `httpx` for
+FastAPI's test client and `build` for the packaging tests. Some frontend tests also run
+`node` and are skipped when it is not installed.
+
+Run from source with its own data directory. A source checkout can be ahead of the Tokdash
+you have installed, and opening the usage database migrates it to the newer schema, which
+the installed version then refuses to read. A separate `TOKDASH_DATA_DIR` keeps the two
+apart (`output/` is gitignored):
 ```bash
-python3 main.py
+TOKDASH_DATA_DIR=output/dev-data python3 main.py
+# PowerShell: $env:TOKDASH_DATA_DIR = "output/dev-data"; python main.py
 ```
 
 For UI work, start the real dashboard against a dense synthetic dataset:
@@ -52,7 +60,11 @@ without ever reading your history.
 Run tests:
 ```bash
 pytest -q
+pytest tests/test_pricing_normalization.py -k lookup   # one file, filtered by test name
 ```
+
+The suite points `TOKDASH_DATA_DIR` at a temporary directory itself, so it never touches
+your real data.
 
 ## Releases
 

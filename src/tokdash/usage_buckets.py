@@ -1,7 +1,7 @@
 """Bounded Overview buckets folded alongside the existing headline aggregation."""
 from __future__ import annotations
 
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from datetime import datetime, timedelta, timezone
 from operator import itemgetter
 from typing import Any
@@ -170,13 +170,7 @@ def merge_buckets(parts: list[dict[str, Any] | None]) -> dict[str, Any] | None:
     return {"granularity": granularity, "buckets": [buckets[key] for key in sorted(buckets)]}
 
 
-def interval_buckets(intervals: list[tuple[int, int]], granularity: str,
-                     bounds: tuple[int, int] | None = None, *, ordered_positive: bool = False) -> dict[str, Any]:
-    """Split additive agent intervals at local calendar boundaries, including DST."""
-    if not intervals:
-        return {"granularity": granularity, "buckets": []}
-    first, last = bounds if bounds is not None else (
-        min(start for start, _ in intervals), max(end for _, end in intervals))
+def _interval_bucket_edges(first: int, last: int, granularity: str) -> tuple[list[str], list[int]]:
     # Resolve the bounded hour/day/month boundaries once. Converting every
     # interval to local time is expensive for tools with thousands of events.
     local = datetime.fromtimestamp(first / 1000).astimezone()
@@ -196,6 +190,58 @@ def interval_buckets(intervals: list[tuple[int, int]], granularity: str,
             tomorrow = local.date() + timedelta(days=1)
             boundary = int(datetime.combine(tomorrow, datetime.min.time()).astimezone().timestamp() * 1000)
         edges.append(boundary)
+    return keys, edges
+
+
+def merged_interval_buckets(intervals: list[tuple[int, int]], granularity: str,
+                            bounds: tuple[int, int]) -> tuple[int, dict[str, Any]]:
+    """Clock union and additive buckets in one pass over sorted positive intervals."""
+    if not intervals:
+        return 0, {"granularity": granularity, "buckets": []}
+    keys, edges = _interval_bucket_edges(*bounds, granularity)
+    totals = [0] * len(keys)
+    clock_start, clock_end = intervals[0]
+    clock_total = start_index = 0
+    for index, right in enumerate(edges[1:]):
+        # Locate the next calendar boundary once per bucket, rather than
+        # checking the start's bucket or building endpoint arrays per event.
+        next_index = bisect_left(intervals, (right,), lo=start_index)
+        agent_total = totals[index]
+        for start, end in intervals[start_index:next_index]:
+            if start > clock_end:
+                clock_total += clock_end - clock_start
+                clock_start, clock_end = start, end
+            elif end > clock_end:
+                clock_end = end
+            if end <= right:
+                agent_total += end - start
+            else:
+                agent_total += right - start
+                cursor, target = right, index + 1
+                while cursor < end:
+                    stop = min(end, edges[target + 1])
+                    totals[target] += stop - cursor
+                    cursor, target = stop, target + 1
+        totals[index] = agent_total
+        start_index = next_index
+    grouped: dict[str, int] = {}
+    for key, total in zip(keys, totals):
+        if total:
+            grouped[key] = grouped.get(key, 0) + total
+    return clock_total + clock_end - clock_start, {
+        "granularity": granularity,
+        "buckets": [{"key": key, "agent_ms": grouped[key]} for key in sorted(grouped)],
+    }
+
+
+def interval_buckets(intervals: list[tuple[int, int]], granularity: str,
+                     bounds: tuple[int, int] | None = None, *, ordered_positive: bool = False) -> dict[str, Any]:
+    """Split additive agent intervals at local calendar boundaries, including DST."""
+    if not intervals:
+        return {"granularity": granularity, "buckets": []}
+    first, last = bounds if bounds is not None else (
+        min(start for start, _ in intervals), max(end for _, end in intervals))
+    keys, edges = _interval_bucket_edges(first, last, granularity)
     if granularity == "month":
         # Integrate the number of active agents at each boundary. Integer sums
         # over sorted endpoints avoid Python work per event per bucket, and keep

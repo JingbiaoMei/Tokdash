@@ -28,7 +28,7 @@ from .activity_insights import (
 )
 from .compute import cache_hit_rate, pct_change, period_to_days, previous_period_range
 from .dateutil import local_midnight, parse_date_range
-from .usage_buckets import bucket_granularity, interval_buckets, local_hour_keys
+from .usage_buckets import bucket_granularity, merged_interval_buckets, local_hour_keys
 from .pricing import PricingDatabase
 from .sources.coding_tools import (
     CODEX_DEFAULT_MODEL,
@@ -6746,11 +6746,12 @@ def get_active_time_data(
         datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(milliseconds=since_ms) if since_ms is not None else None,
         datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(milliseconds=until_ms) if until_ms is not None else None,
     )
-    ordered = sorted(all_intervals) if granularity == "month" else all_intervals
-    active_ms = _merged_interval_ms(ordered, presorted=granularity == "month")
+    ordered = sorted(all_intervals)
+    if granularity:
+        active_ms, sparkline = merged_interval_buckets(ordered, granularity, (since_ms, until_ms))
+    else:
+        active_ms, sparkline = _merged_interval_ms(ordered, presorted=True), None
     active_ms_sum = sum(int(row["active_ms_sum"]) for row in by_tool.values())
-    sparkline = interval_buckets(ordered, granularity, bounds=(since_ms, until_ms),
-                                ordered_positive=granularity == "month") if granularity else None
     if granularity == "hour":
         sparkline["keys"] = local_hour_keys(datetime.fromtimestamp(since_ms / 1000).astimezone())
 

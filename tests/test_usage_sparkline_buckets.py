@@ -286,3 +286,31 @@ def test_bounded_monthly_read_uses_disjoint_indexed_ranges_and_iterable_sources(
     assert queries[0].count("UNION ALL") == 11
     searches = [str(row[3]) for row in plans if "SEARCH usage_entries" in str(row[3])]
     assert len(searches) == 12 and all("USING INDEX" in row for row in searches)
+
+
+@pytest.mark.parametrize("granularity,first_day,last_day", [
+    ("hour", "2026-03-29", "2026-03-29"),
+    ("day", "2026-03-27", "2026-04-02"),
+    ("month", "2024-01-15", "2024-12-15"),
+])
+@pytest.mark.parametrize("shape", ["sparse", "dense", "long"])
+def test_shared_clock_and_bucket_pass_matches_independent_aggregations(granularity, first_day, last_day, shape):
+    import random
+    from tokdash.sessions import _merged_interval_ms
+    from tokdash.usage_buckets import merged_interval_buckets
+    since, until = parse_date_range(first_day, last_day)
+    first, last = int(since.timestamp()*1000), int(until.timestamp()*1000)
+    span = last-first
+    rng = random.Random(17)
+    if shape == "sparse":
+        raw = [(first + i*span//37, min(last, first + i*span//37 + 120_000)) for i in range(37)]
+    elif shape == "dense":
+        raw = [(first + i*span//240, min(last, first + i*span//240 + span//2)) for i in range(120)]
+    else:
+        starts = [rng.randrange(first, last-1) for _ in range(37)]
+        raw = [(start, min(last, start + rng.randrange(1, span//3))) for start in starts]
+    ordered = sorted(raw)
+    clock, buckets = merged_interval_buckets(ordered, granularity, (first,last))
+    assert clock == _merged_interval_ms(raw)
+    assert buckets == interval_buckets(raw, granularity, (first,last))
+    assert sum(row["agent_ms"] for row in buckets["buckets"]) == sum(end-start for start,end in raw)

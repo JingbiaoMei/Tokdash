@@ -17,7 +17,7 @@ try:
     from ..dateutil import local_midnight
     from ..pricing import PricingDatabase
     from ..model_normalization import normalize_model_name
-    from ..usage_buckets import add_bucket, bucket_granularity, bucket_key, sql_bucket_expression, sql_bucket_key
+    from ..usage_buckets import add_bucket, bucket_granularity, bucket_key, sql_bucket_expression, sql_bucket_key, sql_monthly_query
     from ..store_logging import log_store_failure
     from ..usage_store import (
         USAGE_ENTRY_FORMAT_VERSION,
@@ -35,7 +35,7 @@ except ImportError:  # pragma: no cover
     from dateutil import local_midnight
     from pricing import PricingDatabase
     from model_normalization import normalize_model_name
-    from usage_buckets import add_bucket, bucket_granularity, bucket_key, sql_bucket_expression, sql_bucket_key
+    from usage_buckets import add_bucket, bucket_granularity, bucket_key, sql_bucket_expression, sql_bucket_key, sql_monthly_query
     USAGE_ENTRY_FORMAT_VERSION = 1  # type: ignore
 
     class UsageDatabaseSchemaTooNewError(RuntimeError):  # type: ignore
@@ -646,13 +646,17 @@ def _openclaw_usage_from_store(
             SUM(message_count) AS message_count_sum
         FROM usage_entries
     """
-    if where:
-        query += " WHERE " + " AND ".join(where)
     granularity = bucket_granularity(since_date, until_date)
-    if granularity:
-        expression = sql_bucket_expression(since_date, until_date, granularity)
-        query = query.replace("SELECT", f"SELECT {expression} AS bucket,", 1)
-    query += " GROUP BY model" + (", bucket" if granularity else "")
+    if granularity == "month" and since_date is not None and until_date is not None:
+        source_where, source_args = store._where(sources=["openclaw"])
+        query, args = sql_monthly_query(query, source_where, source_args, since_date, until_date, "model")
+    else:
+        if where:
+            query += " WHERE " + " AND ".join(where)
+        if granularity:
+            expression = sql_bucket_expression(since_date, until_date, granularity)
+            query = query.replace("SELECT", f"SELECT {expression} AS bucket,", 1)
+        query += " GROUP BY model" + (", bucket" if granularity else "")
 
     # Both fetches share ONE snapshot. Read separately, they could straddle a
     # write that lands under superseded pricing, and the model totals would then

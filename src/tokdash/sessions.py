@@ -777,9 +777,9 @@ def _session_active_intervals(
     return _clip_intervals(intervals, since_ms, until_ms)
 
 
-def _merged_interval_ms(intervals: Iterable[tuple[int, int]]) -> int:
+def _merged_interval_ms(intervals: Iterable[tuple[int, int]], *, presorted: bool = False) -> int:
     """Wall-clock covered by the intervals, counting overlap once."""
-    ordered = iter(sorted(intervals))
+    ordered = iter(intervals if presorted else sorted(intervals))
     first = next(ordered, None)
     if first is None:
         return 0
@@ -6746,9 +6746,11 @@ def get_active_time_data(
         datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(milliseconds=since_ms) if since_ms is not None else None,
         datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(milliseconds=until_ms) if until_ms is not None else None,
     )
-    active_ms = _merged_interval_ms(all_intervals)
+    ordered = sorted(all_intervals) if granularity == "month" else all_intervals
+    active_ms = _merged_interval_ms(ordered, presorted=granularity == "month")
     active_ms_sum = sum(int(row["active_ms_sum"]) for row in by_tool.values())
-    sparkline = interval_buckets(all_intervals, granularity, bounds=(since_ms, until_ms)) if granularity else None
+    sparkline = interval_buckets(ordered, granularity, bounds=(since_ms, until_ms),
+                                ordered_positive=granularity == "month") if granularity else None
     if granularity == "hour":
         sparkline["keys"] = local_hour_keys(datetime.fromtimestamp(since_ms / 1000).astimezone())
 

@@ -238,3 +238,51 @@ def test_monthly_intervals_preserve_leap_days_dst_and_partial_months():
         else:
             os.environ["TZ"] = prior
         time.tzset()
+
+
+def test_monthly_agent_endpoints_keep_unsorted_long_measured_intervals_additive():
+    since, until = parse_date_range("2024-01-15", "2024-04-15")
+    first, last = int(since.timestamp()*1000), int(until.timestamp()*1000)
+    mid = first + (last-first)//2
+    raw = [(mid, last), (first, last), (first, mid), (mid, mid), (last, first)]
+    split = interval_buckets(raw, "month")
+    assert len(split["buckets"]) == 4
+    assert sum(row["agent_ms"] for row in split["buckets"]) == 2 * (last-first)
+    ordered = sorted(raw[:3])
+    assert interval_buckets(ordered, "month", (first,last), ordered_positive=True) == split
+
+
+def test_bounded_monthly_read_uses_disjoint_indexed_ranges_and_iterable_sources(tmp_path):
+    raw = []
+    for month in range(1, 13):
+        since, _ = parse_date_range(f"2024-{month:02d}-15", f"2024-{month:02d}-15")
+        for source in ("codex", "claude"):
+            raw.append({**entries()[0], "source":source, "timestamp":int(since.timestamp()*1000)})
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    for source in ("codex", "claude"):
+        selected = [row for row in raw if row["source"] == source]
+        store.sync_source(source, build_source_signature(files=[[source, 1, 1]], parser={"v":1}), lambda: selected)
+    statements, plans = [], []
+    read = store._read_priced
+
+    def traced(fn):
+        def run(conn):
+            conn.set_trace_callback(statements.append)
+            result = fn(conn)
+            conn.set_trace_callback(None)
+            for sql in statements:
+                if sql.lstrip().startswith("SELECT") and "FROM usage_entries" in sql:
+                    plans.extend(conn.execute("EXPLAIN QUERY PLAN " + sql).fetchall())
+            return result
+        return read(run)
+
+    store._read_priced = traced
+    since, until = parse_date_range("2024-01-15", "2024-12-15")
+    result = store.aggregate_entries(sources=iter(["codex"]), since=since, until=until, bucket_granularity="month")
+    assert result["total_messages"] == 12 * 4
+    assert len(result["sparkline"]["buckets"]) == 12
+    queries = [sql for sql in statements if sql.lstrip().startswith("SELECT") and "FROM usage_entries" in sql]
+    assert len(queries) == 1
+    assert queries[0].count("UNION ALL") == 11
+    searches = [str(row[3]) for row in plans if "SEARCH usage_entries" in str(row[3])]
+    assert len(searches) == 12 and all("USING INDEX" in row for row in searches)

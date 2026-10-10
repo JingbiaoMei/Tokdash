@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from bisect import bisect_right
 from datetime import datetime, timedelta, timezone
+from operator import itemgetter
 from typing import Any
 
 try:
@@ -29,6 +30,27 @@ def next_month(local: datetime) -> datetime:
     """First midnight of the next local calendar month, resolving its UTC offset."""
     year, month = divmod(local.year * 12 + local.month, 12)
     return datetime(year, month + 1, 1).astimezone()
+
+
+def sql_monthly_query(select: str, source_where: list[str], source_args: list,
+                      since: datetime, until: datetime, group_by: str) -> tuple[str, list]:
+    """One priced read over disjoint indexed month ranges; each row is read once.
+
+    Keeping each GROUP BY within a month avoids a larger annual sort and any
+    per-event calendar expression. Every partition shares the caller's snapshot.
+    """
+    cursor = since.astimezone()
+    stop = until.astimezone()
+    parts, args = [], []
+    while cursor < stop:
+        end = min(next_month(cursor), stop)
+        index = cursor.year * 12 + cursor.month - 1
+        query = select.replace("SELECT", f"SELECT {index} AS bucket,", 1)
+        where = [*source_where, "timestamp >= ?", "timestamp < ?"]
+        parts.append(query + " WHERE " + " AND ".join(where) + " GROUP BY " + group_by)
+        args.extend([*source_args, int(cursor.timestamp() * 1000), int(end.timestamp() * 1000)])
+        cursor = end
+    return " UNION ALL ".join(parts), args
 
 
 def bucket_key(timestamp_ms: int, granularity: str) -> str:
@@ -85,26 +107,8 @@ def sql_bucket_expression(since: datetime | None, until: datetime | None, granul
     if granularity not in ("hour", "day", "month"):
         raise ValueError(f"unsupported bucket granularity: {granularity}")
     if granularity == "month":
-        if since is None or until is None:
-            return "strftime('%Y-%m', timestamp / 1000, 'unixepoch', 'localtime')"
-        local = since.astimezone()
-        stop = until.astimezone()
-        cursor = datetime(local.year, local.month, 1).astimezone()
-        months = []
-        while cursor < stop:
-            months.append((int(cursor.timestamp() * 1000), cursor.year * 12 + cursor.month - 1))
-            cursor = next_month(cursor)
-
-        def expression(rows):
-            if len(rows) == 1:
-                return str(rows[0][1])
-            mid = len(rows) // 2
-            return (f"CASE WHEN timestamp < {rows[mid][0]} THEN {expression(rows[:mid])} "
-                    f"ELSE {expression(rows[mid:])} END")
-
-        # At most thirteen months; a balanced decision tree takes at most four
-        # integer comparisons per event, with no per-row local-time formatting.
-        return expression(months) if months else "NULL"
+        # Bounded month reads use sql_monthly_query; this is the unbounded fallback.
+        return "strftime('%Y-%m', timestamp / 1000, 'unixepoch', 'localtime')"
     if since is not None and until is not None:
         first = since.astimezone().date()
         last = (until - timedelta(microseconds=1)).astimezone().date()
@@ -167,7 +171,7 @@ def merge_buckets(parts: list[dict[str, Any] | None]) -> dict[str, Any] | None:
 
 
 def interval_buckets(intervals: list[tuple[int, int]], granularity: str,
-                     bounds: tuple[int, int] | None = None) -> dict[str, Any]:
+                     bounds: tuple[int, int] | None = None, *, ordered_positive: bool = False) -> dict[str, Any]:
     """Split additive agent intervals at local calendar boundaries, including DST."""
     if not intervals:
         return {"granularity": granularity, "buckets": []}
@@ -192,6 +196,27 @@ def interval_buckets(intervals: list[tuple[int, int]], granularity: str,
             tomorrow = local.date() + timedelta(days=1)
             boundary = int(datetime.combine(tomorrow, datetime.min.time()).astimezone().timestamp() * 1000)
         edges.append(boundary)
+    if granularity == "month":
+        # Integrate the number of active agents at each boundary. Integer sums
+        # over sorted endpoints avoid Python work per event per bucket, and keep
+        # arbitrarily long measured intervals and concurrent agents additive.
+        valid = intervals if ordered_positive else [(start, end) for start, end in intervals if end > start]
+        starts = list(map(itemgetter(0), valid)) if ordered_positive else sorted(map(itemgetter(0), valid))
+        ends = sorted(map(itemgetter(1), valid))
+        rows = []
+        start_index = end_index = active = 0
+        for key, first, last in zip(keys, edges, edges[1:]):
+            next_start = bisect_right(starts, last - 1)
+            next_end = bisect_right(ends, last - 1)
+            start_count, end_count = next_start - start_index, next_end - end_index
+            total = ((last - first) * active
+                     + start_count * last - sum(starts[start_index:next_start])
+                     - end_count * last + sum(ends[end_index:next_end]))
+            if total:
+                rows.append({"key": key, "agent_ms": total})
+            active += start_count - end_count
+            start_index, end_index = next_start, next_end
+        return {"granularity": granularity, "buckets": rows}
     totals = [0] * len(keys)
     step = edges[1] - edges[0] if len(edges) > 1 else None
     if step and any(right - left != step for left, right in zip(edges, edges[1:])):

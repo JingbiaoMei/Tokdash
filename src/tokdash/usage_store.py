@@ -16,7 +16,7 @@ from . import clientpaths
 from .codex_quota_windows import classify_codex_api_windows
 from .filelock import process_lock
 from .pricing import PricingDatabase
-from .usage_buckets import add_bucket, sql_bucket_expression, sql_bucket_key
+from .usage_buckets import add_bucket, sql_bucket_expression, sql_bucket_key, sql_monthly_query
 
 logger = logging.getLogger(__name__)
 
@@ -2130,6 +2130,7 @@ class UsageEntryStore:
         bucket_granularity: Optional[str] = None,
     ) -> dict[str, Any]:
         """Return parse_entries_json-compatible aggregates using SQL grouping."""
+        sources = tuple(sources) if sources is not None else None
         where, args = self._where(sources=sources, since=since, until=until)
         query = """
             SELECT
@@ -2149,17 +2150,22 @@ class UsageEntryStore:
                 SUM(CASE WHEN cost <= 0 AND cost_authoritative = 0 THEN cache_write ELSE 0 END) AS cache_write_unpriced
             FROM usage_entries
         """
-        if where:
-            query += " WHERE " + " AND ".join(where)
-        if bucket_granularity:
-            expression = sql_bucket_expression(since, until, bucket_granularity)
-            query = query.replace("SELECT", f"SELECT {expression} AS bucket,", 1)
-        query += " GROUP BY source, provider, model" + (", bucket" if bucket_granularity else "")
+        if bucket_granularity == "month" and since is not None and until is not None:
+            source_where, source_args = self._where(sources=sources)
+            query, args = sql_monthly_query(query, source_where, source_args, since, until, "source, provider, model")
+        else:
+            if where:
+                query += " WHERE " + " AND ".join(where)
+            if bucket_granularity:
+                expression = sql_bucket_expression(since, until, bucket_granularity)
+                query = query.replace("SELECT", f"SELECT {expression} AS bucket,", 1)
+            query += " GROUP BY source, provider, model" + (", bucket" if bucket_granularity else "")
 
         rows = self._read_priced(lambda conn: conn.execute(query, args).fetchall())
 
         # Fold the finer groups back into the original model rows. This is still
-        # one indexed scan and one priced snapshot, never a second bucket query.
+        # one priced snapshot, with each input row read once, never a separate
+        # headline read followed by another scan for buckets.
         buckets: dict[str, dict] = {}
         if bucket_granularity:
             grouped: dict[tuple, dict] = {}

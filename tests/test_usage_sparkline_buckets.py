@@ -117,6 +117,29 @@ def test_native_bucket_optimization_preserves_model_order_and_independent_payloa
     assert actual["all_models"][0]["tokens"] == 122
 
 
+def test_native_app_totals_keep_all_integer_components_and_event_order_fees():
+    raw = [{**entries()[0], "source": source, "model": model, "cost": (index + 1) * .1,
+            "messageCount": index + 2, "input": index + 10, "reasoning": index + 3}
+           for index, (source, model) in enumerate([
+               ("codex", "model-a"), ("claude", "model-b"), ("codex", "model-b"),
+               ("codex", "model-a"), ("claude", "model-a")])]
+    actual = parse_entries_json({"entries": raw}, granularity="month")
+    for source in ("codex", "claude"):
+        expected = dict(tokens=0, tokens_in=0, tokens_out=0, tokens_cache=0,
+                        tokens_reasoning=0, cost=0.0, messages=0)
+        for row in raw:
+            if row["source"] != source:
+                continue
+            expected["tokens_in"] += row["input"] + row["cacheWrite"]
+            expected["tokens_out"] += row["output"]
+            expected["tokens_cache"] += row["cacheRead"]
+            expected["tokens_reasoning"] += row["reasoning"]
+            expected["tokens"] += sum(row[field] for field in ("input", "output", "cacheRead", "cacheWrite", "reasoning"))
+            expected["messages"] += row["messageCount"]
+            expected["cost"] += row["cost"]
+        assert {field: actual["apps"][source][field] for field in expected} == expected
+
+
 @pytest.mark.parametrize("amount,expected", [(436.905, 436.90), (2188.175, 2188.18), (2.675, 2.68)])
 def test_usage_cent_rounding_is_independent_of_binary_partition_noise(amount, expected):
     from tokdash.compute import _round_usage_cost

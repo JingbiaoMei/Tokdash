@@ -27,6 +27,7 @@ stand-ins — so the supersede/cancel behaviour is exercised for real.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -531,7 +532,13 @@ def _run(tmp_path: Path, scenario: str) -> dict:
 def test_stale_animation_cannot_overwrite_the_empty_state(tmp_path):
     out = _run(tmp_path, "stale-animation-cannot-overwrite-empty-state")
 
-    assert out["midFlightValue"].endswith("M"), "the populated range must really be counting"
+    # Busy Windows runners may have advanced only into thousands by this frame.
+    # Prove the counter has started and is still below its target, regardless
+    # of the display unit it has reached.
+    match = re.fullmatch(r"([\d.]+)([kM]?)", out["midFlightValue"])
+    assert match, "the populated range must really be counting"
+    scale = {"": 1, "k": 1000, "M": 1_000_000}[match[2]]
+    assert 0 < float(match[1]) * scale < 5_200_000
     assert out["rightAfterEmptyRender"] == "No data"
     assert out["costRightAfter"] == "No data"
     assert out["messagesRightAfter"] == "No data"

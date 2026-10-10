@@ -541,14 +541,8 @@ def parse_entries_json(data: Dict[str, Any], *, granularity: Optional[str] = Non
             }
 
         app_ref = apps[source]
-        app_ref["tokens"] += total_tokens
-        app_ref["tokens_in"] += tokens_in
-        app_ref["tokens_out"] += tokens_out
-        app_ref["tokens_cache"] += tokens_cache
-        app_ref.setdefault("tokens_reasoning", 0)
         app_ref["tokens_reasoning"] += reasoning
         app_ref["cost"] += cost
-        app_ref["messages"] += messages
 
         model_ref = app_ref["models_dict"].get(full_model_name)
         if model_ref is None:
@@ -572,6 +566,11 @@ def parse_entries_json(data: Dict[str, Any], *, granularity: Optional[str] = Non
     for app_data in apps.values():
         app_data["models"] = sorted(app_data["models_dict"].values(), key=model_rank_key)
         del app_data["models_dict"]
+        # These integer app totals are already counted in its model rows. Fold
+        # them once per model instead of allocating duplicate integers per event.
+        # Keep fees in event order above, preserving their floating-point sum.
+        for field in ("tokens", "tokens_in", "tokens_out", "tokens_cache", "messages"):
+            app_data[field] = sum(model[field] for model in app_data["models"])
         for model_ref in app_data["models"]:
             model_ref["cache_hit_rate"] = cache_hit_rate(model_ref["tokens_in"], model_ref["tokens_cache"])
         app_data["cache_hit_rate"] = cache_hit_rate(app_data["tokens_in"], app_data["tokens_cache"])

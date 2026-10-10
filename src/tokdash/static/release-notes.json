@@ -1,6 +1,26 @@
 {
-  "current": "2.6.13",
+  "current": "2.6.14",
   "releases": [
+    {
+      "version": "2.6.14",
+      "date": "2026-10-10",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "A new Model output speed page, under Intelligence, shows how fast each model actually streamed, measured from your own logs. Rates come only from responses whose duration was matched, and every row says how many calls were measured and what share of eligible calls that covers, so a figure built on 40 calls does not read like one built on 40,000. Pick a model and its rate spreads across the day, by hour and by six-hour window.",
+            "Sessions gained an Output tok/s column for the selected date range, and opening a session shows its per-response speed as a chart or as the list behind it. When a session uses several models or mixes two kinds of duration, it says so instead of blending them into one average.",
+            "Timing is built on demand in its own small cache, never during your ordinary usage refresh, and the build runs at a fraction of your CPU that you can set. Nothing leaves your machine and no conversation text is stored: only the numbers."
+          ]
+        },
+        {
+          "type": "changed",
+          "items": [
+            "The documentation now states what this feature costs alongside what it gives you, including the two performance targets it has not met yet. With a large history the first speed build can take a long while: progress is shown, the last good figures stay readable while it runs, and a build that fails leaves those figures in place and reports the failure."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.6.13",
       "date": "2026-10-10",

@@ -10,6 +10,8 @@ regular_rows=${TOKDASH_BENCH_REGULAR_ROWS:-300}
 dense_rows=${TOKDASH_BENCH_DENSE_ROWS:-1500}
 python_bin=${TOKDASH_BENCH_PYTHON:-python3}
 browser_python=${TOKDASH_BROWSER_PYTHON:-/home/howard/anaconda3/envs/webapptest/bin/python}
+cpu_args=()
+if [[ -n ${TOKDASH_BENCH_CPU:-} ]]; then cpu_args=(--cpu "$TOKDASH_BENCH_CPU"); fi
 
 mkdir -p "$output_dir"
 printf 'Running complete tests before timing either version.\n'
@@ -25,7 +27,7 @@ for workload in regular dense; do
     if [[ $workload == dense ]]; then rows=$dense_rows; fi
     printf 'Starting %s backend benchmark: %s rows per day, %s samples per case.\n' "$workload" "$rows" "$backend_repeats"
     if "$python_bin" scripts/benchmark_sparkline_aggregation.py --baseline "$baseline" \
-        --rows-per-day "$rows" --repeats "$backend_repeats" --output "$output_dir/$workload" \
+        --rows-per-day "$rows" --repeats "$backend_repeats" "${cpu_args[@]}" --output "$output_dir/$workload" \
         > "$output_dir/$workload-summary.log" 2>&1; then
         printf '%s backend benchmark passed.\n' "$workload"
     else

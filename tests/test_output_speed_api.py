@@ -779,17 +779,41 @@ def test_a_request_under_one_key_never_answers_a_different_key(client):
     assert {r["source"] for r in _across(client)["rows"]} == {"kimi", "omp"}
 
 
-def test_a_cold_key_computes_once_and_a_second_reader_is_not_served_stale_numbers(client,monkeypatch):
+@pytest.mark.parametrize('bootstrap_busy', [False, True])
+def test_a_cold_key_computes_once_and_a_second_reader_is_not_served_stale_numbers(client,monkeypatch,bootstrap_busy):
     """Concurrent cold reads join one durable job without sharing report slots."""
     UsageEntryStore()._connect().close()
     launches=[]
     monkeypatch.setattr(speed_cache,'launch_worker',lambda c:launches.append(True))
     from tokdash import speed_worker
     monkeypatch.setattr(speed_worker,'build',lambda *a,**kw:pytest.fail('synchronous extraction'))
+    if bootstrap_busy:
+        real_connect = speed_cache.connect
+        gate = threading.Lock()
+        first = [True]
+        def connect(*args, **kwargs):
+            with gate:
+                if first[0]:
+                    first[0] = False
+                    raise sqlite3.OperationalError('database is locked')
+            return real_connect(*args, **kwargs)
+        monkeypatch.setattr(speed_cache, 'connect', connect)
     params=dict(date_from=DAY_FROM,date_to=DAY_TO)
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=4) as pool:
-        answers=list(pool.map(lambda _:client.get('/api/output-speed',params).json(),range(4)))
+        responses=list(pool.map(lambda _:client.get('/api/output-speed',params),range(4)))
+    if bootstrap_busy:
+        assert any(response.status_code == 503 for response in responses)
+    answers = []
+    for response in responses:
+        # Cold WAL/schema initialization can briefly contend on Windows. The
+        # browser retries this 503; after the concurrent reads finish, it must
+        # join the same durable job instead of creating another or serving data.
+        if response.status_code == 503:
+            assert 'publication is busy' in response.text, response.text
+            response = client.get('/api/output-speed', params)
+        assert response.status_code == 200, response.text
+        answers.append(response.json())
     assert len({p['cache']['job_id'] for p in answers})==1
     assert all(p['cache']['state']=='building' and p['rows']==[] for p in answers)
     with closing(speed_cache.connect()) as c:

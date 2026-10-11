@@ -399,7 +399,7 @@ def test_empty_selected_dates_expose_recorded_dates_without_changing_the_window(
     assert payload["rows"] == []
     assert payload["range"] == {"from": "2026-10-08", "to": "2026-10-08"}
     assert payload["available_measurement_range"] == {"from": "2026-07-16", "to": "2026-09-15"}
-    assert payload["schema_version"] == speed_report.SPEED_CACHE_CONTRACT_VERSION == 6
+    assert payload["schema_version"] == speed_report.SPEED_CACHE_CONTRACT_VERSION == 7
 
 
 def test_recorded_dates_are_null_when_only_untimed_usage_exists(client):

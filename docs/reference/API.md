@@ -38,7 +38,7 @@ per-session token); see [`docs/SECURITY.md`](../SECURITY.md) and `PUT /api/prici
 | `GET` | `/api/sessions` | List sessions for a given tool |
 | `GET` | `/api/session` | Detailed turns for a single session |
 | `GET` | `/api/active-time` | Estimated active time across every session tool |
-| `GET` | `/api/output-speed` | Measured model throughput and within-model hour-of-day comparison |
+| `GET` | `/api/output-speed` | Measured model throughput (per stream and combined), its trend over time, and within-model hour-of-day comparison |
 | `POST` | `/api/session-speeds` | Cache-only, selected-range speed summaries for up to 50 sessions |
 | `GET` | `/api/session-speed` | One session's response timeline and model-specific aggregates |
 | `POST` | `/api/output-speed/ensure` | Request timing builds for a bounded batch of sessions |
@@ -642,11 +642,12 @@ range controls. Opening Overview or Usage Report does not request this endpoint.
 
 | Parameter | Default | Description |
 |---|---|---|
-| `view` | `across-models` | `across-models` or `time-of-day` |
+| `view` | `across-models` | `across-models`, `trend` or `time-of-day` |
 | `period` | `year` | Standard period resolver, unless explicit dates are provided |
 | `date_from`, `date_to` | — | Inclusive date range; supply both as `YYYY-MM-DD` |
 | `source` | — | Optional comparison filter; required for `time-of-day` |
 | `model`, `measurement_kind`, `token_basis` | — | Required with `source` for `time-of-day` |
+| `bucket` | `auto` | `trend` only: `auto`, `hour`, `day`, `week`, `month` or `quarter`. A size the window does not offer falls back to `auto` |
 | `refresh` | `false` | Queue a lightweight usage/ownership synchronization followed by a timing build; avoids full usage-report aggregation |
 | `cache_only` | `false` | Read the published snapshot without queuing work, even if inputs changed; takes precedence over `refresh` |
 
@@ -657,6 +658,33 @@ Each measured row includes additive `speed_tokens`, `speed_ms`, `speed_calls`,
 The rate is `1000 * SUM(speed_tokens) / SUM(speed_ms)`. Rates from individual calls
 are never averaged. Unmeasured throughput is absent or `null`, and empty hours are
 `null`, rather than zero.
+
+That rate is **per stream**: each response contributes its own duration, so responses
+running at the same time never add up. Every row also carries the **combined** rate,
+the output per wall-clock second while at least one of the row's responses was in
+flight: `busy_ms` is the union of the responses' intervals, `combined_tok_per_s` is
+`1000 * SUM(speed_tokens) / busy_ms`, `parallelism` is `SUM(speed_ms) / busy_ms` (so
+combined = per stream × parallelism), and `peak_in_flight` is the most responses
+running at one moment. A response's interval comes from its stored timestamp and
+duration: OpenCode, KiloCode and mimo store the start of their window, the other
+readers the end. `models` merges each normalized model across every harness that
+measured it, with `sources`, `measurement_kinds` and `token_bases`, summed
+`speed_tokens`/`speed_ms`/`speed_calls`, `eligible_calls` and `coverage`, and busy time
+taken over all of those harnesses at once. It has no pooled per-stream rate, because
+its harnesses may time responses in different ways.
+
+Trend responses lay the same responses out over time. `offered_buckets` lists the
+sizes the window supports, each with its bucket count: a size is offered when the
+window holds at least two buckets of it, no more than its cap (hourly 36, daily 45,
+weekly 40, monthly 36, quarterly 24) and at least its minimum span (1, 2, 8, 60 and
+184 days). `auto_bucket` is the finest offered size, and `granularity` is the size
+actually used. `buckets` lists them oldest first: Monday-start weeks, calendar months
+and quarters, each clipped to the window (`key`, `from`, `to`, plus `hour` when
+hourly). `series` has one entry per comparison key, with `per_stream`, `combined`,
+`parallelism` and `calls` arrays aligned to `buckets`. `model_series` holds the
+per-model merges, with no `per_stream` array. Each also has `hours`, the same arrays
+over the 24 local hours of the day, from the same read. A bucket's busy time is the
+union of its own responses; empty buckets are `null`.
 
 Time-of-day responses include `selected_key`, 24 `hourly` buckets and four
 `six_hour` buckets, with the same totals and coverage fields. Buckets use the
@@ -685,7 +713,7 @@ fields. Ordinary ingestion and Overview do not open the derived database
 or invoke timing helpers. Existing primary pages become reusable; migration does
 not automatically compact the SQLite file. Timing reader versions are independent
 of pricing and ordinary parser identities. Derived schema is **3**, speed API
-contract **6**, and measurement contract **3**.
+contract **7**, and measurement contract **3**.
 Publication identity **3** retires older model-window completion markers without
 discarding valid timing rows. A window is current only at the generation of its
 exact full source/date build. Session builds retain the last full-window source
@@ -787,7 +815,7 @@ none exist. These bounds are independent of the selected range and do not imply
 continuous coverage. Empty views offer an explicit action to apply those dates
 to the shared top range. The comparison defaults to all measured tools; choosing
 a tool without measurements offers a return to all tools. Response contract and
-cache version: `6`; measurement contract: `3`; usage schema: `13`. Derived schema
+cache version: `7`; measurement contract: `3`; usage schema: `13`. Derived schema
 and publication identity are `3`. The separate
 derived database uses a partial measured-timestamp index for these endpoint seeks,
 including the empty case. It does not scan native JSON for available bounds.

@@ -406,7 +406,7 @@ def job_status(job_id):
         return result
 
 
-def payload(day_from, day_to, *, view='across-models', source='', model='', kind='', basis='', refresh=False, cache_only=False):
+def payload(day_from, day_to, *, view='across-models', source='', model='', kind='', basis='', bucket='auto', refresh=False, cache_only=False):
     cache = None if cache_only else ensure(day_from,day_to,source=source,refresh=refresh)
     with closing(connect(readonly=cache_only)) as conn:
         conn.execute('BEGIN')
@@ -426,6 +426,11 @@ def payload(day_from, day_to, *, view='across-models', source='', model='', kind
                 hour, day = speed_report.local_clock()
                 result.update(speed_report.temporal_rows(conn,day_from,day_to,source=source,model=model,
                             measurement_kind=kind,token_basis=basis,hour_of_local=hour,date_of_local=day))
+            elif view == 'trend':
+                from . import speed_trend
+                hour, day = speed_report.local_clock()
+                result.update(speed_trend.trend_rows(conn,day_from,day_to,bucket=bucket,source=source,
+                            hour_of_local=hour,date_of_local=day))
             else:
                 rows, report_meta = speed_report.across_model_rows(conn,day_from,day_to,source=source)
                 result.update(report_meta, rows=rows)
@@ -442,7 +447,7 @@ def payload(day_from, day_to, *, view='across-models', source='', model='', kind
         # A cache without a publication revision uses the ordinary SQL fallback.
         key = (str(path.resolve()),st.st_dev,st.st_ino,state.get('instance_id'),revision,
                speed_report.SPEED_CACHE_CONTRACT_VERSION,speed_report.SPEED_MEASUREMENT_CONTRACT_VERSION,
-               view,source,model,kind,basis,day_from,day_to,clock) if revision and st and state.get('instance_id') else None
+               view,source,model,kind,basis,bucket if view == 'trend' else '',day_from,day_to,clock) if revision and st and state.get('instance_id') else None
         report = speed_results.read(key,aggregate)
         statuses = report.pop('_statuses')
         source_days = report.pop('_source_days')

@@ -2441,15 +2441,18 @@ def get_output_speed(
     model: Optional[str] = None,
     measurement_kind: Optional[str] = None,
     token_basis: Optional[str] = None,
+    bucket: str = "auto",
     refresh: bool = False,
     cache_only: bool = False,
 ) -> Dict[str, Any]:
     """Model output throughput, for the standalone Model output speed page.
 
     Lazy by design: the report's normal load never calls this, and the dashboard
-    only requests it once the page is open. Two views share one route so the
-    hourly view cannot disagree with the table it summarises -- both are built
-    from the same grouped read of the same snapshot.
+    only requests it once the page is open. The views share one route so the
+    hourly and trend views cannot disagree with the table they summarise -- all
+    are built from the same snapshot. ``trend`` lays every comparison key and
+    every per-model merge out over ``bucket``-sized periods and the 24 local
+    hours, per stream and combined (see speed_trend).
 
     A rate here is always SUM(matched output tokens) / SUM(matched duration),
     never an average of per-call rates, so one long call counts for the time it
@@ -2457,8 +2460,11 @@ def get_output_speed(
     hour has no rate rather than a zero one.
     """
     _validate_date_params(date_from, date_to)
-    if view not in ("across-models", "time-of-day"):
+    if view not in ("across-models", "time-of-day", "trend"):
         raise HTTPException(status_code=400, detail="unknown view")
+    from .speed_trend import BUCKETS
+    if bucket != "auto" and bucket not in BUCKETS:
+        raise HTTPException(status_code=400, detail="unknown bucket")
     if _dev_fixture_mode() == "dense":
         return {
             "schema_version": speed_report.SPEED_CACHE_CONTRACT_VERSION,
@@ -2480,7 +2486,7 @@ def get_output_speed(
         from .speed_cache import payload
         return payload(str(resolved['from']), str(resolved['to']), view=view,
                        source=source or '', model=model or '', kind=measurement_kind or '',
-                       basis=token_basis or '', refresh=refresh, cache_only=cache_only)
+                       basis=token_basis or '', bucket=bucket, refresh=refresh, cache_only=cache_only)
     except UsageDatabaseSchemaTooNewError as e:
         raise HTTPException(status_code=500, detail=str(e))
     except UsageDatabaseNeedsMigrationError as e:

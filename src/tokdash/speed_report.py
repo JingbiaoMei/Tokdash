@@ -47,7 +47,9 @@ from .output_speed import (
 
 #: Response-shape version. Bump when a field is added, renamed or redefined, so a
 #: cached payload is never served to a reader expecting a different contract.
-SPEED_CACHE_CONTRACT_VERSION = 6
+#: 7: combined throughput (busy_ms, combined_tok_per_s, parallelism,
+#: peak_in_flight) on every row, per-model ``models``, and ``view=trend``.
+SPEED_CACHE_CONTRACT_VERSION = 7
 
 #: Mirrors output_speed.SPEED_CONTRACT_VERSION. Separate so a stored duration's
 #: *meaning* can retire comparison caches on its own, without the response shape
@@ -345,6 +347,13 @@ def across_model_rows(
         )
         rows.append(entry)
 
+    # Combined throughput and the per-model merge come from one more pass over
+    # the same measured responses; see speed_trend for why they need intervals
+    # rather than the additive columns this function sums.
+    from .speed_trend import attach_combined
+    # ``source`` was reused as a loop variable above; ``wanted`` is the caller's filter.
+    models = attach_combined(conn, rows, day_from, day_to, measured_days, source=wanted)
+
     # Deterministic: measured-call count first (the sample size is what a reader
     # needs to judge a rate by), then the rate, then the key for stability.
     rows.sort(
@@ -362,6 +371,7 @@ def across_model_rows(
         # rows from more than one source at once.
         "days_with_measurements": len(population_days),
         "_days": population_days,
+        "models": models,
     }
     return rows, meta
 

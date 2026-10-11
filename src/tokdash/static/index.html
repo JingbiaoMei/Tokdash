@@ -2133,8 +2133,18 @@
     .usage-report-subtab[aria-selected="true"] { color: var(--color-primary); border-bottom-color: var(--color-primary); }
     .usage-report-subtab:focus-visible { outline: 2px solid var(--color-cta); outline-offset: 2px; border-radius: 6px; }
 
-    /* Model output speed. One comparison table, then the hour strip and its
-       six-hour rollups; both read the same snapshot on the server. */
+    /* Model output speed. One chart over the window, then one comparison table;
+       both read the same snapshot on the server. Series colours are fixed slots,
+       validated for colour-blind separation and contrast against both surfaces:
+       a series keeps its slot while it is charted, whatever else is removed. */
+    :root {
+      --speed-s1: #2a78d6; --speed-s2: #eb6834; --speed-s3: #1baf7a;
+      --speed-s4: #eda100; --speed-s5: #e87ba4; --speed-s6: #6250d6;
+    }
+    html.dark {
+      --speed-s1: #3987e5; --speed-s2: #d95926; --speed-s3: #199e70;
+      --speed-s4: #c98500; --speed-s5: #d55181; --speed-s6: #9085e9;
+    }
     .speed-table-wrap { overflow-x: auto; min-width: 0; }
     .speed-table { width: 100%; border-collapse: collapse; font-size: 13px; }
     .speed-table th, .speed-table td { padding: 8px 10px; text-align: right; white-space: nowrap; }
@@ -2147,29 +2157,85 @@
     .speed-table td.speed-unmeasured { color: var(--color-muted); }
     .speed-sample { display: block; font-size: 11px; font-weight: 600; color: var(--color-muted); white-space: nowrap; }
     .speed-sample .speed-excluded { color: var(--color-cta); }
-    .speed-detail-row td { text-align: left; white-space: normal; background: color-mix(in srgb, var(--color-surface-glass) 60%, var(--color-bg)); }
-    .speed-detail { font-size: 12px; color: var(--color-muted); line-height: 1.55; max-width: 78ch; }
-    .speed-detail b { color: var(--color-text); font-weight: 700; }
-    .speed-hours { display: flex; align-items: flex-end; gap: 2px; height: 104px; }
-    .speed-hour { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; position: relative; outline-offset: 3px; }
-    .speed-hour-tooltip { position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); z-index: 5; width: max-content; max-width: 230px; padding: 7px 10px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg); color: var(--color-text); box-shadow: 0 4px 14px #0002; font-size: 11px; line-height: 1.5; white-space: pre-line; opacity: 0; visibility: hidden; pointer-events: none; }
-    .speed-hour:not(.tooltip-dismissed):hover .speed-hour-tooltip, .speed-hour:not(.tooltip-dismissed):focus .speed-hour-tooltip { opacity: 1; visibility: visible; }
-    .speed-hour:nth-child(-n+3) .speed-hour-tooltip { left: 0; transform: none; }
-    .speed-hour:nth-last-child(-n+3) .speed-hour-tooltip { left: auto; right: 0; transform: none; }
-    .speed-hour:hover i, .speed-hour:focus i { opacity: 1; }
     .speed-method-note { margin-top: 14px; color: var(--color-muted); font-size: 12px; line-height: 1.6; }
     .speed-method-note summary { cursor: pointer; width: fit-content; }
-    /* An unmeasured hour keeps its slot and paints nothing: a zero-height bar
-       with a fill would read as "measured, and it was zero". */
-    .speed-hour i { display: block; border-radius: 3px 3px 0 0; background: var(--color-secondary); opacity: .85; }
-    .speed-hour.is-empty i { background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--color-border) 80%, transparent) 0 2px, transparent 2px 4px); opacity: 1; }
-    .speed-hour.is-peak i { background: var(--color-primary); opacity: 1; }
-    .speed-hour-ax { display: flex; justify-content: space-between; font-size: 10px; color: var(--color-muted); margin-top: 4px; }
+    .speed-head-ctl { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+    .speed-stepper { display: inline-flex; align-items: center; border: 1px solid var(--color-border); border-radius: 12px; background: color-mix(in srgb, var(--color-primary) 5%, transparent); }
+    .speed-stepper button { border: 0; background: none; width: 30px; height: 32px; display: grid; place-items: center; color: var(--color-muted); cursor: pointer; border-radius: 10px; }
+    .speed-stepper button:hover:not(:disabled) { color: var(--color-text); }
+    .speed-stepper button:disabled { opacity: .3; cursor: default; }
+    .speed-stepper-label { min-width: 112px; text-align: center; font-size: 12px; font-weight: 700; color: var(--color-text); }
+    .speed-lens-note { margin: 10px 0 0; font-size: 13px; color: var(--color-muted); max-width: 900px; }
+    .speed-chart { position: relative; min-height: 240px; }
+    .speed-chart svg { display: block; }
+    .speed-chart svg:focus-visible { outline: 2px solid var(--color-cta); outline-offset: 2px; border-radius: 6px; }
+    .speed-chart-message { display: grid; place-items: center; min-height: 240px; color: var(--color-muted); font-size: 13px; }
+    .speed-grid { stroke: color-mix(in srgb, var(--color-border) 55%, transparent); stroke-width: 1; }
+    .speed-base { stroke: var(--color-border); stroke-width: 1; }
+    .speed-tick { fill: var(--color-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+    .speed-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+    .speed-point { stroke: var(--color-surface); stroke-width: 2; }
+    .speed-xhair { stroke: var(--color-muted); stroke-width: 1; }
+    .speed-end-label { fill: var(--color-muted); font-size: 11.5px; font-weight: 600; }
+    .speed-empty { fill: var(--color-muted); font-size: 13px; }
+    .speed-tip { position: absolute; z-index: 5; pointer-events: none; min-width: 200px; max-width: 300px; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-bg); color: var(--color-text); box-shadow: 0 10px 28px #0003; font-size: 12px; line-height: 1.45; }
+    .speed-tip-title { margin-bottom: 5px; font-size: 11.5px; font-weight: 700; color: var(--color-label); }
+    .speed-tip-row { display: flex; align-items: center; gap: 7px; }
+    .speed-tip-row .speed-tip-value { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .speed-tip-sub { padding-left: 16px; color: var(--color-muted); font-size: 11.5px; }
+    .speed-swatch { width: 9px; height: 9px; border-radius: 3px; flex: none; display: inline-block; background: var(--speed-series, var(--color-muted)); }
+    .speed-muted { color: var(--color-muted); }
+    .speed-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 8px; }
+    .speed-legend-item { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--color-border); border-radius: 999px; padding: 3px 3px 3px 9px; font-size: 12.5px; }
+    .speed-legend-item .speed-legend-value { font-weight: 700; font-variant-numeric: tabular-nums; }
+    .speed-legend-item button { border: 0; background: none; border-radius: 50%; width: 20px; height: 20px; display: grid; place-items: center; color: var(--color-muted); cursor: pointer; }
+    .speed-legend-item button:hover { color: var(--color-text); background: color-mix(in srgb, var(--color-text) 12%, transparent); }
+    .speed-link { border: 0; background: none; padding: 0 4px; font-size: 12.5px; color: var(--color-muted); text-decoration: underline; cursor: pointer; }
+    .speed-why { border-bottom: 1px dotted currentColor; cursor: help; }
+    .speed-chart-data { margin-top: 6px; font-size: 12px; color: var(--color-muted); }
+    .speed-chart-data summary { cursor: pointer; width: fit-content; }
+    .speed-chart-data table { border-collapse: collapse; margin-top: 6px; font-size: 12px; }
+    .speed-chart-data th, .speed-chart-data td { padding: 3px 8px; border-bottom: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent); text-align: right; white-space: nowrap; }
+    .speed-chart-data th:first-child, .speed-chart-data td:first-child { text-align: left; }
+    .speed-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .speed-search { position: relative; display: inline-flex; }
+    .speed-search svg { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: var(--color-muted); pointer-events: none; }
+    .speed-search input { width: 210px; padding-left: 28px; }
+    .speed-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+    .speed-pill { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--color-border); background: none; border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 600; color: var(--color-text); cursor: pointer; }
+    .speed-pill:hover { background: color-mix(in srgb, var(--color-primary) 7%, transparent); }
+    .speed-pill[aria-pressed="true"] { background: color-mix(in srgb, var(--color-primary) 16%, transparent); border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-border)); }
+    .speed-pill-count { color: var(--color-muted); font-variant-numeric: tabular-nums; }
+    .speed-table th.speed-l, .speed-table td.speed-l { text-align: left; }
+    .speed-table td.speed-l { white-space: normal; }
+    .speed-table tbody tr[data-speed-id] { cursor: pointer; }
+    .speed-table td { font-variant-numeric: tabular-nums; }
+    .speed-check { width: 16px; height: 16px; padding: 0; border-radius: 4px; border: 1.5px solid var(--color-border); background: none; display: inline-grid; place-items: center; vertical-align: middle; cursor: pointer; }
+    .speed-check[aria-checked="true"] { border-color: transparent; background: var(--speed-series); }
+    .speed-check[aria-checked="true"]::after { content: ""; width: 8px; height: 4px; border: solid #fff; border-width: 0 0 2px 2px; transform: translateY(-1px) rotate(-45deg); }
+    .speed-check[aria-disabled="true"] { opacity: .35; cursor: not-allowed; }
+    .speed-model { display: flex; align-items: center; gap: 9px; }
+    .speed-logos { display: inline-flex; flex: none; }
+    .speed-logos .tool-identity + .tool-identity { margin-left: -6px; }
+    .speed-model-name { display: block; font-weight: 600; color: var(--color-text); white-space: nowrap; }
+    .speed-model-meta { display: block; font-size: 11.5px; color: var(--color-muted); }
+    .speed-rate { font-weight: 700; }
+    .speed-par { margin-left: 5px; font-size: 11.5px; font-weight: 600; color: var(--color-muted); }
+    .speed-bar { display: inline-block; width: 56px; height: 5px; margin-left: 8px; vertical-align: middle; border-radius: 999px; overflow: hidden; background: color-mix(in srgb, var(--color-border) 55%, transparent); }
+    .speed-bar i { display: block; height: 100%; border-radius: 999px; background: var(--color-muted); }
     .speed-select { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; color: var(--color-label); }
-    .speed-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-top: 14px; }
-    .speed-meta-k { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; color: var(--color-label); }
-    .speed-meta-v { font-size: 15px; font-weight: 800; margin-top: 3px; }
-    .speed-meta-s { font-size: 11px; color: var(--color-muted); margin-top: 2px; }
+    @media (max-width: 720px) {
+      .speed-head-ctl { margin-left: 0; }
+      .speed-hide-sm, .speed-bar { display: none; }
+      .speed-search, .speed-search input { width: 100%; }
+      .speed-search { flex: 1 1 100%; }
+      .speed-table th, .speed-table td { padding: 6px; }
+      .speed-table th { white-space: normal; }
+      .speed-head-ctl .usage-report-seg { flex-wrap: wrap; }
+      .speed-head-ctl .usage-report-seg button { padding: 6px 10px; }
+    }
+    /* The meta line under each model already names its harnesses. */
+    @media (max-width: 480px) { .speed-logos { display: none; } }
 
     /* Per-response output speed in the session detail. */
     .session-speed-wrap { overflow-x: auto; max-height: 320px; overflow-y: auto; }
@@ -5679,7 +5745,8 @@
       </div>
     </div>
 
-    <!-- Model output speed: its range comes from the shared top controls. -->
+    <!-- Model output speed: its range is the shared one. The period control here
+         walks that range, so the Overview and this page never disagree. -->
     <div id="speed-content" class="tab-content">
       <div class="usage-report-shell">
         <div class="usage-report-head">
@@ -5687,84 +5754,99 @@
             <h2 class="usage-report-title" data-i18n="usageReportSpeedTitle">Model output speed</h2>
             <div class="usage-report-sub mono" id="outputSpeedRange"></div>
           </div>
-          <label id="outputSpeedServerWrap" hidden>
-            <span data-i18n="usageReportServerLabel">Server</span>
-            <select id="outputSpeedServer" class="ui-input compact-control"></select>
-          </label>
-        </div>
-        <section class="usage-report-panel" id="usageReportSpeedPanel" style="margin-top:14px">
-          <div class="usage-report-panel-head">
-            <span class="usage-report-spacer"></span>
-            <div class="usage-report-seg" id="usageReportSpeedMode" role="group" data-i18n-aria="usageReportSpeedModeAria" aria-label="Output speed view">
-              <button type="button" data-speed-mode="across" aria-pressed="true" data-i18n="usageReportSpeedModeAcross">Across models</button>
-              <button type="button" data-speed-mode="temporal" aria-pressed="false" data-i18n="usageReportSpeedModeTemporal">Time of day</button>
+          <div class="speed-head-ctl">
+            <div class="usage-report-seg" id="usageReportSpeedLens" role="group" data-i18n-aria="usageReportSpeedLensAria" aria-label="Speed measure">
+              <button type="button" data-speed-lens="combined" aria-pressed="true" data-i18n="usageReportSpeedLensCombined">Combined</button>
+              <button type="button" data-speed-lens="stream" aria-pressed="false" data-i18n="usageReportSpeedLensStream">Per stream</button>
             </div>
-          </div>
-          <p class="usage-report-notice" id="usageReportSpeedIntro" data-i18n="usageReportSpeedIntro" style="margin:0 0 10px">Aggregated across sessions, using measured responses only.</p>
-          <p class="usage-report-note" id="usageReportSpeedPartial" style="margin:0 0 12px"></p>
-          <div id="usageReportSpeedState" class="usage-report-notice mono" role="status" hidden></div>
-
-          <div class="usage-report-panel-head" style="margin-bottom:12px">
-            <label class="speed-select" for="usageReportSpeedTool">
-              <span data-i18n="usageReportSpeedColTool">Tool</span>
-              <select id="usageReportSpeedTool" class="ui-input compact-control"></select>
+            <div class="usage-report-seg" id="usageReportSpeedPeriod" role="group" data-i18n-aria="usageReportSpeedPeriodAria" aria-label="Period">
+              <button type="button" data-speed-period="day" aria-pressed="false" data-i18n="usageReportPeriodDay">Day</button>
+              <button type="button" data-speed-period="week" aria-pressed="false" data-i18n="usageReportPeriodWeek">Week</button>
+              <button type="button" data-speed-period="month" aria-pressed="false" data-i18n="usageReportPeriodMonth">Month</button>
+              <button type="button" data-speed-period="quarter" aria-pressed="false" data-i18n="usageReportSpeedPeriodQuarter">Quarter</button>
+              <button type="button" data-speed-period="year" aria-pressed="false" data-i18n="usageReportPeriodYear">Year</button>
+              <button type="button" data-speed-period="custom" aria-pressed="false" data-i18n="usageReportSpeedPeriodCustom">Custom</button>
+            </div>
+            <div class="speed-stepper" id="usageReportSpeedStepper" hidden>
+              <button type="button" id="usageReportSpeedPrev" data-i18n-aria="usageReportSpeedPrev" aria-label="Previous period">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>
+              </button>
+              <span class="speed-stepper-label" id="usageReportSpeedPeriodLabel" aria-live="polite"></span>
+              <button type="button" id="usageReportSpeedNext" data-i18n-aria="usageReportSpeedNext" aria-label="Next period">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+              </button>
+            </div>
+            <label id="outputSpeedServerWrap" hidden>
+              <span data-i18n="usageReportServerLabel">Server</span>
+              <select id="outputSpeedServer" class="ui-input compact-control"></select>
             </label>
-            <span class="usage-report-note" id="outputSpeedAvailability" style="margin-top:0"></span>
           </div>
-          <div id="usageReportSpeedEmptyAction" class="usage-report-notice" hidden style="margin-bottom:12px"></div>
-          <div id="usageReportSpeedAcross">
-            <div class="speed-table-wrap">
-              <table class="speed-table" id="usageReportSpeedTable">
-                <thead>
-                  <tr>
-                    <th scope="col" data-speed-sort="model" class="is-sortable" aria-sort="none"><span class="speed-sort" data-i18n="usageReportSpeedColModel">Model</span></th>
-                    <th scope="col" data-speed-sort="source" class="is-sortable" aria-sort="none"><span class="speed-sort" data-i18n="usageReportSpeedColTool">Tool</span></th>
-                    <th scope="col" data-speed-sort="output_tok_per_s" class="is-sortable" aria-sort="none"><span class="speed-sort" data-i18n="usageReportSpeedColRate">Output tok/s</span></th>
-                    <th scope="col" data-speed-sort="speed_calls" class="is-sortable" aria-sort="descending"><span class="speed-sort" data-i18n="usageReportSpeedColCalls">Measured calls</span></th>
-                    <th scope="col" data-speed-sort="coverage" class="is-sortable" aria-sort="none"><span class="speed-sort" data-i18n="usageReportSpeedColCoverage">Call coverage</span></th>
-                  </tr>
-                </thead>
-                <tbody id="usageReportSpeedBody"></tbody>
-              </table>
-            </div>
-            <p class="usage-report-note mono" id="usageReportSpeedSources"></p>
-          </div>
+        </div>
+        <p class="speed-lens-note" id="usageReportSpeedIntro"></p>
+        <p class="usage-report-note" id="usageReportSpeedPartial" style="margin:4px 0 0"></p>
+        <div id="usageReportSpeedState" class="usage-report-notice mono" role="status" hidden style="margin-top:8px"></div>
+        <div id="usageReportSpeedEmptyAction" class="usage-report-notice" hidden style="margin-top:8px"></div>
 
-          <div id="usageReportSpeedTemporal" hidden>
-            <div class="usage-report-panel-head" style="margin-bottom:8px">
-              <label class="speed-select" for="usageReportSpeedPick">
-                <span data-i18n="usageReportSpeedPickModel">Model</span>
-                <select id="usageReportSpeedPick" class="ui-input compact-control"></select>
-              </label>
+        <div id="usageReportSpeedPanel">
+          <section class="usage-report-panel" style="margin-top:14px" aria-labelledby="usageReportSpeedChartTitle">
+            <div class="usage-report-panel-head" style="margin-bottom:6px">
+              <span class="usage-report-panel-title" id="usageReportSpeedChartTitle" data-i18n="usageReportSpeedColRate">Output tok/s</span>
+              <span class="usage-report-note" id="usageReportSpeedChartSub" style="margin:0"></span>
               <span class="usage-report-spacer"></span>
-              <span class="usage-report-note mono" id="usageReportSpeedPickMeta" style="margin-top:0"></span>
+              <label class="speed-select" id="usageReportSpeedBucketWrap" for="usageReportSpeedBucket">
+                <span data-i18n="usageReportSpeedGroupBy">Group by</span>
+                <select id="usageReportSpeedBucket" class="ui-input compact-control" disabled></select>
+              </label>
+              <div class="usage-report-seg" id="usageReportSpeedView" role="group" data-i18n-aria="usageReportSpeedViewAria" aria-label="Chart view">
+                <button type="button" data-speed-view="time" aria-pressed="true" data-i18n="usageReportSpeedViewTime">Over time</button>
+                <button type="button" data-speed-view="hour" aria-pressed="false" data-i18n="usageReportSpeedViewHour">By hour</button>
+              </div>
             </div>
-            <div class="usage-report-panel-title" data-i18n="usageReportSpeedHourly" style="margin-top:10px">By hour of day</div>
-            <div class="speed-hours" id="usageReportSpeedHours" role="group" data-i18n-aria="usageReportSpeedHourly" aria-label="By hour of day"></div>
-            <div class="speed-hour-ax"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
-            <div class="speed-table-wrap" style="margin-top:14px">
-              <table class="speed-table">
-                <caption class="usage-report-panel-title" style="caption-side:top;text-align:left;margin-bottom:6px" data-i18n="usageReportSpeedBins">By six hours</caption>
-                <thead>
-                  <tr>
-                    <th scope="col" data-i18n="usageReportSpeedColBin">Window</th>
-                    <th scope="col" data-i18n="usageReportSpeedColRate">Output tok/s</th>
-                    <th scope="col" data-i18n="usageReportSpeedColCalls">Measured calls</th>
-                    <th scope="col" data-i18n="usageReportSpeedColCoverage">Call coverage</th>
-                    <th scope="col" data-i18n="usageReportSpeedColDays">Days</th>
-                  </tr>
-                </thead>
-                <tbody id="usageReportSpeedBinsBody"></tbody>
-              </table>
+            <div class="speed-chart" id="usageReportSpeedChart"></div>
+            <div class="speed-legend" id="usageReportSpeedLegend"></div>
+            <p class="usage-report-note" id="usageReportSpeedMixed" hidden style="margin-top:8px"></p>
+            <p class="usage-report-note" data-i18n="usageReportSpeedGapNote" style="margin-top:8px">A gap in a line means nothing was measured there, which is not a speed of zero.</p>
+            <details class="speed-chart-data">
+              <summary data-i18n="usageReportSpeedChartData">Chart data as a table</summary>
+              <div class="speed-table-wrap" id="usageReportSpeedChartData"></div>
+            </details>
+          </section>
+
+          <section class="usage-report-panel" style="margin-top:14px" data-i18n-aria="usageReportSpeedModelsAria" aria-label="Models">
+            <div class="speed-filters">
+              <label class="speed-search">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                <input type="search" id="usageReportSpeedSearch" class="ui-input compact-control" data-i18n-placeholder="usageReportSpeedSearch" placeholder="Find a model" data-i18n-aria="usageReportSpeedSearch" aria-label="Find a model">
+              </label>
+              <div class="speed-pills" id="usageReportSpeedTools" role="group" data-i18n-aria="usageReportSpeedToolsAria" aria-label="Harness"></div>
+              <span class="usage-report-spacer"></span>
+              <span class="usage-report-note" style="margin:0" data-i18n="usageReportSpeedTickHint">Tick up to six rows to chart them</span>
             </div>
-            <p class="usage-report-note mono" id="usageReportSpeedTemporalNote"></p>
-          </div>
-          <details class="speed-method-note" id="usageReportSpeedMethodNote">
-            <summary data-i18n="usageReportSpeedHowCalculated">How this is calculated</summary>
-            <p data-i18n="usageReportSpeedMethodSummary">Total matched output tokens divided by total matched response time. Each response contributes its own duration, including when sessions overlap.</p>
-            <p id="usageReportSpeedCompleteness" data-i18n="usageReportSpeedCompleteness">Measured days are not proof of complete logs: an idle day and a missing log look the same from here.</p>
-          </details>
-        </section>
+            <div id="usageReportSpeedAcross">
+              <div class="speed-table-wrap">
+                <table class="speed-table" id="usageReportSpeedTable">
+                  <thead>
+                    <tr>
+                      <th scope="col"><span class="sr-only" data-i18n="usageReportSpeedColChart">Chart</span></th>
+                      <th scope="col" data-speed-sort="model" class="is-sortable speed-l" aria-sort="none"><span class="speed-sort" data-i18n="usageReportSpeedColModel">Model</span></th>
+                      <th scope="col" data-speed-sort="rate" class="is-sortable" aria-sort="none"><span class="speed-sort" data-i18n="usageReportSpeedColRate">Output tok/s</span></th>
+                      <th scope="col" data-speed-sort="speed_calls" class="is-sortable" aria-sort="descending"><span class="speed-sort" data-i18n="usageReportSpeedColCalls">Measured calls</span></th>
+                      <th scope="col" data-speed-sort="coverage" class="is-sortable speed-hide-sm" aria-sort="none"><span class="speed-sort" data-i18n="usageReportSpeedColCoverage">Call coverage</span></th>
+                    </tr>
+                  </thead>
+                  <tbody id="usageReportSpeedBody"></tbody>
+                </table>
+              </div>
+              <p class="usage-report-note" id="usageReportSpeedSources"></p>
+            </div>
+            <details class="speed-method-note" id="usageReportSpeedMethodNote">
+              <summary data-i18n="usageReportSpeedHowCalculated">How this is calculated</summary>
+              <p data-i18n="usageReportSpeedMethodSummary">Per stream divides matched output tokens by the sum of each response's own duration, so responses running at once never add up. Combined divides the same tokens by the wall-clock time at least one response was generating, so they do. The ×N beside a combined rate is the ratio of the two: how many responses were generating at once, on average.</p>
+              <p data-i18n="usageReportSpeedMethodBuckets">A response belongs to the hour, day or week its usage record is stamped on. Combined merges the same model across harnesses, since one backend can serve several of them at once; harnesses time responses differently, so a merged row has no per-stream rate.</p>
+              <p id="usageReportSpeedCompleteness" data-i18n="usageReportSpeedCompleteness">Measured days are not proof of complete logs: an idle day and a missing log look the same from here.</p>
+            </details>
+          </section>
+        </div>
 
       </div>
     </div>
@@ -7523,28 +7605,74 @@
         usageReportSubSummary: 'Summary',
         usageReportSubSpeed: 'Model output speed',
         usageReportSpeedTitle: 'Model output speed',
-        usageReportSpeedModeAria: 'Output speed view',
-        usageReportSpeedModeAcross: 'Across models',
-        usageReportSpeedModeTemporal: 'Time of day',
-        usageReportSpeedIntro: 'Aggregated across sessions, using measured responses only.',
+        usageReportSpeedLensAria: 'Speed measure',
+        usageReportSpeedLensCombined: 'Combined',
+        usageReportSpeedLensStream: 'Per stream',
+        usageReportSpeedLensCombinedNote: 'Combined: output tokens per wall-clock second while the model was generating anything, across every harness that ran it. Responses running at once add up, so this is per stream × how many ran at once (the × figure).',
+        usageReportSpeedLensCombinedToolNote: 'Combined: output tokens per wall-clock second while the model was generating anything in {tool}. Responses running at once add up, so this is per stream × how many ran at once (the × figure).',
+        usageReportSpeedLensStreamNote: 'Per stream: how fast a single response generates, its output tokens over its own duration. Responses running at once do not add up.',
+        usageReportSpeedLensUnavailable: 'This server reports per-stream speed only. Update it to see combined throughput.',
+        usageReportSpeedPeriodAria: 'Period',
+        usageReportSpeedPeriodQuarter: 'Quarter',
+        usageReportSpeedPeriodCustom: 'Custom',
+        usageReportSpeedPrev: 'Previous period',
+        usageReportSpeedNext: 'Next period',
+        usageReportSpeedQuarter: 'Q{q} {year}',
+        usageReportSpeedGroupBy: 'Group by',
+        usageReportSpeedAuto: 'Auto ({size})',
+        usageReportSpeedAutoBare: 'Auto',
+        usageReportSpeedAutoHint: 'Auto uses the finest grouping that keeps the chart readable: at most 36 hours, 45 days, 40 weeks, 36 months or 24 quarters.',
+        usageReportSpeedBucketHour: 'Hourly',
+        usageReportSpeedBucketDay: 'Daily',
+        usageReportSpeedBucketWeek: 'Weekly',
+        usageReportSpeedBucketMonth: 'Monthly',
+        usageReportSpeedBucketQuarter: 'Quarterly',
+        usageReportSpeedViewAria: 'Chart view',
+        usageReportSpeedViewTime: 'Over time',
+        usageReportSpeedViewHour: 'By hour',
+        usageReportSpeedHourOfDay: 'by hour of day, whole range pooled',
+        usageReportSpeedChartAria: 'Output tokens per second, {lens}, {n} series. Arrow keys step through the points.',
+        usageReportSpeedChartEmpty: 'Tick a model in the table below to chart it.',
+        usageReportSpeedGapNote: 'A gap in a line means nothing was measured there, which is not a speed of zero.',
+        usageReportSpeedChartData: 'Chart data as a table',
+        usageReportSpeedNothingCharted: 'Nothing is charted.',
+        usageReportSpeedColPeriod: 'Period',
+        usageReportSpeedColHour: 'Hour',
+        usageReportSpeedColChart: 'Chart',
+        usageReportSpeedTipCalls: '{n} calls',
+        usageReportSpeedTipParallel: '×{par} in parallel',
+        usageReportSpeedNotHere: 'not measured here',
+        usageReportSpeedRemove: 'Remove {model}',
+        usageReportSpeedClear: 'Clear',
+        usageReportSpeedMixedLead: 'Timed different ways:',
+        usageReportSpeedMixedTail: 'Part of a gap between them can be the measurement rather than the model.',
+        usageReportSpeedModelsAria: 'Models',
+        usageReportSpeedSearch: 'Find a model',
+        usageReportSpeedToolsAria: 'Harness',
+        usageReportSpeedAll: 'All',
+        usageReportSpeedTickHint: 'Tick up to six rows to chart them',
+        usageReportSpeedTick: 'Chart {model} in {tool}',
+        usageReportSpeedFull: 'Six rows at most. Untick one first.',
+        usageReportSpeedMethods: '{n} timing methods',
+        usageReportSpeedNoMatch: 'No measured model matches.',
+        usageReportSpeedRateTitle: 'Per stream {stream} · combined {combined} · ×{par} in parallel on average, peak {peak}',
+        usageReportSpeedRateTitleMerged: 'Combined {combined} · ×{par} in parallel on average, peak {peak}. Its harnesses time responses differently, so there is no pooled per-stream rate: switch to Per stream to see each one.',
+        usageReportSpeedParTitle: 'On average {par} responses were generating at once; peak {peak}.',
+        usageReportSpeedMethodBuckets: 'A response belongs to the hour, day or week its usage record is stamped on. Combined merges the same model across harnesses, since one backend can serve several of them at once; harnesses time responses differently, so a merged row has no per-stream rate.',
+        speedKindShortServerDecode: 'decode window',
+        speedKindShortPostFirstToken: 'after first token',
+        speedKindShortRequestWindow: 'whole request',
+        speedKindShortResponseWindow: 'response window',
         usageReportSpeedHowCalculated: 'How this is calculated',
-        usageReportSpeedMethodSummary: 'Total matched output tokens divided by total matched response time. Each response contributes its own duration, including when sessions overlap.',
-        usageReportSpeedAcrossSessions: 'across sessions',
+        usageReportSpeedMethodSummary: "Per stream divides matched output tokens by the sum of each response's own duration, so responses running at once never add up. Combined divides the same tokens by the wall-clock time at least one response was generating, so they do. The ×N beside a combined rate is the ratio of the two: how many responses were generating at once, on average.",
         usageReportSpeedCompleteness: 'Measured days are not proof of complete logs: an idle day and a missing log look the same from here.',
         usageReportSpeedColModel: 'Model',
-        usageReportSpeedColTool: 'Tool',
         usageReportSpeedColRate: 'Output tok/s',
         usageReportSpeedColCalls: 'Measured calls',
         usageReportSpeedColCoverage: 'Call coverage',
-        usageReportSpeedColBin: 'Window',
-        usageReportSpeedColDays: 'Days',
-        usageReportSpeedPickModel: 'Model',
-        usageReportSpeedHourly: 'By hour of day',
-        usageReportSpeedBins: 'By six hours',
         usageReportSpeedError: 'Output speed could not be loaded.',
         usageReportSpeedEmpty: 'No measured output speed in this range.',
         usageReportSpeedEmptyKnown: 'This tool has usage in this range, but no measured output speed. See availability below.',
-        usageReportSpeedAvailability: '{measured} of {total} tools have speed measurements in this range.',
         usageReportSpeedRecordedDates: 'Recorded measurements: {from} – {to}. Gaps may exist within these dates.',
         usageReportSpeedViewDates: 'View measured dates',
         usageReportSpeedShowTools: 'Show all measured tools',
@@ -8249,28 +8377,74 @@
         usageReportSubSummary: '概览',
         usageReportSubSpeed: '模型输出速度',
         usageReportSpeedTitle: '模型输出速度',
-        usageReportSpeedModeAria: '输出速度视图',
-        usageReportSpeedModeAcross: '跨模型对比',
-        usageReportSpeedModeTemporal: '按时段',
-        usageReportSpeedIntro: '跨会话汇总，仅包含已测量的响应。',
+        usageReportSpeedLensAria: '速度口径',
+        usageReportSpeedLensCombined: '合并',
+        usageReportSpeedLensStream: '单流',
+        usageReportSpeedLensCombinedNote: '合并：模型有任何响应在生成时，每个实际秒内的输出 token 数，涵盖运行它的所有工具。同时运行的响应会相加，因此等于单流速度 × 同时运行的数量（× 数值）。',
+        usageReportSpeedLensCombinedToolNote: '合并：模型在 {tool} 中有任何响应在生成时，每个实际秒内的输出 token 数。同时运行的响应会相加，因此等于单流速度 × 同时运行的数量（× 数值）。',
+        usageReportSpeedLensStreamNote: '单流：单个响应的生成速度，即其输出 token 数除以它自身的耗时。同时运行的响应不会相加。',
+        usageReportSpeedLensUnavailable: '此服务器只提供单流速度。更新后即可查看合并吞吐量。',
+        usageReportSpeedPeriodAria: '时间段',
+        usageReportSpeedPeriodQuarter: '季度',
+        usageReportSpeedPeriodCustom: '自定义',
+        usageReportSpeedPrev: '上一时间段',
+        usageReportSpeedNext: '下一时间段',
+        usageReportSpeedQuarter: '{year} 年第 {q} 季度',
+        usageReportSpeedGroupBy: '分组',
+        usageReportSpeedAuto: '自动（{size}）',
+        usageReportSpeedAutoBare: '自动',
+        usageReportSpeedAutoHint: '自动会选择能让图表保持清晰的最细分组：最多 36 小时、45 天、40 周、36 个月或 24 个季度。',
+        usageReportSpeedBucketHour: '按小时',
+        usageReportSpeedBucketDay: '按天',
+        usageReportSpeedBucketWeek: '按周',
+        usageReportSpeedBucketMonth: '按月',
+        usageReportSpeedBucketQuarter: '按季度',
+        usageReportSpeedViewAria: '图表视图',
+        usageReportSpeedViewTime: '随时间',
+        usageReportSpeedViewHour: '按时段',
+        usageReportSpeedHourOfDay: '按一天中的时段，整个范围合并',
+        usageReportSpeedChartAria: '每秒输出 token，{lens}，{n} 条序列。方向键可逐点查看。',
+        usageReportSpeedChartEmpty: '在下方表格中勾选模型即可绘制。',
+        usageReportSpeedGapNote: '线条中的空缺表示该处没有测量数据，并不代表速度为零。',
+        usageReportSpeedChartData: '以表格查看图表数据',
+        usageReportSpeedNothingCharted: '尚未绘制任何内容。',
+        usageReportSpeedColPeriod: '时间段',
+        usageReportSpeedColHour: '小时',
+        usageReportSpeedColChart: '图表',
+        usageReportSpeedTipCalls: '{n} 次调用',
+        usageReportSpeedTipParallel: '平均 ×{par} 并行',
+        usageReportSpeedNotHere: '此范围内未测量',
+        usageReportSpeedRemove: '移除 {model}',
+        usageReportSpeedClear: '清除',
+        usageReportSpeedMixedLead: '计时方式不同：',
+        usageReportSpeedMixedTail: '两者之间的差距可能部分来自测量方式，而非模型本身。',
+        usageReportSpeedModelsAria: '模型',
+        usageReportSpeedSearch: '查找模型',
+        usageReportSpeedToolsAria: '工具',
+        usageReportSpeedAll: '全部',
+        usageReportSpeedTickHint: '最多勾选六行来绘制',
+        usageReportSpeedTick: '绘制 {tool} 中的 {model}',
+        usageReportSpeedFull: '最多六行。请先取消勾选一行。',
+        usageReportSpeedMethods: '{n} 种计时方式',
+        usageReportSpeedNoMatch: '没有匹配的已测量模型。',
+        usageReportSpeedRateTitle: '单流 {stream} · 合并 {combined} · 平均 ×{par} 并行，峰值 {peak}',
+        usageReportSpeedRateTitleMerged: '合并 {combined} · 平均 ×{par} 并行，峰值 {peak}。各工具的计时方式不同，因此没有汇总的单流速度；切换到单流可查看每个工具。',
+        usageReportSpeedParTitle: '平均同时有 {par} 个响应在生成；峰值 {peak}。',
+        usageReportSpeedMethodBuckets: '每个响应归入其用量记录时间戳所在的小时、天或周。合并会把同一模型在不同工具中的数据合在一起，因为一个后端可能同时服务多个工具；各工具计时方式不同，因此合并行没有单流速度。',
+        speedKindShortServerDecode: '解码窗口',
+        speedKindShortPostFirstToken: '首个 token 之后',
+        speedKindShortRequestWindow: '整个请求',
+        speedKindShortResponseWindow: '响应窗口',
         usageReportSpeedHowCalculated: '计算方法',
-        usageReportSpeedMethodSummary: '匹配的输出 token 总量除以匹配的响应总时长。即使会话并行，每个响应也贡献自己的时长。',
-        usageReportSpeedAcrossSessions: '跨会话',
+        usageReportSpeedMethodSummary: '单流：匹配的输出 token 数除以每个响应自身耗时之和，因此同时运行的响应不会相加。合并：同样的 token 数除以至少有一个响应在生成的实际时间，因此会相加。合并速度旁的 ×N 是两者之比，即平均有多少个响应同时在生成。',
         usageReportSpeedCompleteness: '有测量的天数并不能证明日志完整：在这里，空闲的一天与缺失的日志看起来完全一样。',
         usageReportSpeedColModel: '模型',
-        usageReportSpeedColTool: '工具',
         usageReportSpeedColRate: '输出 tok/s',
         usageReportSpeedColCalls: '已测量调用数',
         usageReportSpeedColCoverage: '调用覆盖率',
-        usageReportSpeedColBin: '时间窗',
-        usageReportSpeedColDays: '天数',
-        usageReportSpeedPickModel: '模型',
-        usageReportSpeedHourly: '按小时',
-        usageReportSpeedBins: '按六小时段',
         usageReportSpeedError: '无法加载输出速度。',
         usageReportSpeedEmpty: '此时间范围内没有已测得的输出速度。',
         usageReportSpeedEmptyKnown: '此工具在该范围内有使用记录，但没有输出速度测量。请见下方说明。',
-        usageReportSpeedAvailability: '此范围内 {total} 个工具中，{measured} 个有速度测量。',
         usageReportSpeedRecordedDates: '已记录的测量日期：{from} – {to}。此日期范围内可能有空缺。',
         usageReportSpeedViewDates: '查看有测量的日期',
         usageReportSpeedShowTools: '显示所有有测量的工具',
@@ -8976,28 +9150,74 @@
         usageReportSubSummary: '概要',
         usageReportSubSpeed: 'モデル出力速度',
         usageReportSpeedTitle: 'モデル出力速度',
-        usageReportSpeedModeAria: '出力速度の表示',
-        usageReportSpeedModeAcross: 'モデル別',
-        usageReportSpeedModeTemporal: '時間帯別',
-        usageReportSpeedIntro: '測定された応答のみをセッション全体で集計します。',
+        usageReportSpeedLensAria: '速度の指標',
+        usageReportSpeedLensCombined: '統合',
+        usageReportSpeedLensStream: 'ストリーム単位',
+        usageReportSpeedLensCombinedNote: '統合：モデルが何らかの応答を生成していた実時間 1 秒あたりの出力トークン数で、そのモデルを使ったすべてのツールを合わせたものです。同時に動いた応答は合算されるため、ストリーム単位の速度 × 同時に動いた数（× の値）になります。',
+        usageReportSpeedLensCombinedToolNote: '統合：モデルが {tool} で何らかの応答を生成していた実時間 1 秒あたりの出力トークン数です。同時に動いた応答は合算されるため、ストリーム単位の速度 × 同時に動いた数（× の値）になります。',
+        usageReportSpeedLensStreamNote: 'ストリーム単位：1 本の応答が生成する速さで、出力トークン数をその応答自身の所要時間で割ったものです。同時に動いた応答は合算しません。',
+        usageReportSpeedLensUnavailable: 'このサーバーはストリーム単位の速度のみを返します。統合スループットを見るにはサーバーを更新してください。',
+        usageReportSpeedPeriodAria: '期間',
+        usageReportSpeedPeriodQuarter: '四半期',
+        usageReportSpeedPeriodCustom: 'カスタム',
+        usageReportSpeedPrev: '前の期間',
+        usageReportSpeedNext: '次の期間',
+        usageReportSpeedQuarter: '{year}年 第{q}四半期',
+        usageReportSpeedGroupBy: '集計単位',
+        usageReportSpeedAuto: '自動（{size}）',
+        usageReportSpeedAutoBare: '自動',
+        usageReportSpeedAutoHint: '自動では、グラフが読みやすい範囲で最も細かい単位を使います（最大 36 時間・45 日・40 週・36 か月・24 四半期）。',
+        usageReportSpeedBucketHour: '時間ごと',
+        usageReportSpeedBucketDay: '日ごと',
+        usageReportSpeedBucketWeek: '週ごと',
+        usageReportSpeedBucketMonth: '月ごと',
+        usageReportSpeedBucketQuarter: '四半期ごと',
+        usageReportSpeedViewAria: 'グラフ表示',
+        usageReportSpeedViewTime: '推移',
+        usageReportSpeedViewHour: '時間帯別',
+        usageReportSpeedHourOfDay: '時間帯別、期間全体を合算',
+        usageReportSpeedChartAria: '毎秒の出力トークン、{lens}、{n} 系列。矢印キーで各点を移動できます。',
+        usageReportSpeedChartEmpty: '下の表でモデルにチェックを入れるとグラフに表示されます。',
+        usageReportSpeedGapNote: '線の途切れは、そこで何も測定されなかったことを示します。速度ゼロではありません。',
+        usageReportSpeedChartData: 'グラフのデータを表で見る',
+        usageReportSpeedNothingCharted: 'グラフに表示中の項目はありません。',
+        usageReportSpeedColPeriod: '期間',
+        usageReportSpeedColHour: '時',
+        usageReportSpeedColChart: 'グラフ',
+        usageReportSpeedTipCalls: '{n} 回の呼び出し',
+        usageReportSpeedTipParallel: '平均 ×{par} 並行',
+        usageReportSpeedNotHere: 'この期間は未測定',
+        usageReportSpeedRemove: '{model} を外す',
+        usageReportSpeedClear: 'クリア',
+        usageReportSpeedMixedLead: '計測方法が異なります：',
+        usageReportSpeedMixedTail: '両者の差の一部は、モデルではなく計測方法によるものかもしれません。',
+        usageReportSpeedModelsAria: 'モデル',
+        usageReportSpeedSearch: 'モデルを検索',
+        usageReportSpeedToolsAria: 'ツール',
+        usageReportSpeedAll: 'すべて',
+        usageReportSpeedTickHint: '最大 6 行までチェックしてグラフに表示',
+        usageReportSpeedTick: '{tool} の {model} をグラフに表示',
+        usageReportSpeedFull: '最大 6 行です。先にどれかのチェックを外してください。',
+        usageReportSpeedMethods: '{n} 種類の計測方法',
+        usageReportSpeedNoMatch: '一致する測定済みモデルはありません。',
+        usageReportSpeedRateTitle: 'ストリーム単位 {stream} · 統合 {combined} · 平均 ×{par} 並行、ピーク {peak}',
+        usageReportSpeedRateTitleMerged: '統合 {combined} · 平均 ×{par} 並行、ピーク {peak}。ツールごとに応答の計測方法が異なるため、まとめたストリーム単位の速度はありません。ツールごとの値はストリーム単位に切り替えて確認してください。',
+        usageReportSpeedParTitle: '平均 {par} 本の応答が同時に生成されていました。ピーク {peak}。',
+        usageReportSpeedMethodBuckets: '各応答は、使用量レコードのタイムスタンプがある時間・日・週に入ります。統合では同じモデルをツールをまたいでまとめます。1 つのバックエンドが複数のツールに同時に応答することがあるためです。ツールごとに計測方法が異なるため、統合の行にはストリーム単位の速度がありません。',
+        speedKindShortServerDecode: 'デコード区間',
+        speedKindShortPostFirstToken: '最初のトークン以降',
+        speedKindShortRequestWindow: 'リクエスト全体',
+        speedKindShortResponseWindow: '応答区間',
         usageReportSpeedHowCalculated: '計算方法',
-        usageReportSpeedMethodSummary: '対応する出力トークンの合計を応答時間の合計で割ります。セッションが重複していても、各応答の時間を加算します。',
-        usageReportSpeedAcrossSessions: '全セッション集計',
+        usageReportSpeedMethodSummary: 'ストリーム単位は、一致した出力トークン数を各応答自身の所要時間の合計で割ったもので、同時に動いた応答は合算されません。統合は、同じトークン数を少なくとも 1 本の応答が生成していた実時間で割ったもので、合算されます。統合の横の ×N は両者の比で、平均して何本の応答が同時に生成していたかを表します。',
         usageReportSpeedCompleteness: '測定された日数がログの完全性を保証するわけではありません。閑散とした日と欠損したログは、ここでは同じ見た目になります。',
         usageReportSpeedColModel: 'モデル',
-        usageReportSpeedColTool: 'ツール',
         usageReportSpeedColRate: '出力 tok/s',
         usageReportSpeedColCalls: '測定済み呼び出し',
         usageReportSpeedColCoverage: '呼び出しカバレッジ',
-        usageReportSpeedColBin: '時間帯',
-        usageReportSpeedColDays: '日数',
-        usageReportSpeedPickModel: 'モデル',
-        usageReportSpeedHourly: '時間帯別',
-        usageReportSpeedBins: '6時間区分',
         usageReportSpeedError: '出力速度を読み込めませんでした。',
         usageReportSpeedEmpty: 'この期間に測定された出力速度はありません。',
         usageReportSpeedEmptyKnown: 'このツールには利用履歴がありますが、出力速度の測定はありません。下の説明をご覧ください。',
-        usageReportSpeedAvailability: 'この範囲では {total} ツール中 {measured} ツールに速度測定があります。',
         usageReportSpeedRecordedDates: '記録された測定：{from} – {to}。この期間内に欠損がある場合があります。',
         usageReportSpeedViewDates: '測定のある期間を表示',
         usageReportSpeedShowTools: '測定のある全ツールを表示',
@@ -9703,28 +9923,74 @@
         usageReportSubSummary: '요약',
         usageReportSubSpeed: '모델 출력 속도',
         usageReportSpeedTitle: '모델 출력 속도',
-        usageReportSpeedModeAria: '출력 속도 보기',
-        usageReportSpeedModeAcross: '모델별',
-        usageReportSpeedModeTemporal: '시간대별',
-        usageReportSpeedIntro: '측정된 응답만 사용하여 여러 세션을 집계합니다.',
+        usageReportSpeedLensAria: '속도 기준',
+        usageReportSpeedLensCombined: '통합',
+        usageReportSpeedLensStream: '스트림당',
+        usageReportSpeedLensCombinedNote: '통합: 모델이 어떤 응답이든 생성하던 실제 시간 1초당 출력 토큰 수로, 그 모델을 실행한 모든 도구를 합친 값입니다. 동시에 실행된 응답은 합산되므로 스트림당 속도 × 동시에 실행된 수(× 값)와 같습니다.',
+        usageReportSpeedLensCombinedToolNote: '통합: 모델이 {tool}에서 어떤 응답이든 생성하던 실제 시간 1초당 출력 토큰 수입니다. 동시에 실행된 응답은 합산되므로 스트림당 속도 × 동시에 실행된 수(× 값)와 같습니다.',
+        usageReportSpeedLensStreamNote: '스트림당: 응답 하나가 생성되는 속도로, 출력 토큰 수를 그 응답 자체의 소요 시간으로 나눈 값입니다. 동시에 실행된 응답은 합산하지 않습니다.',
+        usageReportSpeedLensUnavailable: '이 서버는 스트림당 속도만 제공합니다. 통합 처리량을 보려면 서버를 업데이트하세요.',
+        usageReportSpeedPeriodAria: '기간',
+        usageReportSpeedPeriodQuarter: '분기',
+        usageReportSpeedPeriodCustom: '사용자 지정',
+        usageReportSpeedPrev: '이전 기간',
+        usageReportSpeedNext: '다음 기간',
+        usageReportSpeedQuarter: '{year}년 {q}분기',
+        usageReportSpeedGroupBy: '묶음 단위',
+        usageReportSpeedAuto: '자동({size})',
+        usageReportSpeedAutoBare: '자동',
+        usageReportSpeedAutoHint: '자동은 차트를 읽기 쉽게 유지하는 가장 세밀한 단위를 사용합니다. 최대 36시간, 45일, 40주, 36개월 또는 24분기입니다.',
+        usageReportSpeedBucketHour: '시간별',
+        usageReportSpeedBucketDay: '일별',
+        usageReportSpeedBucketWeek: '주별',
+        usageReportSpeedBucketMonth: '월별',
+        usageReportSpeedBucketQuarter: '분기별',
+        usageReportSpeedViewAria: '차트 보기',
+        usageReportSpeedViewTime: '시간 흐름',
+        usageReportSpeedViewHour: '시간대별',
+        usageReportSpeedHourOfDay: '시간대별, 전체 기간 합산',
+        usageReportSpeedChartAria: '초당 출력 토큰, {lens}, 계열 {n}개. 화살표 키로 각 지점을 이동합니다.',
+        usageReportSpeedChartEmpty: '아래 표에서 모델을 체크하면 차트에 표시됩니다.',
+        usageReportSpeedGapNote: '선이 끊긴 곳은 측정된 것이 없다는 뜻이며, 속도가 0이라는 뜻이 아닙니다.',
+        usageReportSpeedChartData: '차트 데이터를 표로 보기',
+        usageReportSpeedNothingCharted: '차트에 표시된 항목이 없습니다.',
+        usageReportSpeedColPeriod: '기간',
+        usageReportSpeedColHour: '시',
+        usageReportSpeedColChart: '차트',
+        usageReportSpeedTipCalls: '호출 {n}회',
+        usageReportSpeedTipParallel: '평균 ×{par} 병렬',
+        usageReportSpeedNotHere: '이 기간에는 측정 없음',
+        usageReportSpeedRemove: '{model} 제거',
+        usageReportSpeedClear: '지우기',
+        usageReportSpeedMixedLead: '측정 방식이 다릅니다:',
+        usageReportSpeedMixedTail: '둘 사이 차이의 일부는 모델이 아니라 측정 방식 때문일 수 있습니다.',
+        usageReportSpeedModelsAria: '모델',
+        usageReportSpeedSearch: '모델 찾기',
+        usageReportSpeedToolsAria: '도구',
+        usageReportSpeedAll: '전체',
+        usageReportSpeedTickHint: '최대 6개 행을 체크해 차트에 표시',
+        usageReportSpeedTick: '{tool}의 {model} 차트에 표시',
+        usageReportSpeedFull: '최대 6개 행입니다. 먼저 하나를 체크 해제하세요.',
+        usageReportSpeedMethods: '측정 방식 {n}가지',
+        usageReportSpeedNoMatch: '일치하는 측정된 모델이 없습니다.',
+        usageReportSpeedRateTitle: '스트림당 {stream} · 통합 {combined} · 평균 ×{par} 병렬, 최대 {peak}',
+        usageReportSpeedRateTitleMerged: '통합 {combined} · 평균 ×{par} 병렬, 최대 {peak}. 도구마다 응답을 측정하는 방식이 달라 합산한 스트림당 속도는 없습니다. 도구별 값은 스트림당으로 전환해 확인하세요.',
+        usageReportSpeedParTitle: '평균 {par}개의 응답이 동시에 생성되었습니다. 최대 {peak}개.',
+        usageReportSpeedMethodBuckets: '각 응답은 사용량 기록의 타임스탬프가 속한 시간, 일 또는 주에 들어갑니다. 통합은 같은 모델을 여러 도구에 걸쳐 합칩니다. 백엔드 하나가 여러 도구를 동시에 처리할 수 있기 때문입니다. 도구마다 측정 방식이 달라 통합 행에는 스트림당 속도가 없습니다.',
+        speedKindShortServerDecode: '디코드 구간',
+        speedKindShortPostFirstToken: '첫 토큰 이후',
+        speedKindShortRequestWindow: '요청 전체',
+        speedKindShortResponseWindow: '응답 구간',
         usageReportSpeedHowCalculated: '계산 방법',
-        usageReportSpeedMethodSummary: '일치하는 출력 토큰의 합계를 응답 시간의 합계로 나눕니다. 세션이 겹쳐도 각 응답의 시간을 합산합니다.',
-        usageReportSpeedAcrossSessions: '세션 전체 집계',
+        usageReportSpeedMethodSummary: '스트림당은 일치한 출력 토큰 수를 각 응답 자체 소요 시간의 합으로 나눈 값이므로 동시에 실행된 응답이 합산되지 않습니다. 통합은 같은 토큰 수를 응답이 하나 이상 생성되던 실제 시간으로 나누므로 합산됩니다. 통합 속도 옆의 ×N은 둘의 비율로, 평균적으로 몇 개의 응답이 동시에 생성되었는지를 나타냅니다.',
         usageReportSpeedCompleteness: '측정된 날짜는 로그가 완전하다는 증거가 아닙니다. 조용한 날과 없는 로그는 여기서 똑같이 보입니다.',
         usageReportSpeedColModel: '모델',
-        usageReportSpeedColTool: '도구',
         usageReportSpeedColRate: '출력 tok/s',
         usageReportSpeedColCalls: '측정된 호출',
         usageReportSpeedColCoverage: '호출 커버리지',
-        usageReportSpeedColBin: '구간',
-        usageReportSpeedColDays: '일수',
-        usageReportSpeedPickModel: '모델',
-        usageReportSpeedHourly: '시간별',
-        usageReportSpeedBins: '6시간 구간',
         usageReportSpeedError: '출력 속도를 불러올 수 없습니다.',
         usageReportSpeedEmpty: '이 기간에 측정된 출력 속도가 없습니다.',
         usageReportSpeedEmptyKnown: '이 도구에는 사용 기록이 있지만 출력 속도 측정은 없습니다. 아래 설명을 확인하세요.',
-        usageReportSpeedAvailability: '이 범위에서 {total}개 도구 중 {measured}개에 속도 측정이 있습니다.',
         usageReportSpeedRecordedDates: '기록된 측정: {from} – {to}. 이 기간 안에 누락된 날짜가 있을 수 있습니다.',
         usageReportSpeedViewDates: '측정된 날짜 보기',
         usageReportSpeedShowTools: '측정된 모든 도구 보기',
@@ -10430,28 +10696,74 @@
         usageReportSubSummary: 'Resumen',
         usageReportSubSpeed: 'Velocidad de salida del modelo',
         usageReportSpeedTitle: 'Velocidad de salida del modelo',
-        usageReportSpeedModeAria: 'Vista de velocidad de salida',
-        usageReportSpeedModeAcross: 'Por modelos',
-        usageReportSpeedModeTemporal: 'Por hora del día',
-        usageReportSpeedIntro: 'Agregado entre sesiones, usando solo respuestas medidas.',
+        usageReportSpeedLensAria: 'Medida de velocidad',
+        usageReportSpeedLensCombined: 'Combinado',
+        usageReportSpeedLensStream: 'Por flujo',
+        usageReportSpeedLensCombinedNote: 'Combinado: tokens de salida por segundo de reloj mientras el modelo generaba algo, sumando todas las herramientas que lo usaron. Las respuestas simultáneas se suman, así que equivale a la velocidad por flujo × cuántas corrían a la vez (la cifra ×).',
+        usageReportSpeedLensCombinedToolNote: 'Combinado: tokens de salida por segundo de reloj mientras el modelo generaba algo en {tool}. Las respuestas simultáneas se suman, así que equivale a la velocidad por flujo × cuántas corrían a la vez (la cifra ×).',
+        usageReportSpeedLensStreamNote: 'Por flujo: la velocidad con que genera una sola respuesta, sus tokens de salida entre su propia duración. Las respuestas simultáneas no se suman.',
+        usageReportSpeedLensUnavailable: 'Este servidor solo informa la velocidad por flujo. Actualízalo para ver el rendimiento combinado.',
+        usageReportSpeedPeriodAria: 'Periodo',
+        usageReportSpeedPeriodQuarter: 'Trimestre',
+        usageReportSpeedPeriodCustom: 'Personalizado',
+        usageReportSpeedPrev: 'Periodo anterior',
+        usageReportSpeedNext: 'Periodo siguiente',
+        usageReportSpeedQuarter: 'T{q} {year}',
+        usageReportSpeedGroupBy: 'Agrupar por',
+        usageReportSpeedAuto: 'Auto ({size})',
+        usageReportSpeedAutoBare: 'Auto',
+        usageReportSpeedAutoHint: 'Auto usa la agrupación más fina que mantiene el gráfico legible: como máximo 36 horas, 45 días, 40 semanas, 36 meses o 24 trimestres.',
+        usageReportSpeedBucketHour: 'Por hora',
+        usageReportSpeedBucketDay: 'Por día',
+        usageReportSpeedBucketWeek: 'Por semana',
+        usageReportSpeedBucketMonth: 'Por mes',
+        usageReportSpeedBucketQuarter: 'Por trimestre',
+        usageReportSpeedViewAria: 'Vista del gráfico',
+        usageReportSpeedViewTime: 'En el tiempo',
+        usageReportSpeedViewHour: 'Por hora del día',
+        usageReportSpeedHourOfDay: 'por hora del día, todo el rango junto',
+        usageReportSpeedChartAria: 'Tokens de salida por segundo, {lens}, {n} series. Las flechas recorren los puntos.',
+        usageReportSpeedChartEmpty: 'Marca un modelo en la tabla de abajo para graficarlo.',
+        usageReportSpeedGapNote: 'Un hueco en una línea significa que ahí no se midió nada, no una velocidad de cero.',
+        usageReportSpeedChartData: 'Datos del gráfico como tabla',
+        usageReportSpeedNothingCharted: 'No hay nada graficado.',
+        usageReportSpeedColPeriod: 'Periodo',
+        usageReportSpeedColHour: 'Hora',
+        usageReportSpeedColChart: 'Gráfico',
+        usageReportSpeedTipCalls: '{n} llamadas',
+        usageReportSpeedTipParallel: '×{par} en paralelo',
+        usageReportSpeedNotHere: 'sin mediciones aquí',
+        usageReportSpeedRemove: 'Quitar {model}',
+        usageReportSpeedClear: 'Limpiar',
+        usageReportSpeedMixedLead: 'Medidos de distinta forma:',
+        usageReportSpeedMixedTail: 'Parte de la diferencia entre ellos puede deberse a la medición y no al modelo.',
+        usageReportSpeedModelsAria: 'Modelos',
+        usageReportSpeedSearch: 'Buscar un modelo',
+        usageReportSpeedToolsAria: 'Herramienta',
+        usageReportSpeedAll: 'Todas',
+        usageReportSpeedTickHint: 'Marca hasta seis filas para graficarlas',
+        usageReportSpeedTick: 'Graficar {model} en {tool}',
+        usageReportSpeedFull: 'Seis filas como máximo. Desmarca una primero.',
+        usageReportSpeedMethods: '{n} métodos de medición',
+        usageReportSpeedNoMatch: 'Ningún modelo medido coincide.',
+        usageReportSpeedRateTitle: 'Por flujo {stream} · combinado {combined} · ×{par} en paralelo de media, pico {peak}',
+        usageReportSpeedRateTitleMerged: 'Combinado {combined} · ×{par} en paralelo de media, pico {peak}. Sus herramientas miden las respuestas de forma distinta, así que no hay una velocidad por flujo conjunta: cambia a Por flujo para ver cada una.',
+        usageReportSpeedParTitle: 'De media había {par} respuestas generándose a la vez; pico {peak}.',
+        usageReportSpeedMethodBuckets: 'Cada respuesta pertenece a la hora, el día o la semana de la marca de tiempo de su registro de uso. Combinado une el mismo modelo entre herramientas, porque un mismo backend puede atender a varias a la vez; las herramientas miden las respuestas de forma distinta, así que una fila combinada no tiene velocidad por flujo.',
+        speedKindShortServerDecode: 'ventana de decodificación',
+        speedKindShortPostFirstToken: 'tras el primer token',
+        speedKindShortRequestWindow: 'petición completa',
+        speedKindShortResponseWindow: 'ventana de respuesta',
         usageReportSpeedHowCalculated: 'Cómo se calcula',
-        usageReportSpeedMethodSummary: 'Tokens de salida coincidentes divididos entre el tiempo total de respuesta. Cada respuesta aporta su duración, incluso cuando las sesiones se superponen.',
-        usageReportSpeedAcrossSessions: 'entre sesiones',
+        usageReportSpeedMethodSummary: 'Por flujo divide los tokens de salida emparejados entre la suma de la duración de cada respuesta, así que las respuestas simultáneas nunca se suman. Combinado divide los mismos tokens entre el tiempo de reloj en que al menos una respuesta generaba, así que sí se suman. El ×N junto a una velocidad combinada es la proporción entre ambas: cuántas respuestas generaban a la vez, de media.',
         usageReportSpeedCompleteness: 'Los días medidos no prueban registros completos: un día en calma y un registro perdido se ven igual desde aquí.',
         usageReportSpeedColModel: 'Modelo',
-        usageReportSpeedColTool: 'Herramienta',
         usageReportSpeedColRate: 'Salida tok/s',
         usageReportSpeedColCalls: 'Llamadas medidas',
         usageReportSpeedColCoverage: 'Cobertura de llamadas',
-        usageReportSpeedColBin: 'Ventana',
-        usageReportSpeedColDays: 'Días',
-        usageReportSpeedPickModel: 'Modelo',
-        usageReportSpeedHourly: 'Por hora del día',
-        usageReportSpeedBins: 'Por tramos de seis horas',
         usageReportSpeedError: 'No se pudo cargar la velocidad de salida.',
         usageReportSpeedEmpty: 'Sin velocidad de salida medida en este rango.',
         usageReportSpeedEmptyKnown: 'Esta herramienta tiene uso en este intervalo, pero no velocidad de salida medida. Vea la disponibilidad abajo.',
-        usageReportSpeedAvailability: '{measured} de {total} herramientas tienen mediciones de velocidad en este intervalo.',
         usageReportSpeedRecordedDates: 'Mediciones registradas: {from} – {to}. Puede haber huecos entre estas fechas.',
         usageReportSpeedViewDates: 'Ver fechas con mediciones',
         usageReportSpeedShowTools: 'Mostrar todas las herramientas medidas',
@@ -11157,28 +11469,74 @@
         usageReportSubSummary: 'Resumo',
         usageReportSubSpeed: 'Velocidade de saída do modelo',
         usageReportSpeedTitle: 'Velocidade de saída do modelo',
-        usageReportSpeedModeAria: 'Visão de velocidade de saída',
-        usageReportSpeedModeAcross: 'Por modelo',
-        usageReportSpeedModeTemporal: 'Por hora do dia',
-        usageReportSpeedIntro: 'Agregado entre sessões, usando apenas respostas medidas.',
+        usageReportSpeedLensAria: 'Medida de velocidade',
+        usageReportSpeedLensCombined: 'Combinado',
+        usageReportSpeedLensStream: 'Por fluxo',
+        usageReportSpeedLensCombinedNote: 'Combinado: tokens de saída por segundo de relógio enquanto o modelo gerava algo, somando todas as ferramentas que o usaram. Respostas simultâneas se somam, então equivale à velocidade por fluxo × quantas rodavam ao mesmo tempo (o número ×).',
+        usageReportSpeedLensCombinedToolNote: 'Combinado: tokens de saída por segundo de relógio enquanto o modelo gerava algo em {tool}. Respostas simultâneas se somam, então equivale à velocidade por fluxo × quantas rodavam ao mesmo tempo (o número ×).',
+        usageReportSpeedLensStreamNote: 'Por fluxo: a velocidade com que uma única resposta é gerada, seus tokens de saída divididos pela própria duração. Respostas simultâneas não se somam.',
+        usageReportSpeedLensUnavailable: 'Este servidor informa apenas a velocidade por fluxo. Atualize-o para ver o throughput combinado.',
+        usageReportSpeedPeriodAria: 'Período',
+        usageReportSpeedPeriodQuarter: 'Trimestre',
+        usageReportSpeedPeriodCustom: 'Personalizado',
+        usageReportSpeedPrev: 'Período anterior',
+        usageReportSpeedNext: 'Próximo período',
+        usageReportSpeedQuarter: 'T{q} {year}',
+        usageReportSpeedGroupBy: 'Agrupar por',
+        usageReportSpeedAuto: 'Auto ({size})',
+        usageReportSpeedAutoBare: 'Auto',
+        usageReportSpeedAutoHint: 'Auto usa o agrupamento mais fino que mantém o gráfico legível: no máximo 36 horas, 45 dias, 40 semanas, 36 meses ou 24 trimestres.',
+        usageReportSpeedBucketHour: 'Por hora',
+        usageReportSpeedBucketDay: 'Por dia',
+        usageReportSpeedBucketWeek: 'Por semana',
+        usageReportSpeedBucketMonth: 'Por mês',
+        usageReportSpeedBucketQuarter: 'Por trimestre',
+        usageReportSpeedViewAria: 'Visualização do gráfico',
+        usageReportSpeedViewTime: 'Ao longo do tempo',
+        usageReportSpeedViewHour: 'Por hora do dia',
+        usageReportSpeedHourOfDay: 'por hora do dia, todo o intervalo junto',
+        usageReportSpeedChartAria: 'Tokens de saída por segundo, {lens}, {n} séries. As setas percorrem os pontos.',
+        usageReportSpeedChartEmpty: 'Marque um modelo na tabela abaixo para exibi-lo no gráfico.',
+        usageReportSpeedGapNote: 'Uma lacuna na linha significa que nada foi medido ali, não uma velocidade zero.',
+        usageReportSpeedChartData: 'Dados do gráfico em tabela',
+        usageReportSpeedNothingCharted: 'Nada no gráfico.',
+        usageReportSpeedColPeriod: 'Período',
+        usageReportSpeedColHour: 'Hora',
+        usageReportSpeedColChart: 'Gráfico',
+        usageReportSpeedTipCalls: '{n} chamadas',
+        usageReportSpeedTipParallel: '×{par} em paralelo',
+        usageReportSpeedNotHere: 'sem medições aqui',
+        usageReportSpeedRemove: 'Remover {model}',
+        usageReportSpeedClear: 'Limpar',
+        usageReportSpeedMixedLead: 'Medidos de formas diferentes:',
+        usageReportSpeedMixedTail: 'Parte da diferença entre eles pode vir da medição, não do modelo.',
+        usageReportSpeedModelsAria: 'Modelos',
+        usageReportSpeedSearch: 'Buscar um modelo',
+        usageReportSpeedToolsAria: 'Ferramenta',
+        usageReportSpeedAll: 'Todas',
+        usageReportSpeedTickHint: 'Marque até seis linhas para exibi-las no gráfico',
+        usageReportSpeedTick: 'Exibir {model} em {tool} no gráfico',
+        usageReportSpeedFull: 'No máximo seis linhas. Desmarque uma primeiro.',
+        usageReportSpeedMethods: '{n} métodos de medição',
+        usageReportSpeedNoMatch: 'Nenhum modelo medido corresponde.',
+        usageReportSpeedRateTitle: 'Por fluxo {stream} · combinado {combined} · ×{par} em paralelo em média, pico {peak}',
+        usageReportSpeedRateTitleMerged: 'Combinado {combined} · ×{par} em paralelo em média, pico {peak}. Suas ferramentas medem as respostas de formas diferentes, então não há velocidade por fluxo conjunta: mude para Por fluxo para ver cada uma.',
+        usageReportSpeedParTitle: 'Em média, {par} respostas estavam sendo geradas ao mesmo tempo; pico {peak}.',
+        usageReportSpeedMethodBuckets: 'Cada resposta pertence à hora, ao dia ou à semana do carimbo de data do seu registro de uso. Combinado une o mesmo modelo entre ferramentas, porque um mesmo backend pode atender várias ao mesmo tempo; as ferramentas medem as respostas de formas diferentes, então uma linha combinada não tem velocidade por fluxo.',
+        speedKindShortServerDecode: 'janela de decodificação',
+        speedKindShortPostFirstToken: 'após o primeiro token',
+        speedKindShortRequestWindow: 'requisição inteira',
+        speedKindShortResponseWindow: 'janela de resposta',
         usageReportSpeedHowCalculated: 'Como é calculado',
-        usageReportSpeedMethodSummary: 'Tokens de saída correspondentes divididos pelo tempo total de resposta. Cada resposta contribui com sua duração, mesmo quando as sessões se sobrepõem.',
-        usageReportSpeedAcrossSessions: 'entre sessões',
+        usageReportSpeedMethodSummary: 'Por fluxo divide os tokens de saída pareados pela soma da duração de cada resposta, então respostas simultâneas nunca se somam. Combinado divide os mesmos tokens pelo tempo de relógio em que pelo menos uma resposta estava sendo gerada, então elas se somam. O ×N ao lado de uma velocidade combinada é a razão entre as duas: quantas respostas eram geradas ao mesmo tempo, em média.',
         usageReportSpeedCompleteness: 'Dias medidos não provam registros completos: um dia parado e um registro perdido parecem iguais daqui.',
         usageReportSpeedColModel: 'Modelo',
-        usageReportSpeedColTool: 'Ferramenta',
         usageReportSpeedColRate: 'Saída tok/s',
         usageReportSpeedColCalls: 'Chamadas medidas',
         usageReportSpeedColCoverage: 'Cobertura de chamadas',
-        usageReportSpeedColBin: 'Janela',
-        usageReportSpeedColDays: 'Dias',
-        usageReportSpeedPickModel: 'Modelo',
-        usageReportSpeedHourly: 'Por hora do dia',
-        usageReportSpeedBins: 'Por faixas de seis horas',
         usageReportSpeedError: 'Não foi possível carregar a velocidade de saída.',
         usageReportSpeedEmpty: 'Sem velocidade de saída medida neste intervalo.',
         usageReportSpeedEmptyKnown: 'Esta ferramenta tem uso neste intervalo, mas não velocidade de saída medida. Veja a disponibilidade abaixo.',
-        usageReportSpeedAvailability: '{measured} de {total} ferramentas têm medições de velocidade neste intervalo.',
         usageReportSpeedRecordedDates: 'Medições registradas: {from} – {to}. Pode haver lacunas entre essas datas.',
         usageReportSpeedViewDates: 'Ver datas com medições',
         usageReportSpeedShowTools: 'Mostrar todas as ferramentas medidas',
@@ -13542,8 +13900,8 @@
         usageReportRender();
       }
       if (typeof usageReportSpeedState !== 'undefined' && usageReportSpeedState.loadedKey) {
+        outputSpeedRenderControls();
         usageReportRenderSpeed();
-        if (usageReportSpeedState.mode === 'temporal') usageReportRenderSpeedTemporal();
       }
       // Which quota layout is on screen follows the last render (a null owner means the
       // per-host blocks), not the current selection: a partial or failed load can leave the
@@ -20756,24 +21114,52 @@
 
     /* ---- Model output speed (standalone page) ----------------------------
        Lazy by construction: nothing here runs until the page is opened, the
-       report's own load never asks for speed data, and each mode fetches only
-       its own view. A rate is always matched tokens over matched milliseconds,
-       summed before the division, so it is a throughput rather than a mean of
-       per-call rates. Absence stays absent: an unmeasured model or an empty
-       hour has no rate, and is drawn with no bar and an em dash. */
+       report's own load never asks for speed data, and the page reads two views
+       of one window: the comparison rows, then the trend its chart draws.
+
+       Two rates describe the same measured responses. Per stream is matched
+       tokens over each response's own duration, so responses running at once
+       never add up. Combined is the same tokens over the wall-clock time at least
+       one of them was generating, so they do, and the ratio of the two is the
+       "×N" printed beside it. Both are sums before the division, never a mean of
+       per-call rates. Absence stays absent: an unmeasured model or bucket has no
+       rate, and is drawn as a gap in its line and printed as an em dash. */
 
     const USAGE_REPORT_SPEED_PREFS_KEY = 'tokdash-usage-report-speed';
+    const USAGE_REPORT_SPEED_PERIODS = ['day', 'week', 'month', 'quarter', 'year'];
+    // Six lines is where a chart stops being readable, and the palette's length.
+    const USAGE_REPORT_SPEED_MAX_SERIES = 6;
+    // Below this a "×1.0" on every row is noise; the exact figure stays in the tooltip.
+    const USAGE_REPORT_SPEED_PAR_SHOWN = 1.15;
+    const USAGE_REPORT_SPEED_BUCKET_KEYS = {
+      hour: 'usageReportSpeedBucketHour',
+      day: 'usageReportSpeedBucketDay',
+      week: 'usageReportSpeedBucketWeek',
+      month: 'usageReportSpeedBucketMonth',
+      quarter: 'usageReportSpeedBucketQuarter',
+    };
+    // A period whose window is also one of the top bar's quick ranges commits
+    // under that range's key: the picker then names it, and it keeps following
+    // today the way the quick range does.
+    const USAGE_REPORT_SPEED_QUICK_KEYS = {
+      'day|0': 'today', 'day|1': 'yesterday', 'week|1': 'lastWeek',
+      'month|0': 'thisMonth', 'month|1': 'lastMonth', 'year|0': 'thisYear', 'year|1': 'lastYear',
+    };
     const usageReportSpeedState = {
       active: false,
       wired: false,
       jobEvents: null,
       serverId: 'local',
-      mode: 'across',
+      // 'combined' or 'stream'. Combined is the default: it is what a workload got.
+      lens: 'combined',
+      // The period the stepper walks when the range is one; the range itself is
+      // always the shared one.
+      period: 'month',
       // Key of the window the loaded rows belong to: server + effective range.
       loadedKey: '',
       loading: false,
       // Bumped by every request; a landing response whose token is no longer
-      // current belongs to a window, server or mode the reader has left.
+      // current belongs to a window, server or chart the reader has left.
       token: 0,
       // The token that currently owns the in-flight guard below. A discarded
       // answer releases that guard only while it still holds it: releasing the
@@ -20781,36 +21167,103 @@
       // releasing its own would leave the panel waiting on a load that already
       // finished and never comes again.
       pendingToken: 0,
-      temporalToken: 0,
       payload: null,
       rows: [],
+      // The harness pill ('' is every harness) and the search box. Both filter
+      // the rows already loaded; neither asks the server for anything.
       tool: '',
+      query: '',
       error: null,
       sort: { field: 'speed_calls', direction: 'desc' },
-      expanded: '',
-      // Time of day: one selection, and its own request per selection.
-      temporalKey: '',
-      temporal: null,
-      temporalLoading: false,
-      pick: null,
+      // The charted rows, in the order they were ticked, and the colour slot each
+      // one holds. A slot belongs to its row: removing one never repaints the rest.
+      selected: [],
+      slots: {},
+      seededKey: '',
+      // The chart: over time or by hour of day, a grouping ('' is Auto), and its
+      // own request per window and grouping.
+      view: 'time',
+      bucket: '',
+      trendToken: 0,
+      trendKey: '',
+      trend: null,
+      trendLoading: false,
+      chart: null,
+      chartGeom: null,
     };
 
     function usageReportSpeedReadPrefs() {
       try {
         const raw = JSON.parse(localStorage.getItem(USAGE_REPORT_SPEED_PREFS_KEY) || '{}');
         if (!raw || typeof raw !== 'object') return;
-        if (raw.tool) usageReportSpeedState.tool = String(raw.tool);
-        if (raw.mode === 'across' || raw.mode === 'temporal') usageReportSpeedState.mode = raw.mode;
+        const state = usageReportSpeedState;
+        if (raw.tool) state.tool = String(raw.tool);
+        if (raw.lens === 'combined' || raw.lens === 'stream') state.lens = raw.lens;
+        if (raw.view === 'time' || raw.view === 'hour') state.view = raw.view;
+        if (USAGE_REPORT_SPEED_PERIODS.includes(raw.period)) state.period = raw.period;
+        if (Array.isArray(raw.selected)) {
+          usageReportSpeedSetSelection(raw.selected.filter((id) => typeof id === 'string' && id),
+            raw.slots && typeof raw.slots === 'object' ? raw.slots : {});
+        }
       } catch (_error) { /* a bad blob is no prefs */ }
     }
 
     function usageReportSpeedWritePrefs() {
       try {
+        const state = usageReportSpeedState;
         localStorage.setItem(USAGE_REPORT_SPEED_PREFS_KEY, JSON.stringify({
-          tool: usageReportSpeedState.tool || '',
-          mode: usageReportSpeedState.mode,
+          tool: state.tool || '',
+          lens: state.lens,
+          view: state.view,
+          period: state.period,
+          selected: state.selected,
+          slots: state.slots,
         }));
       } catch (_error) { /* private mode or quota */ }
+    }
+
+    // The one way the selection changes: at most six rows, none twice, and each
+    // holding its own colour slot. A slot claimed twice, or not at all, goes to
+    // the lowest one still free, so a kept row never changes colour.
+    function usageReportSpeedSetSelection(ids, slots) {
+      const selected = [];
+      const kept = {};
+      const used = new Set();
+      ids.forEach((id) => {
+        if (selected.includes(id) || selected.length >= USAGE_REPORT_SPEED_MAX_SERIES) return;
+        selected.push(id);
+        const slot = slots ? slots[id] : undefined;
+        if (Number.isInteger(slot) && slot >= 0 && slot < USAGE_REPORT_SPEED_MAX_SERIES && !used.has(slot)) {
+          kept[id] = slot;
+          used.add(slot);
+        }
+      });
+      selected.forEach((id) => {
+        if (kept[id] !== undefined) return;
+        let slot = 0;
+        while (used.has(slot)) slot += 1;
+        kept[id] = slot;
+        used.add(slot);
+      });
+      usageReportSpeedState.selected = selected;
+      usageReportSpeedState.slots = kept;
+    }
+
+    function usageReportSpeedToggle(id) {
+      const state = usageReportSpeedState;
+      if (state.selected.includes(id)) {
+        usageReportSpeedSetSelection(state.selected.filter((other) => other !== id), state.slots);
+      } else {
+        if (state.selected.length >= USAGE_REPORT_SPEED_MAX_SERIES) return;
+        usageReportSpeedSetSelection([...state.selected, id], state.slots);
+      }
+      usageReportSpeedWritePrefs();
+      usageReportRenderSpeed();
+    }
+
+    function usageReportSpeedColor(id) {
+      const slot = usageReportSpeedState.slots[id];
+      return Number.isInteger(slot) ? `var(--speed-s${slot + 1})` : 'var(--color-muted)';
     }
 
     // The shared top range is the only date selection this page owns.
@@ -20849,11 +21302,10 @@
       outputSpeedRetirePending();
       usageReportSpeedState.error = null;
       usageReportSpeedState.loadedKey = '';
-      usageReportSpeedState.temporalKey = '';
-      usageReportSpeedState.temporal = null;
+      usageReportSpeedState.trendKey = '';
+      usageReportSpeedState.trend = null;
       usageReportSpeedState.rows = [];
       usageReportSpeedState.payload = null;
-      usageReportSpeedState.pick = null;
     }
 
     // The one gate a speed request goes through. Both entry points that can queue
@@ -20885,7 +21337,7 @@
 
     // The reader left the Report page. Anything in flight describes a view they are
     // no longer on, and its callback is not inert: a landing speed answer renders,
-    // a rendered speed answer can ask for its time-of-day follow-up, and a landing
+    // a rendered speed answer can ask for its chart follow-up, and a landing
     // summary answer schedules the silent re-read that fires three requests twelve
     // seconds later. The tokens are what every one of those callbacks checks, so
     // bumping them and clearing the timer retires the whole chain rather than the
@@ -20907,11 +21359,11 @@
         usageReportSpeedState.jobEvents = null;
       }
       usageReportSpeedState.token += 1;
-      usageReportSpeedState.temporalToken = 0;
-      usageReportSpeedState.temporalLoading = false;
+      usageReportSpeedState.trendToken = 0;
+      usageReportSpeedState.trendLoading = false;
       // An interrupted chart is still owed when the page returns.
-      if (!usageReportSpeedState.temporal || usageReportSpeedState.temporal.__error) {
-        usageReportSpeedState.temporalKey = '';
+      if (!usageReportSpeedState.trend || usageReportSpeedState.trend.__error) {
+        usageReportSpeedState.trendKey = '';
       }
       usageReportSpeedRelease(usageReportSpeedState.pendingToken);
     }
@@ -20926,23 +21378,23 @@
     }
 
     function usageReportSpeedFormatRate(rate) {
-      if (rate === null || rate === undefined || !Number.isFinite(Number(rate))) return '\u2014';
+      if (rate === null || rate === undefined || !Number.isFinite(Number(rate))) return '—';
       return Number(rate).toLocaleString(langLocale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 });
     }
 
     // Number(null) is 0, so a null rate must be caught before coercion. Without
-    // this guard an hour with no measurement renders as "0.0 tok/s", which is a
+    // this guard a bucket with no measurement is drawn at "0.0 tok/s", which is a
     // claim about throughput that was never measured.
-    function usageReportSpeedHourRate(raw) {
+    function usageReportSpeedRateValue(raw) {
       if (raw === null || raw === undefined || raw === '') return null;
       const value = Number(raw);
       return Number.isFinite(value) ? value : null;
     }
 
     function usageReportSpeedFormatStamp(ms) {
-      if (!ms) return '\u2014';
+      if (!ms) return '—';
       const dt = new Date(Number(ms));
-      if (Number.isNaN(dt.getTime())) return '\u2014';
+      if (Number.isNaN(dt.getTime())) return '—';
       return dt.toLocaleString(langLocale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
     }
 
@@ -20953,7 +21405,18 @@
         request_window: 'speedKindRequestWindow',
         response_window: 'speedKindResponseWindow',
       };
-      return keys[kind] ? t(keys[kind]) : (kind || '\u2014');
+      return keys[kind] ? t(keys[kind]) : (kind || '—');
+    }
+
+    // The few words a row has room for; the full definition is its tooltip.
+    function usageReportSpeedKindShort(kind) {
+      const keys = {
+        server_decode: 'speedKindShortServerDecode',
+        post_first_token: 'speedKindShortPostFirstToken',
+        request_window: 'speedKindShortRequestWindow',
+        response_window: 'speedKindShortResponseWindow',
+      };
+      return keys[kind] ? t(keys[kind]) : (kind || '—');
     }
 
     function usageReportSpeedBasisLabel(basis) {
@@ -20962,7 +21425,110 @@
         output_excluding_reasoning: 'speedBasisExcluding',
         output_reasoning_unspecified: 'speedBasisUnspecified',
       };
-      return keys[basis] ? t(keys[basis]) : (basis || '\u2014');
+      return keys[basis] ? t(keys[basis]) : (basis || '—');
+    }
+
+    // Which period the shared range is, if it is one. The period the reader last
+    // walked is tried first, so a Monday's one-day week still reads as a week
+    // rather than as a day; a range no period describes is Custom.
+    function usageReportSpeedPeriodOf(window) {
+      const today = usageReportToday();
+      const from = parseDateKey(window.date_from);
+      if (Number.isNaN(from.getTime())) return null;
+      const day = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const preferred = usageReportSpeedState.period;
+      const order = [preferred, ...USAGE_REPORT_SPEED_PERIODS.filter((period) => period !== preferred)];
+      for (const period of order) {
+        let back;
+        if (period === 'day') back = Math.round((day - from) / 86400000);
+        else if (period === 'week') back = Math.round((startOfWeekMonday(day) - startOfWeekMonday(from)) / (7 * 86400000));
+        else if (period === 'month') back = (day.getFullYear() - from.getFullYear()) * 12 + day.getMonth() - from.getMonth();
+        else if (period === 'quarter') {
+          back = (day.getFullYear() - from.getFullYear()) * 4
+            + Math.floor(day.getMonth() / 3) - Math.floor(from.getMonth() / 3);
+        } else back = day.getFullYear() - from.getFullYear();
+        if (!(back >= 0)) continue;
+        const candidate = usageReportWindows(period, back);
+        if (candidate.date_from === window.date_from && candidate.date_to === window.date_to) return { period, back };
+      }
+      return null;
+    }
+
+    // The stepper writes the shared range through the same router as the top
+    // picker, so the Overview and this page are always on one window.
+    function usageReportSpeedCommitPeriod(period, back) {
+      const steps = Math.max(0, back);
+      const window = usageReportWindows(period, steps);
+      usageReportSpeedState.period = period;
+      usageReportSpeedWritePrefs();
+      commitDateSelection(parseDateKey(window.date_from), parseDateKey(window.date_to),
+        { rangeKey: USAGE_REPORT_SPEED_QUICK_KEYS[`${period}|${steps}`] || null });
+    }
+
+    function usageReportSpeedStep(delta) {
+      const match = usageReportSpeedPeriodOf(usageReportSpeedWindow());
+      if (!match || match.back + delta < 0) return;
+      usageReportSpeedCommitPeriod(match.period, match.back + delta);
+    }
+
+    function usageReportSpeedQuarterLabel(date) {
+      return t('usageReportSpeedQuarter', { q: Math.floor(date.getMonth() / 3) + 1, year: date.getFullYear() });
+    }
+
+    function usageReportSpeedPeriodLabel(period, window) {
+      const locale = langLocale();
+      const from = parseDateKey(window.date_from);
+      const dayMonth = (date) => date.toLocaleDateString(locale, { day: 'numeric', month: 'short' });
+      if (period === 'day') return from.toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+      if (period === 'week') {
+        return `${dayMonth(from)} – ${dayMonth(new Date(from.getFullYear(), from.getMonth(), from.getDate() + 6))}`;
+      }
+      if (period === 'month') return from.toLocaleDateString(locale, { month: 'long', year: 'numeric' });
+      if (period === 'quarter') return usageReportSpeedQuarterLabel(from);
+      return String(from.getFullYear());
+    }
+
+    function usageReportRenderSpeedPeriod(window = usageReportSpeedWindow()) {
+      const match = usageReportSpeedPeriodOf(window);
+      document.querySelectorAll('#usageReportSpeedPeriod button').forEach((button) => {
+        const period = button.dataset.speedPeriod;
+        button.setAttribute('aria-pressed', String(match ? period === match.period : period === 'custom'));
+      });
+      const stepper = document.getElementById('usageReportSpeedStepper');
+      if (stepper) stepper.hidden = !match;
+      if (!match) return;
+      const label = document.getElementById('usageReportSpeedPeriodLabel');
+      if (label) label.textContent = usageReportSpeedPeriodLabel(match.period, window);
+      const next = document.getElementById('usageReportSpeedNext');
+      if (next) next.disabled = match.back === 0;
+    }
+
+    // A server from before combined throughput sends rows without it. Its page
+    // reads per stream rather than an empty Combined table.
+    function usageReportSpeedHasCombined() {
+      const payload = usageReportSpeedState.payload;
+      return !payload || Array.isArray(payload.models);
+    }
+
+    function usageReportSpeedLens() {
+      return usageReportSpeedState.lens === 'combined' && usageReportSpeedHasCombined() ? 'combined' : 'stream';
+    }
+
+    function usageReportRenderSpeedLens() {
+      const lens = usageReportSpeedLens();
+      document.querySelectorAll('#usageReportSpeedLens button').forEach((button) => {
+        button.setAttribute('aria-pressed', String(button.dataset.speedLens === lens));
+        if (button.dataset.speedLens === 'combined') {
+          button.disabled = !usageReportSpeedHasCombined();
+          button.title = button.disabled ? t('usageReportSpeedLensUnavailable') : '';
+        }
+      });
+      const note = document.getElementById('usageReportSpeedIntro');
+      if (!note) return;
+      const tool = usageReportSpeedState.tool;
+      note.textContent = lens === 'stream' ? t('usageReportSpeedLensStreamNote')
+        : tool ? t('usageReportSpeedLensCombinedToolNote', { tool: formatToolName(tool) })
+        : t('usageReportSpeedLensCombinedNote');
     }
 
     function outputSpeedRenderControls() {
@@ -20976,16 +21542,19 @@
       const server = outputSpeedServer();
       if (select) select.replaceChildren(...servers.map((item) => usageReportSpeedOption(
         item.id, item.name || item.id, !!server && item.id === server.id)));
+      usageReportRenderSpeedPeriod(window);
+      usageReportRenderSpeedLens();
     }
 
     function usageReportWireSpeed() {
       if (usageReportSpeedState.wired) return;
       usageReportSpeedState.wired = true;
       usageReportSpeedReadPrefs();
+      const state = usageReportSpeedState;
       // The page came back to the foreground. Everything the hidden stretch put off
-      // -- the comparison rows, the time-of-day view, the summary pair, a silent
-      // re-read whose timer went off with the tab in the background -- is asked for
-      // now, or dropped if the window it described has moved on.
+      // -- the comparison rows, the chart, the summary pair, a silent re-read whose
+      // timer went off with the tab in the background -- is asked for now, or
+      // dropped if the window it described has moved on.
       document.addEventListener('visibilitychange', () => {
         if (typeof document !== 'undefined' && document.hidden) {
           outputSpeedRetirePending();
@@ -20994,42 +21563,124 @@
         usageReportSpeedResume();
       });
       document.getElementById('outputSpeedServer')?.addEventListener('change', (event) => {
-        usageReportSpeedState.serverId = event.target.value;
+        state.serverId = event.target.value;
         usageReportLoadSpeed();
       });
-      document.querySelectorAll('#usageReportSpeedMode button').forEach((button) => {
+      // The lens, the harness pills, the search box, the view and the ticks all
+      // re-read what is loaded. Only the period and the grouping ask the server.
+      document.querySelectorAll('#usageReportSpeedLens button').forEach((button) => {
         button.addEventListener('click', () => {
-          usageReportSpeedState.mode = button.dataset.speedMode === 'temporal' ? 'temporal' : 'across';
+          const lens = button.dataset.speedLens === 'stream' ? 'stream' : 'combined';
+          if (lens === state.lens) return;
+          state.lens = lens;
+          usageReportSpeedRemapSelection();
           usageReportSpeedWritePrefs();
-          usageReportRenderSpeedMode();
-          if (usageReportSpeedState.mode === 'temporal') usageReportEnsureTemporal();
+          usageReportRenderSpeed();
         });
+      });
+      document.querySelectorAll('#usageReportSpeedPeriod button').forEach((button) => {
+        button.addEventListener('click', () => {
+          const period = button.dataset.speedPeriod;
+          // Custom is the top bar's own picker: one place picks arbitrary dates.
+          if (period === 'custom') { document.getElementById('dateRangeTrigger')?.click(); return; }
+          usageReportSpeedCommitPeriod(period, 0);
+        });
+      });
+      document.getElementById('usageReportSpeedPrev')?.addEventListener('click', () => usageReportSpeedStep(1));
+      document.getElementById('usageReportSpeedNext')?.addEventListener('click', () => usageReportSpeedStep(-1));
+      document.querySelectorAll('#usageReportSpeedView button').forEach((button) => {
+        button.addEventListener('click', () => {
+          state.view = button.dataset.speedView === 'hour' ? 'hour' : 'time';
+          usageReportSpeedWritePrefs();
+          usageReportRenderSpeedChartControls();
+          usageReportRenderSpeedChart();
+        });
+      });
+      document.getElementById('usageReportSpeedBucket')?.addEventListener('change', (event) => {
+        state.bucket = event.target.value || '';
+        usageReportEnsureTrend();
       });
       document.querySelectorAll('#usageReportSpeedTable th[data-speed-sort]').forEach((th) => {
         th.addEventListener('click', () => {
           const field = th.dataset.speedSort;
-          const state = usageReportSpeedState.sort;
-          if (state.field === field) {
-            state.direction = state.direction === 'asc' ? 'desc' : 'asc';
+          const sort = state.sort;
+          if (sort.field === field) {
+            sort.direction = sort.direction === 'asc' ? 'desc' : 'asc';
           } else {
-            state.field = field;
-            // A rank opens biggest-first; the two text columns open A-to-Z.
-            state.direction = (field === 'model' || field === 'source') ? 'asc' : 'desc';
+            sort.field = field;
+            // A rank opens biggest-first; the name column opens A-to-Z.
+            sort.direction = field === 'model' ? 'asc' : 'desc';
           }
           usageReportRenderSpeed();
         });
       });
-      document.getElementById('usageReportSpeedTool')?.addEventListener('change', (event) => {
-        usageReportSpeedState.tool = event.target.value || '';
-        usageReportSpeedState.expanded = '';
+      document.getElementById('usageReportSpeedSearch')?.addEventListener('input', (event) => {
+        state.query = event.target.value || '';
+        usageReportRenderSpeed();
+      });
+      document.getElementById('usageReportSpeedTools')?.addEventListener('click', (event) => {
+        const pill = event.target.closest('[data-speed-tool]');
+        if (!pill) return;
+        state.tool = pill.dataset.speedTool || '';
+        usageReportSpeedRemapSelection();
         usageReportSpeedWritePrefs();
         usageReportRenderSpeed();
-        if (usageReportSpeedState.mode === 'temporal') usageReportEnsureTemporal();
       });
-      document.getElementById('usageReportSpeedPick')?.addEventListener('change', (event) => {
-        usageReportSpeedState.pick = event.target.value;
-        usageReportEnsureTemporal();
+      document.getElementById('usageReportSpeedBody')?.addEventListener('click', (event) => {
+        const tr = event.target.closest('tr[data-speed-id]');
+        if (!tr) return;
+        const check = tr.querySelector('.speed-check');
+        if (check && check.getAttribute('aria-disabled') === 'true') return;
+        const id = tr.dataset.speedId;
+        const refocus = !!event.target.closest('.speed-check');
+        usageReportSpeedToggle(id);
+        // The table is rebuilt on every toggle; a keyboard reader keeps their place.
+        if (refocus) {
+          [...document.querySelectorAll('#usageReportSpeedBody .speed-check')]
+            .find((node) => node.dataset.speedCheck === id)?.focus();
+        }
       });
+      document.getElementById('usageReportSpeedLegend')?.addEventListener('click', (event) => {
+        const remove = event.target.closest('[data-speed-remove]');
+        if (remove) { usageReportSpeedToggle(remove.dataset.speedRemove); return; }
+        if (event.target.closest('[data-speed-clear]')) {
+          usageReportSpeedSetSelection([], {});
+          usageReportSpeedWritePrefs();
+          usageReportRenderSpeed();
+        }
+      });
+      const chart = document.getElementById('usageReportSpeedChart');
+      if (chart) {
+        chart.addEventListener('mousemove', (event) => {
+          const geom = state.chartGeom;
+          if (!geom) return;
+          const px = event.clientX - chart.getBoundingClientRect().left;
+          if (px < geom.left || px > geom.left + geom.plotWidth) { usageReportSpeedHidePoint(); return; }
+          usageReportSpeedShowPoint(Math.min(geom.count - 1,
+            Math.max(0, Math.floor(((px - geom.left) / geom.plotWidth) * geom.count))));
+        });
+        chart.addEventListener('mouseleave', usageReportSpeedHidePoint);
+        chart.addEventListener('focusout', usageReportSpeedHidePoint);
+        chart.addEventListener('keydown', (event) => {
+          const geom = state.chartGeom;
+          if (!geom) return;
+          if (event.key === 'Escape') { usageReportSpeedHidePoint(); return; }
+          const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+          if (!step) return;
+          event.preventDefault();
+          const from = geom.cursor === null || geom.cursor === undefined ? (step > 0 ? -1 : geom.count) : geom.cursor;
+          usageReportSpeedShowPoint(Math.min(geom.count - 1, Math.max(0, from + step)));
+        });
+        if (typeof ResizeObserver !== 'undefined') {
+          let width = 0;
+          new ResizeObserver(() => {
+            const next = chart.clientWidth;
+            if (!state.active || Math.abs(next - width) < 2) return;
+            width = next;
+            usageReportDrawSpeedChart();
+          }).observe(chart);
+        }
+      }
     }
 
     function usageReportSpeedQuery(extra) {
@@ -21041,16 +21692,111 @@
       return params.toString();
     }
 
-    // The rows the current tool filter selects, out of whatever the one request
-    // returned. Filtering here rather than asking the server for one tool is
-    // what keeps the tool list honest: a request scoped to the saved tool can
-    // only ever describe that tool, so reloading left a reader holding a
-    // two-tool comparison and a selector offering one of them.
+    // The rows the current harness pill selects, out of whatever the one request
+    // returned. Filtering here rather than asking the server for one harness is
+    // what keeps the pills honest: a request scoped to the saved harness can only
+    // ever describe that harness, so reloading left a reader holding a two-tool
+    // comparison and a control offering one of them.
     function usageReportSpeedVisibleRows() {
       const rows = usageReportSpeedState.rows || [];
       const tool = usageReportSpeedState.tool;
       if (!tool) return rows;
       return rows.filter((row) => row.source === tool);
+    }
+
+    function usageReportSpeedRowId(row) {
+      return row.source
+        ? [row.source, row.model, row.measurement_kind, row.token_basis].join('|')
+        : `all|${row.model}`;
+    }
+
+    // Combined across every harness reads one row per model: one backend serving
+    // two harnesses at once is one workload, and its busy time is their union. A
+    // harness pill, or Per stream, reads each harness on its own.
+    function usageReportSpeedMerging() {
+      return usageReportSpeedLens() === 'combined' && !usageReportSpeedState.tool;
+    }
+
+    function usageReportSpeedModelRows() {
+      const models = usageReportSpeedState.payload && usageReportSpeedState.payload.models;
+      return Array.isArray(models) ? models : [];
+    }
+
+    function usageReportSpeedSources(row) {
+      if (row.source) return [row.source];
+      return Array.isArray(row.sources) ? row.sources : [];
+    }
+
+    function usageReportSpeedKinds(row) {
+      if (row.source) return row.measurement_kind ? [row.measurement_kind] : [];
+      return Array.isArray(row.measurement_kinds) ? row.measurement_kinds : [];
+    }
+
+    function usageReportSpeedHarnessText(row) {
+      return usageReportSpeedSources(row).map((source) => formatToolName(source)).join(' + ');
+    }
+
+    // The lens's own rate. A merged row has no per-stream rate on purpose: its
+    // harnesses time responses different ways, so a pooled figure measures nothing.
+    function usageReportSpeedRate(row) {
+      const value = usageReportSpeedLens() === 'combined' ? row.combined_tok_per_s : row.output_tok_per_s;
+      return value === undefined ? null : value;
+    }
+
+    function usageReportSpeedTableRows() {
+      const rows = usageReportSpeedMerging() ? usageReportSpeedModelRows() : usageReportSpeedVisibleRows();
+      const query = String(usageReportSpeedState.query || '').trim().toLowerCase();
+      if (!query) return rows;
+      return rows.filter((row) => String(row.model || '').toLowerCase().includes(query)
+        || usageReportSpeedHarnessText(row).toLowerCase().includes(query));
+    }
+
+    // Switching between merged and per-harness rows keeps what was chosen: a
+    // merged model becomes its harness rows, and harness rows fold back into
+    // their model, keeping the first one's colour. A row this window has never
+    // heard of stays as it is, so stepping through a quiet period keeps the picks.
+    function usageReportSpeedRemapSelection() {
+      const state = usageReportSpeedState;
+      if (!state.payload) return;
+      const rows = state.rows || [];
+      const models = usageReportSpeedModelRows();
+      const valid = new Set((usageReportSpeedMerging() ? models : rows).map(usageReportSpeedRowId));
+      const known = new Set([...rows, ...models].map(usageReportSpeedRowId));
+      const ids = [];
+      const slots = {};
+      const take = (id, slot) => {
+        if (ids.includes(id)) return;
+        ids.push(id);
+        if (slot !== undefined) slots[id] = slot;
+      };
+      state.selected.forEach((id) => {
+        const slot = state.slots[id];
+        if (valid.has(id) || !known.has(id)) { take(id, slot); return; }
+        if (id.startsWith('all|')) {
+          const model = id.slice(4);
+          rows.filter((row) => row.model === model)
+            .sort((a, b) => Number(b.speed_calls || 0) - Number(a.speed_calls || 0))
+            .forEach((row, index) => take(usageReportSpeedRowId(row), index === 0 ? slot : undefined));
+          return;
+        }
+        const row = rows.find((candidate) => usageReportSpeedRowId(candidate) === id);
+        if (row) take(`all|${row.model}`, slot);
+      });
+      usageReportSpeedSetSelection(ids, slots);
+    }
+
+    // A first visit charts the three most-measured rows, so the chart is never
+    // empty on arrival. A selection the reader cleared on this window stays clear.
+    function usageReportSpeedSeedSelection() {
+      const state = usageReportSpeedState;
+      if (state.selected.length || state.seededKey === state.loadedKey) return;
+      state.seededKey = state.loadedKey;
+      const rows = usageReportSpeedMerging() ? usageReportSpeedModelRows() : usageReportSpeedVisibleRows();
+      const top = [...rows].filter((row) => Number(row.speed_calls || 0) > 0)
+        .sort((a, b) => Number(b.speed_calls || 0) - Number(a.speed_calls || 0))
+        .slice(0, 3)
+        .map(usageReportSpeedRowId);
+      usageReportSpeedSetSelection(top, {});
     }
 
     async function usageReportLoadSpeed({ refresh = false, cacheOnly = false } = {}) {
@@ -21060,7 +21806,7 @@
       if (!refresh && usageReportSpeedState.loading && usageReportSpeedState.pendingKey === key) return;
       if (!refresh && usageReportSpeedState.loadedKey === key) {
         usageReportRenderSpeed();
-        if (usageReportSpeedState.mode === 'temporal') usageReportEnsureTemporal({ cacheOnly });
+        usageReportEnsureTrend({ cacheOnly });
         return;
       }
       // Range changes start immediately; they never wait behind the Overview
@@ -21085,10 +21831,12 @@
         usageReportSpeedState.payload = payload || { rows: [] };
         usageReportSpeedState.rows = Array.isArray(payload && payload.rows) ? payload.rows : [];
         usageReportSpeedState.loadedKey = key;
+        usageReportSpeedRemapSelection();
+        usageReportSpeedSeedSelection();
         if (!cacheOnly) usageReportSpeedWatchJob(payload && payload.cache, key, server);
         usageReportSpeedRelease(token);
         usageReportRenderSpeed();
-        if (usageReportSpeedState.mode === 'temporal') usageReportEnsureTemporal({ cacheOnly });
+        usageReportEnsureTrend({ cacheOnly });
       } catch (error) {
         const mine = usageReportSpeedRelease(token);
         if (!mine || !wanted()) return;
@@ -21144,19 +21892,6 @@
       host.textContent = message;
     }
 
-    function usageReportRenderSpeedMode() {
-      document.querySelectorAll('#usageReportSpeedMode button').forEach((button) => {
-        button.setAttribute('aria-pressed', button.dataset.speedMode === usageReportSpeedState.mode ? 'true' : 'false');
-      });
-      const across = document.getElementById('usageReportSpeedAcross');
-      const temporal = document.getElementById('usageReportSpeedTemporal');
-      const partial = document.getElementById('usageReportSpeedPartial');
-      if (across) across.hidden = usageReportSpeedState.mode !== 'across';
-      if (temporal) temporal.hidden = usageReportSpeedState.mode !== 'temporal';
-      // The hourly view has its own selected-model coverage note below the chart.
-      if (partial) partial.hidden = usageReportSpeedState.mode === 'temporal';
-    }
-
     // How many of the selected days this data has measurements on at all.
     //
     // Not the maximum of the per-row counts, which was the obvious reading and is
@@ -21190,7 +21925,7 @@
       if (!payload) { host.textContent = ''; return; }
       const selected = payload.selected_range || payload.range || {};
       const rows = usageReportSpeedVisibleRows().filter((row) => Number(row.speed_calls || 0) > 0);
-      const range = `${selected.from || '\u2014'} \u2192 ${selected.to || '\u2014'}`;
+      const range = `${selected.from || '—'} → ${selected.to || '—'}`;
       if (!rows.length) {
         host.textContent = '';
         host.title = '';
@@ -21208,8 +21943,8 @@
 
     // A comparison row carries its absence under `unmeasured`, scoped to the
     // (source, model) it belongs to, because a call with no duration has no
-    // measurement kind to file it under. An hour row counts its own, in its own
-    // hour. Both shapes reach this one reader.
+    // measurement kind to file it under. A merged model row counts its own. Both
+    // shapes reach this one reader.
     function usageReportSpeedAbsence(row) {
       const scoped = row && row.unmeasured && row.unmeasured.scope === 'source_model' ? row.unmeasured : null;
       const excluded = (scoped ? scoped.excluded_calls_by_reason : row && row.excluded_calls_by_reason) || {};
@@ -21223,11 +21958,11 @@
     function usageReportSpeedSortedRows() {
       const { field, direction } = usageReportSpeedState.sort;
       const dir = direction === 'asc' ? 1 : -1;
-      const numeric = ['output_tok_per_s', 'speed_calls', 'coverage'];
-      return [...usageReportSpeedVisibleRows()].sort((a, b) => {
-        if (numeric.includes(field)) {
-          const av = a[field];
-          const bv = b[field];
+      const value = (row) => (field === 'rate' ? usageReportSpeedRate(row) : row[field]);
+      return [...usageReportSpeedTableRows()].sort((a, b) => {
+        if (field !== 'model') {
+          const av = value(a);
+          const bv = value(b);
           const aNull = av === null || av === undefined;
           const bNull = bv === null || bv === undefined;
           // Nulls last in both directions: a missing rate is never a smallest
@@ -21237,7 +21972,7 @@
           if (bNull) return -1;
           return (Number(av) - Number(bv)) * dir;
         }
-        return String(a[field] || '').localeCompare(String(b[field] || '')) * dir;
+        return String(a.model || '').localeCompare(String(b.model || '')) * dir;
       });
     }
 
@@ -21249,7 +21984,7 @@
           : 'none');
         const arrow = th.querySelector('.speed-sort-arrow');
         if (!active) { if (arrow) arrow.remove(); return; }
-        const glyph = usageReportSpeedState.sort.direction === 'asc' ? '\u25B2' : '\u25BC';
+        const glyph = usageReportSpeedState.sort.direction === 'asc' ? '▲' : '▼';
         if (arrow) arrow.textContent = ` ${glyph}`;
         else {
           const span = document.createElement('span');
@@ -21260,7 +21995,7 @@
       });
     }
 
-    // The Report tab builds its own elements. Everything it prints started life in
+    // The speed page builds its own elements. Everything it prints started life in
     // someone else's log file, and "remember to escape every one of them" is a rule
     // that eventually gets forgotten, so these helpers are the only way in.
     function usageReportSpeedText(text, className) {
@@ -21318,54 +22053,127 @@
       return sample;
     }
 
+    // The count, its absences beneath it, and in its tooltip the rest of what the
+    // row was built from: the measured span, the days it covers, the raw sums.
     function usageReportSpeedCallsCell(row) {
       const cell = document.createElement('td');
       cell.textContent = String(formatNumber(Number(row.speed_calls || 0)));
       const absence = usageReportSpeedAbsence(row);
       if (absence.excluded || absence.missing) cell.appendChild(usageReportSpeedSampleNode(row, false));
+      cell.title = `${t('usageReportSpeedMeasuredRange')} ${usageReportSpeedFormatStamp(row.first_measured_at)} → ${usageReportSpeedFormatStamp(row.last_measured_at)}`
+        + ` · ${t('usageReportSpeedDaysWith')}`
+        + ` ${formatNumber(Number(row.days_with_measurements || 0))}/${formatNumber(Number(row.selected_days || 0))}`
+        + ` · ${t('usageReportSpeedMatched')}`
+        + ` ${formatNumber(Number(row.speed_tokens || 0))} ${t('tokens')}`
+        + ` / ${formatNumber(Math.round(Number(row.speed_ms || 0)))} ms`;
       return cell;
     }
 
     function usageReportSpeedCoverageCell(coverage) {
       const unknown = coverage === null || coverage === undefined;
-      return usageReportSpeedCell(
+      const cell = usageReportSpeedCell(
         unknown ? t('usageReportSpeedCoverageUnknown') : formatPercent(coverage), unknown);
+      cell.classList.add('speed-hide-sm');
+      return cell;
     }
 
-    function usageReportSpeedDetailRow(row) {
-      const tr = document.createElement('tr');
-      tr.className = 'speed-detail-row';
-      const cell = document.createElement('td');
-      cell.colSpan = 5;
-      const detail = document.createElement('div');
-      detail.className = 'speed-detail';
-      const labelled = (label, value) => {
-        detail.appendChild(document.createTextNode(`${label}: `));
-        const bold = document.createElement('b');
-        bold.textContent = String(value);
-        detail.appendChild(bold);
-        detail.appendChild(document.createElement('br'));
+    function usageReportSpeedRateTitle(row) {
+      const vars = {
+        stream: usageReportSpeedFormatRate(row.output_tok_per_s),
+        combined: usageReportSpeedFormatRate(row.combined_tok_per_s),
+        par: usageReportSpeedFormatRate(row.parallelism),
+        peak: formatNumber(Number(row.peak_in_flight || 0)),
       };
-      labelled(t('usageReportSpeedMethodWindow'), usageReportSpeedKindLabel(row.measurement_kind));
-      labelled(t('usageReportSpeedMethodTokens'), usageReportSpeedBasisLabel(row.token_basis));
-      detail.appendChild(document.createTextNode(
-        `${t('usageReportSpeedMeasuredRange')} ${usageReportSpeedFormatStamp(row.first_measured_at)} → ${usageReportSpeedFormatStamp(row.last_measured_at)}`
-        + ` · ${t('usageReportSpeedDaysWith')}`
-        + ` ${formatNumber(Number(row.days_with_measurements || 0))}/${formatNumber(Number(row.selected_days || 0))}`
-        + ` · ${t('usageReportSpeedMatched')}`
-        + ` ${formatNumber(Number(row.speed_tokens || 0))} ${t('tokens')}`
-        + ` / ${formatNumber(Math.round(Number(row.speed_ms || 0)))} ms`));
-      cell.appendChild(detail);
-      tr.appendChild(cell);
+      return t(row.source ? 'usageReportSpeedRateTitle' : 'usageReportSpeedRateTitleMerged', vars);
+    }
+
+    function usageReportSpeedMethodTitle(row) {
+      if (row.source) {
+        return `${t('usageReportSpeedMethodWindow')}: ${usageReportSpeedKindLabel(row.measurement_kind)}\n`
+          + `${t('usageReportSpeedMethodTokens')}: ${usageReportSpeedBasisLabel(row.token_basis)}`;
+      }
+      return usageReportSpeedKinds(row).map((kind) => `${usageReportSpeedKindShort(kind)}: ${usageReportSpeedKindLabel(kind)}`).join('\n');
+    }
+
+    function usageReportSpeedTableRow(row, maxRate) {
+      const state = usageReportSpeedState;
+      const id = usageReportSpeedRowId(row);
+      const on = state.selected.includes(id);
+      const harness = usageReportSpeedHarnessText(row);
+      const tr = document.createElement('tr');
+      tr.dataset.speedId = id;
+      if (on) tr.className = 'is-selected';
+
+      const tickCell = document.createElement('td');
+      const tick = document.createElement('button');
+      tick.type = 'button';
+      tick.className = 'speed-check';
+      tick.dataset.speedCheck = id;
+      tick.setAttribute('role', 'checkbox');
+      tick.setAttribute('aria-checked', String(on));
+      tick.setAttribute('aria-label', t('usageReportSpeedTick', { model: row.model || '—', tool: harness }));
+      if (on) tick.style.setProperty('--speed-series', usageReportSpeedColor(id));
+      if (!on && state.selected.length >= USAGE_REPORT_SPEED_MAX_SERIES) {
+        tick.setAttribute('aria-disabled', 'true');
+        tick.title = t('usageReportSpeedFull');
+      }
+      tickCell.appendChild(tick);
+      tr.appendChild(tickCell);
+
+      const modelCell = document.createElement('td');
+      modelCell.className = 'speed-l';
+      const model = document.createElement('div');
+      model.className = 'speed-model';
+      const logos = document.createElement('span');
+      logos.className = 'speed-logos';
+      usageReportSpeedSources(row).forEach((source) => {
+        logos.appendChild(createToolIdentity(source, { iconOnly: true, compact: true }));
+      });
+      const names = document.createElement('div');
+      names.appendChild(usageReportSpeedText(row.model || '—', 'speed-model-name'));
+      const meta = document.createElement('span');
+      meta.className = 'speed-model-meta';
+      const kinds = usageReportSpeedKinds(row);
+      const method = usageReportSpeedText(kinds.length === 1 ? usageReportSpeedKindShort(kinds[0])
+        : t('usageReportSpeedMethods', { n: kinds.length }), 'speed-why');
+      method.title = usageReportSpeedMethodTitle(row);
+      meta.append(document.createTextNode(`${harness} · `), method);
+      names.appendChild(meta);
+      model.append(logos, names);
+      modelCell.appendChild(model);
+      tr.appendChild(modelCell);
+
+      const rate = usageReportSpeedRate(row);
+      const rateCell = document.createElement('td');
+      if (rate === null) rateCell.className = 'speed-unmeasured';
+      rateCell.title = usageReportSpeedRateTitle(row);
+      rateCell.appendChild(usageReportSpeedText(usageReportSpeedFormatRate(rate), 'speed-rate'));
+      const par = usageReportSpeedRateValue(row.parallelism);
+      if (usageReportSpeedLens() === 'combined' && par !== null && par >= USAGE_REPORT_SPEED_PAR_SHOWN) {
+        const badge = usageReportSpeedText(`×${usageReportSpeedFormatRate(par)}`, 'speed-par');
+        badge.title = t('usageReportSpeedParTitle', { par: usageReportSpeedFormatRate(par),
+          peak: formatNumber(Number(row.peak_in_flight || 0)) });
+        rateCell.appendChild(badge);
+      }
+      const bar = document.createElement('span');
+      bar.className = 'speed-bar';
+      bar.setAttribute('aria-hidden', 'true');
+      const fill = document.createElement('i');
+      fill.style.width = `${Math.round(((rate || 0) / (maxRate || 1)) * 100)}%`;
+      bar.appendChild(fill);
+      rateCell.appendChild(bar);
+      tr.appendChild(rateCell);
+
+      tr.appendChild(usageReportSpeedCallsCell(row));
+      tr.appendChild(usageReportSpeedCoverageCell(row.coverage));
       return tr;
     }
 
     function usageReportSpeedShowMeasuredTools() {
       usageReportSpeedState.tool = '';
-      usageReportSpeedState.expanded = '';
+      usageReportSpeedRemapSelection();
       usageReportSpeedWritePrefs();
       usageReportRenderSpeed();
-      if (usageReportSpeedState.mode === 'temporal') usageReportEnsureTemporal();
     }
 
     function usageReportSpeedViewMeasuredDates() {
@@ -21432,13 +22240,13 @@
     function usageReportRenderSpeed() {
       usageReportSpeedUpdateHeader();
       usageReportRenderSpeedEmptyAction();
-      usageReportRenderSpeedMode();
+      usageReportRenderSpeedLens();
       usageReportRenderSpeedSortHeaders();
       usageReportSpeedPartialLine();
+      usageReportRenderSpeedTools();
+      usageReportRenderSpeedChartControls();
+      usageReportRenderSpeedChart();
       const body = document.getElementById('usageReportSpeedBody');
-      // Its own element: #usageReportSpeedPick is the model picker in the time-of-day
-      // view, and writing a tool list into it replaced that select's options.
-      const toolSelectHost = document.getElementById('usageReportSpeedTool');
       if (usageReportSpeedState.error) {
         usageReportRenderSpeedState(`${t('usageReportSpeedError')} ${usageReportSpeedState.error}`);
         if (body) body.replaceChildren();
@@ -21448,76 +22256,59 @@
         usageReportRenderSpeedState(t('loading'));
         if (body) body.replaceChildren(usageReportSpeedMessageRow(t('loading')));
         usageReportRenderSpeedSources();
-        if (usageReportSpeedState.mode === 'temporal') usageReportRenderSpeedTemporal();
         return;
       }
       const cache = usageReportSpeedState.payload?.cache;
       usageReportRenderSpeedState(cache?.state === 'stale' && !cache.job_id
         ? '' : usageReportSpeedCacheMessage(cache));
-      // The table is filtered to one tool, so the tool list is a control rather
-      // than a caption: it lives above the table, next to the model picker.
-      const tools = usageReportSpeedTools();
-      const availability = document.getElementById('outputSpeedAvailability');
-      if (availability) availability.textContent = t('usageReportSpeedAvailability')
-        .replace('{measured}', String(tools.filter((tool) => tool.calls > 0).length))
-        .replace('{total}', String(tools.length));
-      if (toolSelectHost) {
-        const wanted = usageReportSpeedState.tool;
-        const options = [usageReportSpeedOption('', t('allTools'), !wanted),
-          ...tools.map((tool) => usageReportSpeedOption(
-          tool.source, formatToolName(tool.source), tool.source === wanted))];
-        // A quiet range must not silently change the reader's chosen harness.
-        if (wanted && !tools.some((tool) => tool.source === wanted)) {
-          options.unshift(usageReportSpeedOption(wanted, formatToolName(wanted), true));
-        }
-        toolSelectHost.replaceChildren(...options);
-      }
       if (!body) return;
       const rows = usageReportSpeedSortedRows();
       if (!rows.length) {
         const payload = usageReportSpeedState.payload;
         const known = payload && Array.isArray(payload.source_status)
           && payload.source_status.some((row) => !usageReportSpeedState.tool || row.source === usageReportSpeedState.tool);
-        body.replaceChildren(usageReportSpeedMessageRow(
-          known ? t('usageReportSpeedEmptyKnown') : t('usageReportSpeedEmpty')));
+        const searched = String(usageReportSpeedState.query || '').trim() && usageReportSpeedVisibleRows().length;
+        body.replaceChildren(usageReportSpeedMessageRow(searched ? t('usageReportSpeedNoMatch')
+          : known ? t('usageReportSpeedEmptyKnown') : t('usageReportSpeedEmpty')));
         usageReportRenderSpeedSources();
-        usageReportRenderSpeedPicker();
         return;
       }
-      const nodes = [];
-      rows.forEach((row) => {
-        const key = [row.source, row.model, row.measurement_kind, row.token_basis].join('|');
-        const open = usageReportSpeedState.expanded === key;
-        const tr = document.createElement('tr');
-        if (open) tr.className = 'is-selected';
-        const nameCell = document.createElement('td');
-        const toggle = document.createElement('button');
-        toggle.type = 'button';
-        toggle.className = 'speed-toggle';
-        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-        toggle.dataset.speedKey = key;
-        // The method travels with the row it describes: two rows can measure
-        // different windows, and a caption above the table cannot say which.
-        toggle.title = usageReportSpeedKindLabel(row.measurement_kind);
-        toggle.textContent = row.model || '—';
-        toggle.addEventListener('click', () => {
-          usageReportSpeedState.expanded = usageReportSpeedState.expanded === key ? '' : key;
-          usageReportRenderSpeed();
-        });
-        nameCell.appendChild(toggle);
-        tr.appendChild(nameCell);
-        tr.appendChild(usageReportSpeedCell(formatToolName(row.source)));
-        const rate = row.output_tok_per_s;
-        tr.appendChild(usageReportSpeedCell(
-          usageReportSpeedFormatRate(rate), rate === null || rate === undefined));
-        tr.appendChild(usageReportSpeedCallsCell(row));
-        tr.appendChild(usageReportSpeedCoverageCell(row.coverage));
-        nodes.push(tr);
-        if (open) nodes.push(usageReportSpeedDetailRow(row));
-      });
-      body.replaceChildren(...nodes);
+      const maxRate = Math.max(1, ...rows.map((row) => Number(usageReportSpeedRate(row) || 0)));
+      body.replaceChildren(...rows.map((row) => usageReportSpeedTableRow(row, maxRate)));
       usageReportRenderSpeedSources();
-      usageReportRenderSpeedPicker();
+    }
+
+    // One pill per harness with measurements here, plus a remembered harness that
+    // has none: a quiet range must not silently change the reader's choice, and
+    // the empty table below it says why and offers the way back.
+    function usageReportRenderSpeedTools() {
+      const host = document.getElementById('usageReportSpeedTools');
+      if (!host) return;
+      const state = usageReportSpeedState;
+      const counts = new Map();
+      (state.rows || []).forEach((row) => counts.set(row.source, (counts.get(row.source) || 0) + 1));
+      const tools = usageReportSpeedTools().filter((tool) => tool.calls > 0 || tool.source === state.tool);
+      if (state.tool && !tools.some((tool) => tool.source === state.tool)) tools.unshift({ source: state.tool, calls: 0 });
+      const lens = usageReportSpeedLens();
+      const all = lens === 'combined' ? usageReportSpeedModelRows().length : (state.rows || []).length;
+      const entries = [['', all], ...tools.map((tool) => [tool.source, counts.get(tool.source) || 0])];
+      // Rebuilt only when the set changes, so a click does not reload every icon.
+      const signature = JSON.stringify([lens, entries, currentLang]);
+      if (host.dataset.signature !== signature) {
+        host.dataset.signature = signature;
+        host.replaceChildren(...entries.map(([source, count]) => {
+          const pill = document.createElement('button');
+          pill.type = 'button';
+          pill.className = 'speed-pill';
+          pill.dataset.speedTool = source;
+          pill.appendChild(source ? createToolIdentity(source, { compact: true }) : usageReportSpeedText(t('usageReportSpeedAll')));
+          pill.appendChild(usageReportSpeedText(formatNumber(count), 'speed-pill-count'));
+          return pill;
+        }));
+      }
+      host.querySelectorAll('[data-speed-tool]').forEach((pill) => {
+        pill.setAttribute('aria-pressed', String(pill.dataset.speedTool === state.tool));
+      });
     }
 
     // What the table does not show, said per source. "This tool keeps no
@@ -21528,32 +22319,24 @@
       if (!host) return;
       const statuses = ((usageReportSpeedState.payload && usageReportSpeedState.payload.source_status) || [])
         .filter((row) => !usageReportSpeedState.tool || row.source === usageReportSpeedState.tool);
-      if (!statuses.length) { host.textContent = ''; return; }
-      if (!usageReportSpeedState.tool) {
-        // Availability remains inspectable without repeating one explanation
-        // for every unsupported harness below the default comparison.
-        const details = document.createElement('details');
-        const summary = document.createElement('summary');
-        summary.textContent = `${t('usageReportSpeedUnmeasuredTools')} (${statuses.length})`;
-        details.appendChild(summary);
-        const groups = new Map();
-        statuses.forEach((row) => {
-          const key = usageReportSpeedStatusKey(row.status);
-          if (!groups.has(key)) groups.set(key, []);
-          groups.get(key).push(`${formatToolName(row.source)} (n=${formatNumber(row.usage_rows || 0)})`);
-        });
-        groups.forEach((tools, key) => {
-          const note = document.createElement('p');
-          note.textContent = `${t(key)}: ${tools.join(', ')}`;
-          details.appendChild(note);
-        });
-        host.replaceChildren(details);
+      if (!statuses.length) { host.replaceChildren(); return; }
+      if (usageReportSpeedState.tool) {
+        host.textContent = statuses.map((row) => {
+          const label = t(usageReportSpeedStatusKey(row.status));
+          return `${formatToolName(row.source)}: ${label} (n=${formatNumber(row.usage_rows || 0)})`;
+        }).join(' · ');
         return;
       }
-      host.textContent = statuses.map((row) => {
-        const label = t(usageReportSpeedStatusKey(row.status));
-        return `${formatToolName(row.source)}: ${label} (n=${formatNumber(row.usage_rows || 0)})`;
-      }).join(' \u00b7 ');
+      // Without a pill, one line names them; each reason is on its own name.
+      const parts = [document.createTextNode(`${t('usageReportSpeedUnmeasuredTools')}: `)];
+      statuses.forEach((row, index) => {
+        if (index) parts.push(document.createTextNode(', '));
+        const name = usageReportSpeedText(formatToolName(row.source), 'speed-why');
+        name.tabIndex = 0;
+        name.title = `${t(usageReportSpeedStatusKey(row.status))} (n=${formatNumber(row.usage_rows || 0)})`;
+        parts.push(name);
+      });
+      host.replaceChildren(...parts);
     }
 
     function usageReportSpeedStatusKey(status) {
@@ -21563,116 +22346,76 @@
       return 'usageReportSpeedSourceNoTiming';
     }
 
-    function usageReportSpeedSelection() {
-      const rows = usageReportSpeedVisibleRows().filter((row) => Number(row.speed_calls || 0) > 0);
-      const keyed = rows.filter((row) => {
-        const key = [row.source, row.model, row.measurement_kind, row.token_basis].join('|');
-        return key === usageReportSpeedState.pick;
-      });
-      return keyed[0] || rows[0] || null;
-    }
-
-    function usageReportRenderSpeedPicker() {
-      const select = document.getElementById('usageReportSpeedPick');
-      if (!select) return;
-      const rows = usageReportSpeedVisibleRows().filter((row) => Number(row.speed_calls || 0) > 0);
-      const options = rows.map((row) => {
-        const key = [row.source, row.model, row.measurement_kind, row.token_basis].join('|');
-        const variants = rows.filter((other) => other.model === row.model && other.source === row.source).length;
-        const method = variants > 1 ? ` · ${usageReportSpeedKindLabel(row.measurement_kind)} · ${usageReportSpeedBasisLabel(row.token_basis)}` : '';
-        return { key, label: `${row.model} · ${formatToolName(row.source)}${method}` };
-      });
-      const current = usageReportSpeedSelection();
-      const currentKey = current
-        ? [current.source, current.model, current.measurement_kind, current.token_basis].join('|')
-        : '';
-      select.replaceChildren(...options.map((option) => usageReportSpeedOption(
-        option.key, option.label, option.key === currentKey)));
-      select.disabled = !options.length;
-      const meta = document.getElementById('usageReportSpeedPickMeta');
-      if (meta) {
-        meta.textContent = current
-          ? `${usageReportSpeedFormatRate(current.output_tok_per_s)} tok/s ${t('usageReportSpeedAcrossSessions')} · n=${formatNumber(Number(current.speed_calls || 0))}`
-          : '';
-        meta.title = current
-          ? `${usageReportSpeedKindLabel(current.measurement_kind)} · ${usageReportSpeedBasisLabel(current.token_basis)}` : '';
-      }
-    }
-
-    function usageReportEnsureTemporal({ cacheOnly = false } = {}) {
-      const current = usageReportSpeedSelection();
-      if (!current) {
-        // Retire a previous model's in-flight chart as well as its cached bars.
-        if (usageReportSpeedState.temporalToken) usageReportSpeedState.token += 1;
-        usageReportSpeedState.temporalToken = 0;
-        usageReportSpeedState.temporalLoading = false;
-        usageReportSpeedState.temporalKey = '';
-        usageReportSpeedState.temporal = null;
-        usageReportRenderSpeedTemporal();
+    // The chart's own request: every row and every merged model laid out over the
+    // window's buckets and the 24 hours of the day, from one read on the server.
+    // The table and the lens never ask for it again; the grouping does.
+    function usageReportEnsureTrend({ cacheOnly = false } = {}) {
+      const state = usageReportSpeedState;
+      // The comparison load asks for its chart when it lands; asking now would
+      // spend its token and discard it.
+      if (state.loading) return;
+      const key = `${usageReportSpeedKey()}|${state.bucket || 'auto'}`;
+      if (state.trendKey === key && state.trend && !state.trend.__error) {
+        usageReportRenderSpeedChartControls();
+        usageReportRenderSpeedChart();
         return;
       }
-      const key = usageReportSpeedKey();
-      const selection = [current.source, current.model, current.measurement_kind, current.token_basis];
-      const temporalKey = [key, ...selection].join('|');
-      if (usageReportSpeedState.temporalKey === temporalKey && usageReportSpeedState.temporal
-          && !usageReportSpeedState.temporal.__error) {
-        usageReportRenderSpeedTemporal();
-        return;
-      }
-      if (usageReportSpeedState.temporalLoading && usageReportSpeedState.temporalKey === temporalKey) return;
-      // Not asked for while hidden: the selection is left unloaded rather than
-      // marked loaded, so `usageReportSpeedResume` asks for it when the panel is
-      // back. A view that recorded its own key and never fetched it is a chart
-      // that stays empty for the rest of the visit.
+      if (state.trendLoading && state.trendKey === key) return;
+      // Not asked for while hidden: the chart is left unloaded rather than marked
+      // loaded, so `usageReportSpeedResume` asks for it when the panel is back. A
+      // view that recorded its own key and never fetched it is a chart that stays
+      // empty for the rest of the visit.
       if (!usageReportSpeedIsVisible()) return;
-      const token = ++usageReportSpeedState.token;
-      usageReportSpeedState.temporalToken = token;
-      usageReportSpeedState.temporalLoading = true;
-      usageReportSpeedState.temporalKey = temporalKey;
-      usageReportSpeedState.temporal = null;
-      usageReportRenderSpeedTemporal();
-      // Released on every exit, wanted or not: `temporalLoading` drives a spinner
+      const token = ++state.token;
+      state.trendToken = token;
+      state.trendLoading = true;
+      state.trendKey = key;
+      state.trend = null;
+      usageReportRenderSpeedChartControls();
+      usageReportRenderSpeedChart();
+      // Released on every exit, wanted or not: `trendLoading` drives a message
       // that nothing else can clear, and a discarded answer that leaves it set
-      // spins for the rest of the visit.
+      // shows it for the rest of the visit.
       const release = () => {
-        if (usageReportSpeedState.temporalToken !== token) return false;
-        usageReportSpeedState.temporalToken = 0;
-        usageReportSpeedState.temporalLoading = false;
+        if (state.trendToken !== token) return false;
+        state.trendToken = 0;
+        state.trendLoading = false;
         return true;
+      };
+      const paint = () => {
+        usageReportRenderSpeedChartControls();
+        usageReportRenderSpeedChart();
       };
       fetchJsonWithRetry(
         outputSpeedServer(),
         `/api/output-speed?${usageReportSpeedQuery({
-          view: 'time-of-day',
-          source: selection[0],
-          model: selection[1],
-          measurement_kind: selection[2],
-          token_basis: selection[3],
+          view: 'trend',
+          bucket: state.bucket || null,
           cache_only: cacheOnly ? 1 : null,
         })}`,
         { cache: 'no-store' },
-        { shouldContinue: () => token === usageReportSpeedState.token && usageReportSpeedIsVisible() },
+        { shouldContinue: () => token === state.token && usageReportSpeedIsVisible() },
       ).then((payload) => {
         release();
-        if (token !== usageReportSpeedState.token) return;
-        usageReportSpeedState.temporal = payload || null;
-        usageReportRenderSpeedTemporal();
+        if (token !== state.token) return;
+        state.trend = payload || null;
+        paint();
       }).catch((error) => {
         release();
-        if (token !== usageReportSpeedState.token) return;
-        // Keep the error visible, but leave this selection unloaded so returning
-        // to the panel retries it. Successful charts alone satisfy the cache.
-        usageReportSpeedState.temporalKey = '';
-        usageReportSpeedState.temporal = { __error: error && error.message ? error.message : String(error) };
-        usageReportRenderSpeedTemporal();
+        if (token !== state.token) return;
+        // Keep the error visible, but leave this chart unloaded so returning to
+        // the panel retries it. Successful charts alone satisfy the cache.
+        state.trendKey = '';
+        state.trend = { __error: error && error.message ? error.message : String(error) };
+        paint();
       });
     }
 
     // The panel is on screen again. Whatever the hidden stretch left unasked for --
-    // the comparison rows, the time-of-day view, or both -- is asked for now, and
-    // what is already loaded is repainted without a round trip. Both halves check
-    // their own key, so a return to a window that has since moved on loads afresh
-    // and a return to the same one does not touch the server.
+    // the comparison rows, the chart, or both -- is asked for now, and what is
+    // already loaded is repainted without a round trip. Both halves check their own
+    // key, so a return to a window that has since moved on loads afresh and a
+    // return to the same one does not touch the server.
     function usageReportSpeedResume() {
       if (!usageReportSpeedIsVisible()) return;
       outputSpeedRenderControls();
@@ -21682,84 +22425,391 @@
       }
       usageReportRenderSpeed();
       usageReportSpeedWatchJob(usageReportSpeedState.payload?.cache, usageReportSpeedKey(), outputSpeedServer());
-      if (usageReportSpeedState.mode === 'temporal') usageReportEnsureTemporal();
+      usageReportEnsureTrend();
     }
 
-    function usageReportSpeedHourCell(row, index, rate, height, isPeak) {
-      const cell = document.createElement('div');
-      cell.className = `speed-hour${rate === null ? ' is-empty' : ''}${isPeak ? ' is-peak' : ''}`;
-      cell.tabIndex = 0;
-      const value = rate === null ? t('usageReportSpeedNoMeasurements')
-        : `${usageReportSpeedFormatRate(rate)} tok/s · n=${formatNumber(Number(row.speed_calls || 0))}`;
-      cell.setAttribute('role', 'img');
-      cell.setAttribute('aria-label', `${row.label} · ${value}`);
-      const bar = document.createElement('i');
-      bar.style.height = `${height}%`;
-      cell.appendChild(bar);
-      const tooltip = document.createElement('span');
-      tooltip.className = 'speed-hour-tooltip';
-      tooltip.setAttribute('role', 'tooltip');
-      // The focused cell already announces this same value through its label.
-      tooltip.setAttribute('aria-hidden', 'true');
-      tooltip.textContent = `${row.label}\n${value}`;
-      cell.appendChild(tooltip);
-      cell.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape') cell.classList.add('tooltip-dismissed');
+    function usageReportRenderSpeedChartControls() {
+      const state = usageReportSpeedState;
+      document.querySelectorAll('#usageReportSpeedView button').forEach((button) => {
+        button.setAttribute('aria-pressed', String(button.dataset.speedView === state.view));
       });
-      ['mouseenter', 'focus'].forEach((event) => cell.addEventListener(event,
-        () => cell.classList.remove('tooltip-dismissed')));
-      return cell;
+      const wrap = document.getElementById('usageReportSpeedBucketWrap');
+      if (wrap) wrap.hidden = state.view !== 'time';
+      const select = document.getElementById('usageReportSpeedBucket');
+      if (!select) return;
+      const trend = state.trend && !state.trend.__error ? state.trend : null;
+      const offered = trend && Array.isArray(trend.offered_buckets) ? trend.offered_buckets : [];
+      const auto = trend && USAGE_REPORT_SPEED_BUCKET_KEYS[trend.auto_bucket];
+      // The sizes come from the server, which owns the ladder: a size is offered
+      // when the window holds at least two of it and no more than its cap.
+      const current = offered.some((entry) => entry.bucket === state.bucket) ? state.bucket : '';
+      select.replaceChildren(
+        usageReportSpeedOption('', auto ? t('usageReportSpeedAuto', { size: t(auto) }) : t('usageReportSpeedAutoBare'), !current),
+        ...offered.filter((entry) => USAGE_REPORT_SPEED_BUCKET_KEYS[entry.bucket]).map((entry) => usageReportSpeedOption(
+          entry.bucket, `${t(USAGE_REPORT_SPEED_BUCKET_KEYS[entry.bucket])} · ${formatNumber(Number(entry.count || 0))}`,
+          entry.bucket === current)),
+      );
+      select.disabled = !trend;
+      select.title = t('usageReportSpeedAutoHint');
     }
 
-    function usageReportRenderSpeedTemporal() {
-      usageReportRenderSpeedPicker();
-      const host = document.getElementById('usageReportSpeedHours');
-      const bins = document.getElementById('usageReportSpeedBinsBody');
-      const note = document.getElementById('usageReportSpeedTemporalNote');
-      if (usageReportSpeedState.mode !== 'temporal') return;
-      if (usageReportSpeedState.temporalLoading) {
-        if (host) host.replaceChildren();
-        if (bins) bins.replaceChildren(usageReportSpeedMessageRow(t('loading')));
-        if (note) note.textContent = '';
+    function usageReportSpeedBucketLabel(bucket, granularity, index) {
+      const locale = langLocale();
+      const from = parseDateKey(bucket.from);
+      const to = parseDateKey(bucket.to);
+      const dayMonth = (date) => date.toLocaleDateString(locale, { day: 'numeric', month: 'short' });
+      if (granularity === 'hour') {
+        const hour = String(Number(bucket.hour || 0)).padStart(2, '0');
+        return { axis: hour, title: `${from.toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short' })}, ${hour}:00` };
+      }
+      if (granularity === 'day') {
+        return { axis: dayMonth(from), title: from.toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) };
+      }
+      if (granularity === 'week') {
+        return { axis: dayMonth(from), title: from.getTime() === to.getTime() ? dayMonth(from) : `${dayMonth(from)} – ${dayMonth(to)}` };
+      }
+      if (granularity === 'month') {
+        const withYear = index === 0 || from.getMonth() === 0;
+        return {
+          axis: from.toLocaleDateString(locale, withYear ? { month: 'short', year: '2-digit' } : { month: 'short' }),
+          title: from.toLocaleDateString(locale, { month: 'long', year: 'numeric' }),
+        };
+      }
+      const quarter = usageReportSpeedQuarterLabel(from);
+      return { axis: quarter, title: quarter };
+    }
+
+    // A charted row's name, from whichever rows describe it here. A row this
+    // window does not hold still has a name: its id carries the model.
+    function usageReportSpeedName(id) {
+      const state = usageReportSpeedState;
+      const row = [...(state.rows || []), ...usageReportSpeedModelRows()]
+        .find((candidate) => usageReportSpeedRowId(candidate) === id);
+      if (row) return { model: row.model || '—', harness: usageReportSpeedHarnessText(row), row };
+      if (id.startsWith('all|')) return { model: id.slice(4), harness: '', row: null };
+      const [source, model] = id.split('|');
+      return { model: model || id, harness: formatToolName(source), row: null };
+    }
+
+    function usageReportSpeedTrendSeries(id) {
+      const trend = usageReportSpeedState.trend;
+      if (!trend || trend.__error) return null;
+      const list = id.startsWith('all|') ? trend.model_series : trend.series;
+      return (Array.isArray(list) ? list : []).find((series) => usageReportSpeedRowId(series) === id) || null;
+    }
+
+    // What the chart draws, independent of how: labels, titles and one value per
+    // bucket for every charted row, null where nothing was measured.
+    function usageReportSpeedChartModel() {
+      const state = usageReportSpeedState;
+      const trend = state.trend && !state.trend.__error ? state.trend : null;
+      if (!trend) return null;
+      const lens = usageReportSpeedLens();
+      let labels;
+      let titles;
+      if (state.view === 'hour') {
+        labels = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, '0'));
+        titles = labels.map((hour) => `${hour}:00–${hour}:59 · ${t('usageReportSpeedLocalClock')}`);
+      } else {
+        const named = (Array.isArray(trend.buckets) ? trend.buckets : [])
+          .map((bucket, index) => usageReportSpeedBucketLabel(bucket, trend.granularity, index));
+        labels = named.map((entry) => entry.axis);
+        titles = named.map((entry) => entry.title);
+      }
+      const series = state.selected.map((id) => {
+        const found = usageReportSpeedTrendSeries(id);
+        const part = found ? (state.view === 'hour' ? found.hours : found) : null;
+        const raw = part ? (lens === 'combined' ? part.combined : part.per_stream) : null;
+        const at = (list, index) => (Array.isArray(list) ? list[index] : null);
+        return {
+          id,
+          ...usageReportSpeedName(id),
+          values: labels.map((_, index) => usageReportSpeedRateValue(at(raw, index))),
+          calls: labels.map((_, index) => Number(at(part && part.calls, index) || 0)),
+          parallelism: labels.map((_, index) => usageReportSpeedRateValue(at(part && part.parallelism, index))),
+        };
+      });
+      return { labels, titles, series, lens };
+    }
+
+    function usageReportSpeedNiceScale(max) {
+      const raw = Math.max(max, 1) / 4;
+      const magnitude = 10 ** Math.floor(Math.log10(raw));
+      const step = [1, 2, 2.5, 5, 10].map((m) => m * magnitude).find((s) => s >= raw);
+      return { step, top: Math.ceil(max / step) * step || step * 4 };
+    }
+
+    function usageReportSpeedSvg(tag, attrs, text) {
+      const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+      Object.entries(attrs || {}).forEach(([name, value]) => node.setAttribute(name, String(value)));
+      if (text !== undefined) node.textContent = String(text);
+      return node;
+    }
+
+    function usageReportRenderSpeedChart() {
+      const state = usageReportSpeedState;
+      state.chart = usageReportSpeedChartModel();
+      usageReportDrawSpeedChart();
+      usageReportRenderSpeedLegend();
+      usageReportRenderSpeedChartData();
+      const sub = document.getElementById('usageReportSpeedChartSub');
+      if (sub) {
+        const lens = t(usageReportSpeedLens() === 'combined' ? 'usageReportSpeedLensCombined' : 'usageReportSpeedLensStream');
+        const granularity = state.trend && !state.trend.__error && USAGE_REPORT_SPEED_BUCKET_KEYS[state.trend.granularity];
+        sub.textContent = state.view === 'hour' ? `${lens} · ${t('usageReportSpeedHourOfDay')}`
+          : granularity ? `${lens} · ${t(granularity)}` : lens;
+      }
+    }
+
+    // Lines with gaps: a bucket with nothing measured breaks its line rather than
+    // dropping to zero. One axis, recessive grid, the values in the tooltip.
+    function usageReportDrawSpeedChart() {
+      const host = document.getElementById('usageReportSpeedChart');
+      if (!host) return;
+      const state = usageReportSpeedState;
+      const model = state.chart;
+      state.chartGeom = null;
+      if (!model) {
+        const message = state.trend && state.trend.__error
+          ? `${t('usageReportSpeedError')} ${state.trend.__error}`
+          : state.trendLoading || state.loading ? t('loading') : '';
+        host.replaceChildren(usageReportSpeedText(message, 'speed-chart-message'));
         return;
       }
-      const data = usageReportSpeedState.temporal;
-      if (!data || data.__error || !Array.isArray(data.hourly)) {
-        if (host) host.replaceChildren();
-        if (bins) bins.replaceChildren(usageReportSpeedMessageRow(
-          data && data.__error ? t('usageReportSpeedError') : t('usageReportSpeedEmpty')));
-        if (note) note.textContent = '';
+      const { labels, series } = model;
+      const width = Math.max(280, host.clientWidth || 0);
+      const height = 240;
+      const showEnd = width >= 640 && series.length > 0 && series.length <= 4;
+      const margin = { left: 44, right: showEnd ? 150 : 12, top: 12, bottom: 26 };
+      const plotWidth = width - margin.left - margin.right;
+      const plotHeight = height - margin.top - margin.bottom;
+      const count = Math.max(1, labels.length);
+      const values = series.flatMap((entry) => entry.values.filter((value) => value !== null));
+      const { step, top } = usageReportSpeedNiceScale(values.length ? Math.max(...values) * 1.08 : 100);
+      const x = (index) => margin.left + ((index + 0.5) * plotWidth) / count;
+      const y = (value) => margin.top + plotHeight - (value / top) * plotHeight;
+      const svg = usageReportSpeedSvg('svg', {
+        width, height, viewBox: `0 0 ${width} ${height}`, role: 'img', tabindex: 0,
+        'aria-label': t('usageReportSpeedChartAria', {
+          lens: t(model.lens === 'combined' ? 'usageReportSpeedLensCombined' : 'usageReportSpeedLensStream'),
+          n: series.length,
+        }),
+      });
+      for (let value = step; value <= top + 1e-9; value += step) {
+        svg.appendChild(usageReportSpeedSvg('line', { class: 'speed-grid', x1: margin.left, x2: margin.left + plotWidth, y1: y(value), y2: y(value) }));
+      }
+      for (let value = 0; value <= top + 1e-9; value += step) {
+        svg.appendChild(usageReportSpeedSvg('text', { class: 'speed-tick', x: margin.left - 7, y: y(value) + 4, 'text-anchor': 'end' },
+          value >= 1000 ? `${value / 1000}k` : String(Math.round(value))));
+      }
+      svg.appendChild(usageReportSpeedSvg('line', { class: 'speed-base', x1: margin.left, x2: margin.left + plotWidth, y1: y(0), y2: y(0) }));
+      const every = Math.max(1, Math.ceil(count / Math.max(2, Math.floor(plotWidth / 62))));
+      labels.forEach((label, index) => {
+        if (index % every === 0) {
+          svg.appendChild(usageReportSpeedSvg('text', { class: 'speed-tick', x: x(index), y: height - 8, 'text-anchor': 'middle' }, label));
+        }
+      });
+      svg.appendChild(usageReportSpeedSvg('line', { class: 'speed-xhair', x1: 0, x2: 0, y1: margin.top, y2: margin.top + plotHeight, visibility: 'hidden' }));
+      if (!series.length) {
+        svg.appendChild(usageReportSpeedSvg('text', { class: 'speed-empty', x: margin.left + plotWidth / 2, y: margin.top + plotHeight / 2, 'text-anchor': 'middle' },
+          t('usageReportSpeedChartEmpty')));
+      }
+      const ends = [];
+      series.forEach((entry) => {
+        const color = usageReportSpeedColor(entry.id);
+        let path = '';
+        let pen = false;
+        entry.values.forEach((value, index) => {
+          if (value === null) { pen = false; return; }
+          path += `${pen ? 'L' : 'M'}${x(index).toFixed(1)},${y(value).toFixed(1)}`;
+          pen = true;
+        });
+        if (path) svg.appendChild(usageReportSpeedSvg('path', { class: 'speed-line', d: path, style: `stroke:${color}` }));
+        entry.values.forEach((value, index) => {
+          if (value === null) return;
+          const isolated = entry.values[index - 1] == null && entry.values[index + 1] == null;
+          if (count <= 24 || isolated) {
+            svg.appendChild(usageReportSpeedSvg('circle', { class: 'speed-point', cx: x(index).toFixed(1), cy: y(value).toFixed(1), r: 4, style: `fill:${color}` }));
+          }
+        });
+        let last = -1;
+        entry.values.forEach((value, index) => { if (value !== null) last = index; });
+        if (showEnd && last >= 0) ends.push({ at: y(entry.values[last]), entry, color });
+      });
+      // End labels in text ink, nudged apart so they never overlap.
+      ends.sort((a, b) => a.at - b.at);
+      for (let index = 1; index < ends.length; index += 1) ends[index].at = Math.max(ends[index].at, ends[index - 1].at + 15);
+      ends.forEach(({ at, entry, color }) => {
+        const twice = ends.filter((other) => other.entry.model === entry.model).length > 1;
+        const full = twice && entry.harness ? `${entry.model} · ${entry.harness}` : entry.model;
+        const name = full.length > 20 ? `${full.slice(0, 19)}…` : full;
+        svg.appendChild(usageReportSpeedSvg('rect', { x: margin.left + plotWidth + 8, y: at - 4.5, width: 9, height: 9, rx: 2.5, style: `fill:${color}` }));
+        svg.appendChild(usageReportSpeedSvg('text', { class: 'speed-end-label', x: margin.left + plotWidth + 22, y: at + 4 }, name));
+      });
+      svg.appendChild(usageReportSpeedSvg('g', { class: 'speed-highlight' }));
+      const tip = document.createElement('div');
+      tip.className = 'speed-tip';
+      tip.hidden = true;
+      host.replaceChildren(svg, tip);
+      state.chartGeom = { left: margin.left, top: margin.top, plotWidth, plotHeight, width, count, x, y, cursor: null };
+    }
+
+    function usageReportSpeedShowPoint(index) {
+      const state = usageReportSpeedState;
+      const model = state.chart;
+      const geom = state.chartGeom;
+      const host = document.getElementById('usageReportSpeedChart');
+      if (!host || !model || !geom || !model.series.length || index === null) { usageReportSpeedHidePoint(); return; }
+      geom.cursor = index;
+      const xhair = host.querySelector('.speed-xhair');
+      if (xhair) {
+        xhair.setAttribute('x1', geom.x(index));
+        xhair.setAttribute('x2', geom.x(index));
+        xhair.setAttribute('visibility', 'visible');
+      }
+      const highlight = host.querySelector('.speed-highlight');
+      if (highlight) {
+        highlight.replaceChildren(...model.series.filter((entry) => entry.values[index] !== null).map((entry) => usageReportSpeedSvg('circle', {
+          class: 'speed-point', cx: geom.x(index), cy: geom.y(entry.values[index]), r: 5, style: `fill:${usageReportSpeedColor(entry.id)}`,
+        })));
+      }
+      const tip = host.querySelector('.speed-tip');
+      if (!tip) return;
+      const title = document.createElement('div');
+      title.className = 'speed-tip-title';
+      title.textContent = model.titles[index] || '';
+      const lines = [title];
+      model.series.forEach((entry) => {
+        const value = entry.values[index];
+        const row = document.createElement('div');
+        row.className = 'speed-tip-row';
+        const swatch = document.createElement('span');
+        swatch.className = 'speed-swatch';
+        swatch.style.setProperty('--speed-series', usageReportSpeedColor(entry.id));
+        const name = document.createElement('span');
+        name.append(document.createTextNode(`${entry.model} `), usageReportSpeedText(entry.harness, 'speed-muted'));
+        row.append(swatch, name, usageReportSpeedText(usageReportSpeedFormatRate(value), 'speed-tip-value'));
+        const par = entry.parallelism[index];
+        const sub = value === null ? t('usageReportSpeedNoMeasurements')
+          : `${t('usageReportSpeedTipCalls', { n: formatNumber(entry.calls[index]) })}`
+            + (model.lens === 'combined' && par !== null ? ` · ${t('usageReportSpeedTipParallel', { par: usageReportSpeedFormatRate(par) })}` : '');
+        lines.push(row, usageReportSpeedText(sub, 'speed-tip-sub'));
+      });
+      tip.replaceChildren(...lines);
+      tip.hidden = false;
+      const tipWidth = tip.offsetWidth;
+      const left = geom.x(index) + 14 + tipWidth > geom.width ? geom.x(index) - 14 - tipWidth : geom.x(index) + 14;
+      tip.style.left = `${Math.max(0, left)}px`;
+      tip.style.top = `${geom.top}px`;
+    }
+
+    function usageReportSpeedHidePoint() {
+      const host = document.getElementById('usageReportSpeedChart');
+      if (usageReportSpeedState.chartGeom) usageReportSpeedState.chartGeom.cursor = null;
+      if (!host) return;
+      host.querySelector('.speed-xhair')?.setAttribute('visibility', 'hidden');
+      host.querySelector('.speed-highlight')?.replaceChildren();
+      const tip = host.querySelector('.speed-tip');
+      if (tip) tip.hidden = true;
+    }
+
+    // The legend is the selection: a name, its rate over the whole window, and a
+    // way to remove it. A row the window does not hold says so rather than vanish.
+    function usageReportRenderSpeedLegend() {
+      const host = document.getElementById('usageReportSpeedLegend');
+      const state = usageReportSpeedState;
+      if (host) {
+        const lens = usageReportSpeedLens();
+        const items = state.selected.map((id) => {
+          const { model, harness, row } = usageReportSpeedName(id);
+          const item = document.createElement('span');
+          item.className = 'speed-legend-item';
+          const swatch = document.createElement('span');
+          swatch.className = 'speed-swatch';
+          swatch.style.setProperty('--speed-series', usageReportSpeedColor(id));
+          item.append(swatch, usageReportSpeedText(model));
+          if (harness) item.appendChild(usageReportSpeedText(harness, 'speed-muted'));
+          if (row) {
+            item.appendChild(usageReportSpeedText(usageReportSpeedFormatRate(usageReportSpeedRate(row)), 'speed-legend-value'));
+            const par = usageReportSpeedRateValue(row.parallelism);
+            if (lens === 'combined' && par !== null && par >= USAGE_REPORT_SPEED_PAR_SHOWN) {
+              item.appendChild(usageReportSpeedText(`×${usageReportSpeedFormatRate(par)}`, 'speed-muted'));
+            }
+          } else {
+            item.appendChild(usageReportSpeedText(t('usageReportSpeedNotHere'), 'speed-muted'));
+          }
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.dataset.speedRemove = id;
+          remove.setAttribute('aria-label', t('usageReportSpeedRemove', { model }));
+          remove.textContent = '×';
+          item.appendChild(remove);
+          return item;
+        });
+        if (state.selected.length > 1) {
+          const clear = document.createElement('button');
+          clear.type = 'button';
+          clear.className = 'speed-link';
+          clear.dataset.speedClear = '1';
+          clear.textContent = t('usageReportSpeedClear');
+          items.push(clear);
+        }
+        host.replaceChildren(...items);
+      }
+      // Inform, never block: two timing methods in one chart are worth naming,
+      // because part of a gap between them can be the method rather than the model.
+      const mixed = document.getElementById('usageReportSpeedMixed');
+      if (!mixed) return;
+      const kinds = [...new Set(state.selected.map((id) => usageReportSpeedName(id).row)
+        .filter(Boolean).flatMap(usageReportSpeedKinds))];
+      mixed.hidden = kinds.length < 2;
+      if (kinds.length < 2) { mixed.replaceChildren(); return; }
+      const lead = document.createElement('b');
+      lead.textContent = t('usageReportSpeedMixedLead');
+      const parts = [lead, document.createTextNode(' ')];
+      kinds.forEach((kind, index) => {
+        if (index) parts.push(document.createTextNode(' · '));
+        const name = usageReportSpeedText(usageReportSpeedKindShort(kind), 'speed-why');
+        name.title = usageReportSpeedKindLabel(kind);
+        parts.push(name);
+      });
+      parts.push(document.createTextNode(`. ${t('usageReportSpeedMixedTail')}`));
+      mixed.replaceChildren(...parts);
+    }
+
+    // The chart's numbers as a table, for screen readers and for copying.
+    function usageReportRenderSpeedChartData() {
+      const host = document.getElementById('usageReportSpeedChartData');
+      if (!host) return;
+      const model = usageReportSpeedState.chart;
+      if (!model || !model.series.length) {
+        host.replaceChildren(usageReportSpeedText(t('usageReportSpeedNothingCharted')));
         return;
       }
-      const hourly = data.hourly;
-      const rates = hourly.map((row) => usageReportSpeedHourRate(row.output_tok_per_s));
-      const peak = Math.max(0, ...rates.filter((rate) => rate !== null));
-      // Only hours with a measurement get a bar. An empty hour is a gap in the
-      // strip, never a bar of height zero: zero is a measurement, and this one
-      // was not taken.
-      host.replaceChildren(...hourly.map((row, index) => {
-        const rate = rates[index];
-        const height = rate && peak > 0 ? Math.max(4, Math.round((rate / peak) * 100)) : 0;
-        const isPeak = rate !== null && peak > 0 && rate === peak;
-        return usageReportSpeedHourCell(row, index, rate, height, isPeak);
-      }));
-      const excludedTotal = usageReportSpeedAbsence(data).excluded;
-      bins.replaceChildren(...(data.six_hour || []).map((row) => {
+      const table = document.createElement('table');
+      const head = document.createElement('tr');
+      const corner = document.createElement('th');
+      corner.scope = 'col';
+      corner.textContent = t(usageReportSpeedState.view === 'hour' ? 'usageReportSpeedColHour' : 'usageReportSpeedColPeriod');
+      head.appendChild(corner);
+      model.series.forEach((entry) => {
+        const th = document.createElement('th');
+        th.scope = 'col';
+        th.textContent = entry.harness ? `${entry.model} · ${entry.harness}` : entry.model;
+        head.appendChild(th);
+      });
+      const thead = document.createElement('thead');
+      thead.appendChild(head);
+      const tbody = document.createElement('tbody');
+      model.titles.forEach((title, index) => {
         const tr = document.createElement('tr');
-        tr.appendChild(usageReportSpeedCell(row.label));
-        tr.appendChild(usageReportSpeedCell(usageReportSpeedFormatRate(row.output_tok_per_s),
-          row.output_tok_per_s === null || row.output_tok_per_s === undefined));
-        tr.appendChild(usageReportSpeedCallsCell(row));
-        tr.appendChild(usageReportSpeedCoverageCell(row.coverage));
-        tr.appendChild(usageReportSpeedCell(formatNumber(Number(row.days_with_measurements || 0))));
-        return tr;
-      }));
-      if (note) {
-        note.textContent = `${t('usageReportSpeedDaysWith')} ${formatNumber(Number(data.days_with_measurements || 0))}/${formatNumber(Number(data.selected_days || 0))}`;
-        note.title = `${t('usageReportSpeedMeasuredRange')} ${usageReportSpeedFormatStamp(data.first_measured_at)} → ${usageReportSpeedFormatStamp(data.last_measured_at)}`
-          + ` · ${formatNumber(excludedTotal)} ${t('usageReportSpeedExcluded')}`
-          + ` · ${formatNumber(Number(data.missing_timing_calls || 0))} ${t('usageReportSpeedWithoutTiming')}`;
-      }
+        tr.appendChild(usageReportSpeedCell(title));
+        model.series.forEach((entry) => tr.appendChild(usageReportSpeedCell(
+          usageReportSpeedFormatRate(entry.values[index]), entry.values[index] === null)));
+        tbody.appendChild(tr);
+      });
+      table.append(thead, tbody);
+      host.replaceChildren(table);
     }
 
     function usageReportServers() {
@@ -21796,6 +22846,11 @@
       if (period === 'month') {
         const first = new Date(today.getFullYear(), today.getMonth() - back, 1);
         const stop = back === 0 ? today : new Date(first.getFullYear(), first.getMonth() + 1, 0);
+        return { date_from: formatDateKey(first), date_to: formatDateKey(stop) };
+      }
+      if (period === 'quarter') {
+        const first = new Date(today.getFullYear(), Math.floor(today.getMonth() / 3) * 3 - 3 * back, 1);
+        const stop = back === 0 ? today : new Date(first.getFullYear(), first.getMonth() + 3, 0);
         return { date_from: formatDateKey(first), date_to: formatDateKey(stop) };
       }
       const year = today.getFullYear() - back;
@@ -24001,10 +25056,12 @@
       if (tab === 'pricing' && !pricingDbLoaded) loadPricingDb();
       // The quick ranges drive the overview's trailing windows; the report walks
       // whole periods instead, so the two swap in the same strip of the top bar.
+      // The speed page walks the shared range with its own period control, so the
+      // quick ranges step aside there too and leave the picker for custom dates.
       const overviewRanges = document.getElementById('overviewQuickRanges');
       const reportChips = document.getElementById('reportPeriodChips');
       if (overviewRanges && reportChips) {
-        overviewRanges.hidden = tab === 'report';
+        overviewRanges.hidden = tab === 'report' || tab === 'speed';
         reportChips.hidden = tab !== 'report';
         if (tab === 'report') usageReportRenderPeriodChips();
       }

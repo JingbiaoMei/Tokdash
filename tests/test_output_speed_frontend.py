@@ -1,12 +1,14 @@
 """Dashboard-side rules for the output-speed surfaces.
 
-Two surfaces, and only two: the standalone output-speed page (one comparison
-table, plus a within-model time-of-day view) and the session modal's response
-table. The properties worth automating are the ones a screenshot cannot keep
+Two surfaces, and only two: the standalone output-speed page (one chart over
+the window, then one comparison table) and the session modal's response table. The properties worth automating are the ones a screenshot cannot keep
 from drifting later:
 
 * the comparison table is one table, not a stack of sections;
-* nothing asks the server for speed until the subtab is opened;
+* nothing asks the server for speed until the subtab is opened, and only the
+  period and the grouping ask it at all;
+* Combined is the default, merges a model across harnesses, and a pick survives
+  the switch to Per stream and back;
 * absence sorts last, formats as a dash, and never becomes a zero;
 * every element the speed code reaches for actually exists in the markup;
 * every speed string is present in all six shipped languages.
@@ -61,6 +63,12 @@ def _extract(signature: str) -> str:
     raise AssertionError(f"unterminated: {signature}")
 
 
+def _line(prefix: str) -> str:
+    """One single-line declaration, whole: a constant has no body to brace-match."""
+    start = SRC.index(prefix)
+    return SRC[start:SRC.index(chr(10), start)]
+
+
 def _run_node(tmp_path: Path, name: str, script: str):
     if shutil.which("node") is None:
         pytest.skip("node is not installed")
@@ -96,7 +104,23 @@ def _rows_js() -> str:
         # every tool and the table shows one of them.
         _extract("function usageReportSpeedVisibleRows()"),
         _extract("function usageReportSpeedTools()"),
+        # Which rows the table shows depends on the lens: merged per model in
+        # Combined across every harness, one row per harness otherwise.
+        _line("const USAGE_REPORT_SPEED_MAX_SERIES ="),
+        _extract("function usageReportSpeedHasCombined()"),
+        _extract("function usageReportSpeedLens()"),
+        _extract("function usageReportSpeedMerging()"),
+        _extract("function usageReportSpeedModelRows()"),
+        _extract("function usageReportSpeedSources(row)"),
+        _extract("function usageReportSpeedKinds(row)"),
+        _extract("function usageReportSpeedHarnessText(row)"),
+        _extract("function usageReportSpeedRowId(row)"),
+        _extract("function usageReportSpeedRate(row)"),
+        _extract("function usageReportSpeedTableRows()"),
         _extract("function usageReportSpeedSortedRows()"),
+        _extract("function usageReportSpeedSetSelection(ids, slots)"),
+        _extract("function usageReportSpeedRemapSelection()"),
+        _extract("function usageReportSpeedSeedSelection()"),
         # The measured-day union the note under the table reads.
         _extract("function usageReportSpeedMeasuredDays(rows)"),
         _extract("function usageReportSpeedFormatRate(rate)"),
@@ -119,26 +143,29 @@ def test_output_speed_renders_in_exactly_two_places():
     assert 'data-tab="speed"' in SRC
     assert SRC.index('id="report-content"') < SRC.index('id="speed-content"') < SRC.index('id="usageReportSpeedPanel"')
     speed_panel = SRC[SRC.index('id="speed-content"'):SRC.index('id="quota-content"')]
-    assert 'data-period=' not in speed_panel, "only the global range controls select speed dates"
-    # No leftover from the earlier four-section demo: the across view is a single
-    # table, and its method detail is a row inside it rather than a section.
-    across = SRC[SRC.index('<div id="usageReportSpeedAcross">'):SRC.index('<div id="usageReportSpeedTemporal"')]
+    # The page walks periods, but owns no dates: its control commits the shared
+    # range through the same router as the top picker.
+    assert 'data-period=' not in speed_panel, "the report's period control is not this page's"
+    assert 'data-speed-period="quarter"' in speed_panel
+    commit = _extract("function usageReportSpeedCommitPeriod(")
+    assert "commitDateSelection(" in commit
+    # One comparison table, and the method of each row is on the row itself.
+    across = SRC[SRC.index('<div id="usageReportSpeedAcross">'):SRC.index('<details class="speed-method-note"')]
     assert across.count("<table") == 1, "the across view is one comparison table"
-    # The method row is built as an element, so it is a class assignment here and
-    # not a markup attribute: the Report tab never writes innerHTML.
-    assert "tr.className = 'speed-detail-row'" in SRC
+    assert "'speed-model-meta'" in _extract("function usageReportSpeedTableRow(")
     for dead in ("usageReportSpeedMethod", "usageReportSpeedCoverage",
-                 "usageReportSpeedExclusions", "usageReportSpeedInstrument"):
+                 "usageReportSpeedExclusions", "usageReportSpeedInstrument",
+                 "usageReportSpeedTemporal", "usageReportSpeedPick", "usageReportSpeedHours"):
         assert f'id="{dead}"' not in SRC, f"{dead} is a section the design no longer has"
 
 
-def test_the_time_of_day_view_is_within_model_not_another_table_of_models():
-    temporal = SRC[SRC.index('<div id="usageReportSpeedTemporal"'):SRC.index('</section>', SRC.index('<div id="usageReportSpeedTemporal"'))]
-    # One picker for one model, one hour strip, one six-hour table.
-    assert 'id="usageReportSpeedPick"' in temporal
-    assert 'id="usageReportSpeedHours"' in temporal
-    assert temporal.count("<table") == 1
-    assert "data-speed-sort" not in temporal, "no second sortable model ranking"
+def test_the_chart_is_one_view_with_two_layouts_and_no_second_ranking():
+    chart = SRC[SRC.index('aria-labelledby="usageReportSpeedChartTitle"'):SRC.index('<div class="speed-filters">')]
+    assert 'id="usageReportSpeedChart"' in chart
+    assert 'data-speed-view="time"' in chart and 'data-speed-view="hour"' in chart
+    assert 'id="usageReportSpeedBucket"' in chart, "the grouping lives on the chart it groups"
+    assert "data-speed-sort" not in chart, "no second sortable model ranking"
+    assert chart.count("<table") == 0, "the chart's data table is built from the chart, not a second view"
 
 
 def test_the_page_asks_for_speed_only_when_the_subtab_is_open():
@@ -151,14 +178,14 @@ def test_the_page_asks_for_speed_only_when_the_subtab_is_open():
     multiplies, and a load that forgets the gate is invisible to a string match.
     """
     callers = [
-        name for name in ("usageReportLoadSpeed", "usageReportEnsureTemporal")
+        name for name in ("usageReportLoadSpeed", "usageReportEnsureTrend")
         if "/api/output-speed" in _extract(
             "async function usageReportLoadSpeed("
             if name == "usageReportLoadSpeed"
-            else "function usageReportEnsureTemporal("
+            else "function usageReportEnsureTrend("
         )
     ]
-    assert callers == ["usageReportLoadSpeed", "usageReportEnsureTemporal"]
+    assert callers == ["usageReportLoadSpeed", "usageReportEnsureTrend"]
     loader = _extract("async function loadUsageReport(options = {})")
     assert len(loader) > 500, "the extractor returned a signature, not a body"
     assert "/api/output-speed" not in loader
@@ -194,8 +221,9 @@ def test_a_hidden_or_otherwise_unviewed_panel_asks_for_nothing(tmp_path):
         "const asked = [];",
         "function usageReportRenderSpeedState() {}",
         "function usageReportRenderSpeed() {}",
-        "function usageReportSpeedPickDefaultTool() {}",
-        "function usageReportEnsureTemporal() {}",
+        "function usageReportSpeedRemapSelection() {}",
+        "function usageReportSpeedSeedSelection() {}",
+        "function usageReportEnsureTrend() {}",
         "function fetchJsonWithRetry(server, url, options, retry) {",
         "  asked.push(url);",
         "  if (retry && retry.shouldContinue && !retry.shouldContinue()) {",
@@ -278,21 +306,20 @@ def test_a_hidden_or_otherwise_unviewed_panel_asks_for_nothing(tmp_path):
     )
 
 
-def test_a_failed_temporal_load_is_retried_only_when_the_view_returns(tmp_path):
+def test_a_failed_chart_load_is_retried_only_when_the_view_returns(tmp_path):
     script = chr(10).join([
         _extract("const usageReportSpeedState = {"),
-        _extract("function usageReportEnsureTemporal("),
+        _extract("function usageReportEnsureTrend("),
         _extract("function usageReportSpeedResume()"),
         "function usageReportSpeedWatchJob() {}",
         "const document = { hidden: false };",
         "function usageReportSpeedIsVisible() { return !document.hidden; }",
         "function usageReportSpeedKey() { return 'window'; }",
         "function outputSpeedRenderControls() {}",
-        "function usageReportSpeedSelection() { return { source: 'kimi', model: 'kimi-k3',",
-        "  measurement_kind: 'server_decode', token_basis: 'output_reasoning_unspecified' }; }",
         "function outputSpeedServer() { return { id: 'local' }; }",
-        "function usageReportSpeedQuery() { return 'view=time-of-day'; }",
-        "function usageReportRenderSpeedTemporal() {}",
+        "function usageReportSpeedQuery() { return 'view=trend'; }",
+        "function usageReportRenderSpeedChartControls() {}",
+        "function usageReportRenderSpeedChart() {}",
         "function usageReportRenderSpeed() {}",
         "function usageReportLoadSpeed() { throw new Error('comparison was already loaded'); }",
         "const requests = [];",
@@ -302,13 +329,12 @@ def test_a_failed_temporal_load_is_retried_only_when_the_view_returns(tmp_path):
   const out = {};
   const settle = () => new Promise(resolve => setImmediate(resolve));
   usageReportSpeedState.loadedKey = 'window';
-  usageReportSpeedState.mode = 'temporal';
   usageReportSpeedResume();
   document.hidden = true;
   requests[0].reject(new Error('503: temporarily unavailable'));
   await settle();
-  out.afterFailure = { error: usageReportSpeedState.temporal.__error,
-    loading: usageReportSpeedState.temporalLoading };
+  out.afterFailure = { error: usageReportSpeedState.trend.__error,
+    loading: usageReportSpeedState.trendLoading };
   usageReportSpeedResume();
   out.whileHidden = requests.length;
 
@@ -316,23 +342,53 @@ def test_a_failed_temporal_load_is_retried_only_when_the_view_returns(tmp_path):
   usageReportSpeedResume();
   out.afterReturn = requests.length;
   if (requests[1]) {
-    requests[1].resolve({ hours: [{ hour: 12, speed_calls: 4, output_tok_per_s: 40 }] });
+    requests[1].resolve({ granularity: 'day', series: [], model_series: [] });
     await settle();
   }
-  out.recovered = !!usageReportSpeedState.temporal.hours;
-  out.loading = usageReportSpeedState.temporalLoading;
+  out.recovered = Array.isArray(usageReportSpeedState.trend.series);
+  out.loading = usageReportSpeedState.trendLoading;
   usageReportSpeedResume();
   out.cachedReturn = requests.length;
   process.stdout.write(JSON.stringify(out));
 })();
 """,
     ])
-    out = _run_node(tmp_path, "temporal_retry_on_return", script)
+    out = _run_node(tmp_path, "trend_retry_on_return", script)
     assert out["afterFailure"] == {"error": "503: temporarily unavailable", "loading": False}
     assert out["whileHidden"] == 1, "the hidden view retried its failed request"
     assert out["afterReturn"] == 2, "an error was cached as a successfully loaded chart"
     assert out["recovered"] is True and out["loading"] is False
     assert out["cachedReturn"] == 2, "a successful chart should be reused on return"
+
+
+def test_the_chart_waits_for_the_comparison_load_instead_of_stealing_its_token(tmp_path):
+    """Every request bumps the one token, so a chart asked for mid-load would
+    discard the comparison rows on their way in. The loader asks for the chart
+    when it lands; anything else asking earlier is a no-op."""
+    script = chr(10).join([
+        _extract("const usageReportSpeedState = {"),
+        _extract("function usageReportEnsureTrend("),
+        "function usageReportSpeedIsVisible() { return true; }",
+        "function usageReportSpeedKey() { return 'window'; }",
+        "function outputSpeedServer() { return { id: 'local' }; }",
+        "function usageReportSpeedQuery() { return 'view=trend'; }",
+        "function usageReportRenderSpeedChartControls() {}",
+        "function usageReportRenderSpeedChart() {}",
+        "const asks = [];",
+        "function fetchJsonWithRetry(server, url) { asks.push(url); return new Promise(() => {}); }",
+        """
+usageReportSpeedState.loading = true;
+usageReportSpeedState.token = 7;
+usageReportEnsureTrend();
+const during = { asks: asks.length, token: usageReportSpeedState.token };
+usageReportSpeedState.loading = false;
+usageReportEnsureTrend();
+console.log(JSON.stringify({ during, after: asks.length }));
+""",
+    ])
+    out = _run_node(tmp_path, "trend_waits_for_rows", script)
+    assert out["during"] == {"asks": 0, "token": 7}
+    assert out["after"] == 1
 
 
 def test_a_stale_retry_chain_stops_instead_of_retrying(tmp_path):
@@ -446,7 +502,7 @@ def test_a_page_left_during_the_backoff_is_not_charged_for_another_request(tmp_p
 
 def test_range_changes_invalidate_speed_without_charging_the_report():
     invalidate = _extract("function usageReportSpeedInvalidate(")
-    for field in ("loadedKey", "temporalKey", "rows", "payload"):
+    for field in ("loadedKey", "trendKey", "rows", "payload"):
         assert field in invalidate
     loader = _extract("async function usageReportLoadSpeed(")
     assert "usageReportSpeedInvalidate();" in loader
@@ -465,8 +521,9 @@ def _standalone_loader_js():
         'function outputSpeedServer() { return {id: "local"}; }',
         'function outputSpeedRenderControls() {}',
         'function usageReportRenderSpeed() {}',
-        'function usageReportEnsureTemporal() {}',
-        'function usageReportSpeedPickDefaultTool() {}',
+        'function usageReportEnsureTrend() {}',
+        'function usageReportSpeedRemapSelection() {}',
+        'function usageReportSpeedSeedSelection() {}',
         'function usageReportSpeedWatchJob() {}',
         'function updateDashboard() { throw new Error("Range switch used Overview loader"); }',
         'const asks = [];',
@@ -573,14 +630,13 @@ console.log(JSON.stringify({staleReads,hiddenReads,secondRetained,hiddenSubscrip
 def test_terminal_model_job_reads_snapshot_and_keeps_manual_refresh_explicit(tmp_path, terminal_state):
     program = _standalone_loader_js().replace(
         'function usageReportSpeedWatchJob() {}', _extract('function usageReportSpeedWatchJob(')
-    ).replace('function usageReportEnsureTemporal() {}',
-              'const hourly=[]; function usageReportEnsureTemporal(options) { hourly.push(options); }')
+    ).replace('function usageReportEnsureTrend() {}',
+              'const hourly=[]; function usageReportEnsureTrend(options) { hourly.push(options); }')
     program += """
 const events=[];
 function pickRoute(){return null;}function serverPath(server,path){return path;}
 class EventSource{constructor(url){this.url=url;events.push(this);}close(){this.closed=true;}}
 (async()=>{
- usageReportSpeedState.mode='temporal';
  const first=usageReportLoadSpeed();asks[0].resolve({rows:[],cache:{state:'building',job_id:'first'}});await first;
  events[0].onmessage({data:JSON.stringify({state:TERMINAL})});
  asks[1].resolve({rows:[{model:'published'}],cache:{state:'stale',job_id:'unexpected'}});await flush();
@@ -599,23 +655,25 @@ class EventSource{constructor(url){this.url=url;events.push(this);}close(){this.
     assert out['subscriptions'] == 2
 
 
-def test_terminal_hourly_followup_reads_snapshot_but_explicit_hourly_load_can_ensure(tmp_path):
+def test_terminal_chart_followup_reads_snapshot_but_explicit_chart_load_can_ensure(tmp_path):
     program = '\n'.join([
-        _extract('const usageReportSpeedState = {'), _extract('function usageReportEnsureTemporal('),
+        _extract('const usageReportSpeedState = {'), _extract('function usageReportEnsureTrend('),
         "function usageReportSpeedKey(){return 'range';}function usageReportSpeedIsVisible(){return true;}",
-        "function usageReportSpeedSelection(){return {source:'codex',model:'m',measurement_kind:'response_window',token_basis:'output_including_reasoning'};}",
-        "function outputSpeedServer(){return {id:'local'};}function usageReportRenderSpeedTemporal(){}",
+        "function outputSpeedServer(){return {id:'local'};}",
+        "function usageReportRenderSpeedChartControls(){}function usageReportRenderSpeedChart(){}",
         "function usageReportSpeedQuery(params){return new URLSearchParams(Object.entries(params).filter(([,v])=>v!==null)).toString();}",
-        "const asks=[];function fetchJsonWithRetry(server,url){asks.push(url);return Promise.resolve({hourly:[]});}",
+        "const asks=[];function fetchJsonWithRetry(server,url){asks.push(url);return Promise.resolve({series:[]});}",
         """
-(async()=>{usageReportEnsureTemporal({cacheOnly:true});await new Promise(done=>setImmediate(done));
- usageReportSpeedState.temporalKey='';usageReportEnsureTemporal();await new Promise(done=>setImmediate(done));
+(async()=>{usageReportEnsureTrend({cacheOnly:true});await new Promise(done=>setImmediate(done));
+ usageReportSpeedState.trendKey='';usageReportEnsureTrend();await new Promise(done=>setImmediate(done));
+ usageReportSpeedState.bucket='week';usageReportEnsureTrend();await new Promise(done=>setImmediate(done));
  console.log(JSON.stringify(asks));})();
 """,
     ])
-    out = _run_node(tmp_path, 'terminal_hourly_snapshot', program)
-    assert len(out) == 2 and 'cache_only=1' in out[0] and 'cache_only' not in out[1]
-
+    out = _run_node(tmp_path, 'terminal_trend_snapshot', program)
+    assert len(out) == 3 and 'cache_only=1' in out[0] and 'cache_only' not in out[1]
+    assert all('view=trend' in url for url in out)
+    assert 'bucket' not in out[1] and 'bucket=week' in out[2], "a grouping is its own chart"
 
 
 def test_tool_picker_includes_unmeasured_harnesses(tmp_path):
@@ -684,17 +742,18 @@ def test_model_snapshot_status_distinguishes_stale_pending_active_and_error_with
 function element(){return {parts:[],dataset:{},appendChild(x){this.parts.push(x);},replaceChildren(...xs){this.parts=xs;},setAttribute(){},addEventListener(){}};}
 const body=element(),header=element();let message='';
 const document={getElementById:id=>id==='usageReportSpeedBody'?body:id==='lastUpdate'?header:null,createElement:element};
-function usageReportRenderSpeedEmptyAction(){}function usageReportRenderSpeedMode(){}function usageReportRenderSpeedSortHeaders(){}
-function usageReportSpeedPartialLine(){}function usageReportRenderSpeedSources(){}function usageReportRenderSpeedPicker(){}
-function usageReportSpeedTools(){return [];}function usageReportSpeedSortedRows(){return usageReportSpeedState.rows;}
-function usageReportSpeedKindLabel(kind){return kind;}function usageReportSpeedCell(value){return {value};}
-function usageReportSpeedCallsCell(row){return {value:row.speed_calls};}function usageReportSpeedCoverageCell(row){return {value:row.coverage};}
-function usageReportSpeedFormatRate(rate){return String(rate);}function usageReportRenderSpeedState(text){message=text;}
+function usageReportRenderSpeedEmptyAction(){}function usageReportRenderSpeedLens(){}function usageReportRenderSpeedSortHeaders(){}
+function usageReportSpeedPartialLine(){}function usageReportRenderSpeedSources(){}function usageReportRenderSpeedTools(){}
+function usageReportRenderSpeedChartControls(){}function usageReportRenderSpeedChart(){}
+function usageReportSpeedSortedRows(){return usageReportSpeedState.rows;}function usageReportSpeedVisibleRows(){return usageReportSpeedState.rows;}
+function usageReportSpeedRate(row){return row.output_tok_per_s;}
+function usageReportSpeedTableRow(row){return {rate:String(usageReportSpeedRate(row))};}
+function usageReportRenderSpeedState(text){message=text;}
 usageReportSpeedState.active=true;usageReportSpeedState.rows=[{source:'codex',model:'m',output_tok_per_s:72,speed_calls:4,coverage:1}];
 const states=[{state:'stale',job_id:null},{state:'stale',job_id:'active'},{state:'building',job_id:null},
  {state:'pending',job_id:null},{state:'not-indexed',job_id:null},{state:'error',job_id:null,error:'worker failed'},{state:'ready',job_id:null}];
 console.log(JSON.stringify(states.map(cache=>{usageReportSpeedState.payload={cache};usageReportRenderSpeed();
- return {message,header:header.textContent,rows:body.parts.length,rate:body.parts[0].parts[2].value};})));
+ return {message,header:header.textContent,rows:body.parts.length,rate:body.parts[0].rate};})));
 """,
     ])
     out = _run_node(tmp_path, 'snapshot_status', script)
@@ -709,32 +768,92 @@ console.log(JSON.stringify(states.map(cache=>{usageReportSpeedState.payload={cac
     assert all(row['rows'] == 1 and row['rate'] == '72' for row in out)
 
 
-def test_hourly_snapshot_note_preserves_measurements_without_repeating_cache_status(tmp_path):
-    script = STUBS + '\n'.join([
-        _extract('const usageReportSpeedState = {'),
-        _extract('function usageReportSpeedCacheMessage('),
-        _extract('function usageReportSpeedHourRate('),
-        _extract('function usageReportRenderSpeedTemporal()'),
-        """
-function element(){return {parts:[],replaceChildren(...xs){this.parts=xs;}};}
-const host=element(),bins=element(),note=element();
-const document={getElementById:id=>id==='usageReportSpeedHours'?host:id==='usageReportSpeedBinsBody'?bins:note};
-function usageReportRenderSpeedPicker(){}function usageReportSpeedHourCell(row,index,rate){return {rate};}
-function usageReportSpeedAbsence(){return {excluded:0};}function usageReportSpeedFormatStamp(ms){return String(ms);}
-usageReportSpeedState.mode='temporal';
-const states=[{state:'stale',job_id:null},{state:'stale',job_id:'active'},{state:'error',job_id:null,error:'worker failed'}];
-console.log(JSON.stringify(states.map(cache=>{
- usageReportSpeedState.temporal={cache,hourly:[{label:'00',output_tok_per_s:42}],six_hour:[],days_with_measurements:1,selected_days:3};
- usageReportRenderSpeedTemporal();return {note:note.textContent,rate:host.parts[0].rate};
-})));
-""",
+def _chart_model_js() -> str:
+    return chr(10).join([
+        STUBS,
+        "function parseDateKey(value) { const [y, m, d] = String(value).split('-').map(Number); return new Date(y, m - 1, d); }",
+        _extract("const USAGE_REPORT_SPEED_BUCKET_KEYS = {"),
+        _extract("const usageReportSpeedState = {"),
+        _extract("function usageReportSpeedHasCombined()"),
+        _extract("function usageReportSpeedLens()"),
+        _extract("function usageReportSpeedModelRows()"),
+        _extract("function usageReportSpeedSources(row)"),
+        _extract("function usageReportSpeedHarnessText(row)"),
+        _extract("function usageReportSpeedRowId(row)"),
+        _extract("function usageReportSpeedRateValue(raw)"),
+        _extract("function usageReportSpeedQuarterLabel(date)"),
+        _extract("function usageReportSpeedBucketLabel("),
+        _extract("function usageReportSpeedName(id)"),
+        _extract("function usageReportSpeedTrendSeries(id)"),
+        _extract("function usageReportSpeedChartModel()"),
     ])
-    out = _run_node(tmp_path, 'hourly_snapshot_status', script)
-    assert out == [
-        {'note': 'usageReportSpeedDaysWith 1/3', 'rate': 42},
-        {'note': 'usageReportSpeedDaysWith 1/3', 'rate': 42},
-        {'note': 'usageReportSpeedDaysWith 1/3', 'rate': 42},
-    ]
+
+
+def test_the_chart_reads_the_lens_view_and_merged_series_and_keeps_gaps(tmp_path):
+    script = _chart_model_js() + """
+const state = usageReportSpeedState;
+state.payload = {models: []};
+state.rows = [{source: 'codex', model: 'm', measurement_kind: 'response_window', token_basis: 'b'}];
+state.trend = {
+  granularity: 'day',
+  buckets: [{key: '2026-10-01', from: '2026-10-01', to: '2026-10-01'},
+            {key: '2026-10-02', from: '2026-10-02', to: '2026-10-02'}],
+  series: [{source: 'codex', model: 'm', measurement_kind: 'response_window', token_basis: 'b',
+            combined: [20, null], per_stream: [10, null], parallelism: [2, null], calls: [3, 0],
+            hours: {combined: Array(24).fill(null).map((_, h) => h === 9 ? 30 : null),
+                    per_stream: Array(24).fill(null).map((_, h) => h === 9 ? 15 : null),
+                    parallelism: Array(24).fill(null), calls: Array(24).fill(0)}}],
+  model_series: [{model: 'm', sources: ['codex', 'opencode'], combined: [25, 0], parallelism: [2.5, 1], calls: [4, 1],
+                  hours: {combined: Array(24).fill(null), parallelism: Array(24).fill(null), calls: Array(24).fill(0)}}],
+};
+const pick = (id) => { state.selected = [id]; return usageReportSpeedChartModel(); };
+const out = {};
+state.lens = 'combined';
+out.combined = pick('codex|m|response_window|b').series[0].values;
+out.labels = usageReportSpeedChartModel().labels.length;
+out.merged = pick('all|m').series[0].values;
+state.lens = 'stream';
+out.stream = pick('codex|m|response_window|b').series[0].values;
+out.mergedInStream = pick('all|m').series[0].values;
+state.view = 'hour';
+const hours = pick('codex|m|response_window|b');
+out.hourCount = hours.labels.length;
+out.hour9 = hours.series[0].values[9];
+out.hour10 = hours.series[0].values[10];
+out.unknown = pick('codex|gone|response_window|b').series[0];
+state.trend = {__error: 'boom'};
+out.errored = usageReportSpeedChartModel();
+console.log(JSON.stringify(out));
+"""
+    out = _run_node(tmp_path, "chart_model", script)
+    assert out["combined"] == [20, None], "an unmeasured bucket is a gap, not a zero"
+    assert out["labels"] == 2
+    assert out["merged"] == [25, 0], "a measured zero stays a zero"
+    assert out["stream"] == [10, None]
+    assert out["mergedInStream"] == [None, None], "a merged model has no per-stream line"
+    assert out["hourCount"] == 24 and out["hour9"] == 15 and out["hour10"] is None
+    assert out["unknown"]["model"] == "gone" and out["unknown"]["values"] == [None] * 24
+    assert out["errored"] is None
+
+
+def test_bucket_labels_follow_the_calendar(tmp_path):
+    script = _chart_model_js() + """
+const label = (bucket, granularity, index = 1) => usageReportSpeedBucketLabel(bucket, granularity, index);
+console.log(JSON.stringify({
+  hour: label({from: '2026-10-11', to: '2026-10-11', hour: 7}, 'hour').axis,
+  week: label({from: '2026-10-05', to: '2026-10-11'}, 'week').title,
+  clipped: label({from: '2026-10-01', to: '2026-10-04'}, 'week').title,
+  quarter: label({from: '2026-10-01', to: '2026-12-31'}, 'quarter').axis,
+  january: label({from: '2026-01-01', to: '2026-01-31'}, 'month').axis,
+  march: label({from: '2026-03-01', to: '2026-03-31'}, 'month').axis,
+}));
+"""
+    out = _run_node(tmp_path, "bucket_labels", script)
+    assert out["hour"] == "07"
+    assert out["week"] == "5 Oct – 11 Oct"
+    assert out["clipped"] == "1 Oct – 4 Oct", "a week clipped to the window says so"
+    assert out["quarter"] == "usageReportSpeedQuarter", "the quarter label is a translated template"
+    assert out["january"] != out["march"] and "26" in out["january"], "a year turn names the year"
 
 
 def test_another_pages_refresh_invalidates_speed_without_fetching_while_hidden(tmp_path):
@@ -789,18 +908,19 @@ def test_queued_overview_work_is_not_dispatched_on_the_speed_page(tmp_path):
 def test_every_element_the_speed_code_reaches_for_exists():
     """A missing id is silent in a browser and loud here.
 
-    The tool filter and the model picker each need their own element: one select
-    cannot serve two purposes, and the first draft wrote both through the same
-    id, which silently removed the per-tool filter from the page.
+    The harness pills, the chart and its grouping each need their own element:
+    one control cannot serve two purposes, and an earlier draft wrote two through
+    the same id, which silently removed the per-tool filter from the page.
     """
     ids = set(re.findall(r"getElementById\(['\"](usageReportSpeed[A-Za-z]*|sessionSpeed[A-Za-z]*)['\"]\)", SRC))
     ids |= set(re.findall(r"querySelector(?:All)?\(['\"]#(usageReportSpeed[A-Za-z]*|sessionSpeed[A-Za-z]*)", SRC))
     assert ids, "the speed code should reference elements"
     for element_id in sorted(ids):
         assert f'id="{element_id}"' in SRC, f"{element_id} is referenced but never rendered"
-    assert "usageReportSpeedTool" in ids
-    assert "usageReportSpeedPick" in ids
-    assert 'for="usageReportSpeedTool"' in SRC
+    for element_id in ("usageReportSpeedTools", "usageReportSpeedChart", "usageReportSpeedBucket",
+                       "usageReportSpeedLens", "usageReportSpeedPeriod", "usageReportSpeedSearch"):
+        assert element_id in ids, element_id
+    assert 'for="usageReportSpeedBucket"' in SRC
 
 
 def test_no_report_call_site_names_a_function_that_does_not_exist():
@@ -825,19 +945,21 @@ def test_standalone_speed_activation_sets_its_gate_before_loading():
     assert body.index("usageReportSpeedState.active = tab === 'speed'") < body.index("usageReportSpeedResume()")
     assert "outputSpeedRetirePending()" in body
     assert "usageReportSpeedSetSubtab" not in body
+    # The page's own period control replaces the quick ranges, as the report's does.
+    assert "overviewRanges.hidden = tab === 'report' || tab === 'speed'" in body
 
 
 def test_the_table_and_its_spanned_rows_agree_on_the_column_count():
     headers = re.findall(r'data-speed-sort="([a-z_]+)"', SRC)
-    assert headers == ["model", "source", "output_tok_per_s", "speed_calls", "coverage"]
-    # Both spanned rows are built by helpers now, so the span is a property rather
-    # than an attribute in a template string.
-    spanned = "\n".join([
-        _extract("function usageReportSpeedMessageRow(message)"),
-        _extract("function usageReportSpeedDetailRow(row)"),
-    ])
-    spans = set(re.findall(r"colSpan = (\d+)", spanned))
-    assert spans == {"5"}, f"spanned rows must match the {len(headers)} columns"
+    assert headers == ["model", "rate", "speed_calls", "coverage"]
+    table = SRC[SRC.index('id="usageReportSpeedTable"'):SRC.index('</thead>', SRC.index('id="usageReportSpeedTable"'))]
+    columns = table.count('<th scope="col"')
+    assert columns == 5, "a tick column, then the four sortable ones"
+    spans = set(re.findall(r"colSpan = (\d+)", _extract("function usageReportSpeedMessageRow(message)")))
+    assert spans == {str(columns)}, f"spanned rows must match the {columns} columns"
+    # A built row has a cell per column, too.
+    row = _extract("function usageReportSpeedTableRow(")
+    assert row.count("tr.appendChild(") == columns
 
 
 # --------------------------------------------------------------------------
@@ -846,15 +968,15 @@ def test_the_table_and_its_spanned_rows_agree_on_the_column_count():
 
 
 def test_an_unmeasured_hour_is_a_gap_not_a_zero_rate(tmp_path):
-    """The hour strip asks whether the hour was measured before it coerces.
+    """The chart asks whether a bucket was measured before it coerces.
 
     ``Number(null)`` is ``0``, so the first version of the time-of-day view drew
     every unmeasured hour as a labelled ``0.0 tok/s`` bar slot: a number, for a
     thing that never happened. The guard has to sit ahead of the coercion.
     """
-    script = STUBS + _extract("function usageReportSpeedHourRate(raw)") + """
+    script = STUBS + _extract("function usageReportSpeedRateValue(raw)") + """
 const cases = [null, undefined, '', '72.4', 0, 12.5, NaN, Infinity, 'abc'];
-console.log(JSON.stringify(cases.map((v) => usageReportSpeedHourRate(v))));
+console.log(JSON.stringify(cases.map((v) => usageReportSpeedRateValue(v))));
 """
     out = _run_node(tmp_path, "hour-rate", script)
     assert out[:4] == [None, None, None, 72.4], out
@@ -863,43 +985,365 @@ console.log(JSON.stringify(cases.map((v) => usageReportSpeedHourRate(v))));
     assert out[6:] == [None, None, None], "non-finite and unparseable rates are absence"
 
 
-def test_the_hour_strip_uses_that_guard():
-    body = _extract("function usageReportRenderSpeedTemporal()")
-    assert "usageReportSpeedHourRate(row.output_tok_per_s)" in body
-    assert "Number(row.output_tok_per_s)" not in body
+def test_the_chart_uses_that_guard():
+    body = _extract("function usageReportSpeedChartModel()")
+    assert "usageReportSpeedRateValue(at(raw, index))" in body
+    assert "Number(at(raw" not in body
+    draw = _extract("function usageReportDrawSpeedChart()")
+    assert "if (value === null) { pen = false; return; }" in draw, "a gap lifts the pen"
 
 
-def test_hour_tooltips_expose_values_and_keep_missing_hours_unmeasured(tmp_path):
-    script = _rows_js() + _extract('function usageReportSpeedHourCell(') + '''
-function element(tag) {
-  return {tag, style:{}, attributes:{}, parts:[], events:{},
-    setAttribute(key,value) {this.attributes[key] = value;},
-    addEventListener(key,callback) {this.events[key] = callback;},
-    appendChild(child) {this.parts.push(child);},
-    classList:{add(){},remove(){}}};
+def _table_row_js() -> str:
+    return _rows_js() + chr(10).join([
+        "function t(key, vars) { return vars ? `${key}:${JSON.stringify(vars)}` : key; }",
+        _line("const USAGE_REPORT_SPEED_PAR_SHOWN ="),
+        _extract("function usageReportSpeedColor(id)"),
+        _extract("function usageReportSpeedRateValue(raw)"),
+        _extract("function usageReportSpeedKindLabel(kind)"),
+        _extract("function usageReportSpeedKindShort(kind)"),
+        _extract("function usageReportSpeedBasisLabel(basis)"),
+        _extract("function usageReportSpeedFormatStamp(ms)"),
+        _extract("function usageReportSpeedCell(text, isUnmeasured)"),
+        _extract("function usageReportSpeedCallsCell(row)"),
+        _extract("function usageReportSpeedCoverageCell(coverage)"),
+        _extract("function usageReportSpeedRateTitle(row)"),
+        _extract("function usageReportSpeedMethodTitle(row)"),
+        _extract("function usageReportSpeedTableRow("),
+        """
+function el(tag) {
+  const node = {tag, className: '', dataset: {}, style: {setProperty(k, v) { this[k] = v; }}, attributes: {}, parts: [],
+    classList: {add(name) { node.className = `${node.className} ${name}`.trim(); }},
+    setAttribute(k, v) { this.attributes[k] = String(v); }, getAttribute(k) { return this.attributes[k]; },
+    addEventListener() {}, appendChild(child) { this.parts.push(child); return child; },
+    append(...children) { this.parts.push(...children); },
+    set textContent(value) { this.parts = [String(value)]; },
+    get textContent() { return this.parts.map((p) => (typeof p === 'string' ? p : p.textContent || '')).join(''); }};
+  return node;
 }
-global.document = {createElement:element};
-const measured = usageReportSpeedHourCell({label:'09–10',speed_calls:15},9,48.6,80,false);
-const missing = usageReportSpeedHourCell({label:'03–04',speed_calls:0},3,null,0,false);
-console.log(JSON.stringify([measured,missing]));
-'''
-    measured, missing = _run_node(tmp_path, 'hour_tooltip_values', script)
-    assert measured['tabIndex'] == missing['tabIndex'] == 0
-    assert '48.6 tok/s' in measured['parts'][1]['textContent']
-    assert 'n=15' in measured['attributes']['aria-label']
-    assert 'usageReportSpeedNoMeasurements' in missing['parts'][1]['textContent']
-    assert '0.0 tok/s' not in missing['attributes']['aria-label']
-    assert missing['parts'][0]['style']['height'] == '0%'
+global.document = {createElement: el, createTextNode: (value) => ({textContent: String(value)})};
+function createToolIdentity(tool) { const node = el('span'); node.textContent = tool; return node; }
+const find = (node, cls) => node && typeof node === 'object' && ((node.className || '').split(' ').includes(cls) ? node
+  : (node.parts || []).map((p) => find(p, cls)).find(Boolean));
+""",
+    ])
 
 
-def test_method_explanations_are_collapsed_and_model_summary_is_aggregated():
+def test_rows_show_xn_only_from_the_threshold_and_merged_rows_name_their_harnesses(tmp_path):
+    script = _table_row_js() + """
+const base = {model: 'm', speed_calls: 4, coverage: 1, combined_tok_per_s: 30, output_tok_per_s: 20, peak_in_flight: 3};
+const harness = (par) => ({...base, source: 'codex', measurement_kind: 'response_window', token_basis: 'b', parallelism: par});
+const render = (row) => {
+  const tr = usageReportSpeedTableRow(row, 100);
+  return {cells: tr.parts.length, par: (find(tr.parts[2], 'speed-par') || {}).textContent || null,
+          rate: find(tr.parts[2], 'speed-rate').textContent, meta: find(tr.parts[1], 'speed-model-meta').textContent,
+          title: tr.parts[2].title, disabled: tr.parts[0].parts[0].attributes['aria-disabled'] || null};
+};
+const out = {};
+usageReportSpeedState.lens = 'combined';
+usageReportSpeedState.payload = {models: []};
+out.below = render(harness(1.14));
+out.at = render(harness(1.16));
+out.merged = render({...base, sources: ['omp', 'opencode'], measurement_kinds: ['post_first_token', 'request_window'],
+                     parallelism: 2.5});
+usageReportSpeedState.lens = 'stream';
+out.stream = render(harness(2.5));
+usageReportSpeedSetSelection(['a', 'b', 'c', 'd', 'e', 'f'], {});
+out.full = render(harness(1));
+console.log(JSON.stringify(out));
+"""
+    out = _run_node(tmp_path, "table_rows", script)
+    assert out["below"]["cells"] == 5
+    assert out["below"]["par"] is None, "×1.1 on every row is noise"
+    assert out["at"]["par"] == "×1.2"
+    assert out["at"]["rate"] == "30.0", "Combined shows the combined rate"
+    assert out["merged"]["meta"].startswith("omp + opencode · ")
+    assert "usageReportSpeedMethods" in out["merged"]["meta"], "two methods are named as two"
+    assert "usageReportSpeedRateTitleMerged" in out["merged"]["title"]
+    assert out["stream"]["rate"] == "20.0" and out["stream"]["par"] is None, "Per stream has no ×N"
+    assert out["full"]["disabled"] == "true", "a seventh row cannot be ticked"
+
+
+def test_method_explanations_are_collapsed_and_rows_carry_both_rates():
     note = SRC[SRC.index('<details class="speed-method-note"'):SRC.index('</details>', SRC.index('<details class="speed-method-note"'))]
     assert ' open' not in note
     assert 'usageReportSpeedCompleteness' in note
     assert 'usageReportSpeedMethodSummary' in note
-    picker = _extract('function usageReportRenderSpeedPicker()')
-    assert 'current.output_tok_per_s' in picker
-    assert 'usageReportSpeedAcrossSessions' in picker
+    title = _extract('function usageReportSpeedRateTitle(row)')
+    assert 'row.output_tok_per_s' in title and 'row.combined_tok_per_s' in title
+
+
+def test_combined_is_the_default_lens():
+    state = _extract("const usageReportSpeedState = {")
+    assert "lens: 'combined'," in state
+    assert 'data-speed-lens="combined" aria-pressed="true"' in SRC
+
+
+def test_an_older_server_without_combined_reads_per_stream(tmp_path):
+    script = _rows_js() + """
+usageReportSpeedState.lens = 'combined';
+usageReportSpeedState.payload = {rows: []};
+const old = {lens: usageReportSpeedLens(), merging: usageReportSpeedMerging()};
+usageReportSpeedState.payload = {rows: [], models: []};
+console.log(JSON.stringify({old, current: usageReportSpeedLens()}));
+"""
+    out = _run_node(tmp_path, "old_server_lens", script)
+    assert out["old"] == {"lens": "stream", "merging": False}
+    assert out["current"] == "combined"
+
+
+def test_a_merged_pick_becomes_its_harness_rows_and_folds_back(tmp_path):
+    script = _rows_js() + """
+const state = usageReportSpeedState;
+state.rows = [
+  {source: 'omp', model: 'glm', measurement_kind: 'post_first_token', token_basis: 'b', speed_calls: 5},
+  {source: 'opencode', model: 'glm', measurement_kind: 'request_window', token_basis: 'b', speed_calls: 9},
+  {source: 'kimi', model: 'k2', measurement_kind: 'server_decode', token_basis: 'b', speed_calls: 3},
+];
+state.payload = {rows: state.rows, models: [{model: 'glm', sources: ['omp', 'opencode'], speed_calls: 14},
+                                             {model: 'k2', sources: ['kimi'], speed_calls: 3}]};
+state.lens = 'combined';
+usageReportSpeedSetSelection(['all|k2', 'all|glm', 'codex|gone|x|b'], {'all|k2': 0, 'all|glm': 2, 'codex|gone|x|b': 1});
+const out = {};
+state.lens = 'stream';
+usageReportSpeedRemapSelection();
+out.split = {selected: [...state.selected], slots: {...state.slots}};
+state.lens = 'combined';
+usageReportSpeedRemapSelection();
+out.folded = {selected: [...state.selected], slots: {...state.slots}};
+state.tool = 'omp';
+usageReportSpeedRemapSelection();
+out.pill = [...state.selected];
+console.log(JSON.stringify(out));
+"""
+    out = _run_node(tmp_path, "remap_selection", script)
+    assert out["split"]["selected"] == [
+        "kimi|k2|server_decode|b", "opencode|glm|request_window|b", "omp|glm|post_first_token|b", "codex|gone|x|b"]
+    slots = out["split"]["slots"]
+    assert slots["kimi|k2|server_decode|b"] == 0 and slots["opencode|glm|request_window|b"] == 2, (
+        "a kept row keeps its colour")
+    assert slots["codex|gone|x|b"] == 1, "a row this window does not hold stays, colour and all"
+    assert slots["omp|glm|post_first_token|b"] == 3, "a new row takes the lowest free colour"
+    assert out["folded"]["selected"] == ["all|k2", "all|glm", "codex|gone|x|b"]
+    assert out["folded"]["slots"] == {"all|k2": 0, "all|glm": 2, "codex|gone|x|b": 1}
+    assert out["pill"] == ["kimi|k2|server_decode|b", "opencode|glm|request_window|b",
+                           "omp|glm|post_first_token|b", "codex|gone|x|b"], "a pill reads per harness"
+
+
+def test_six_rows_at_most_and_colours_stay_with_their_row(tmp_path):
+    script = _rows_js() + """
+const state = usageReportSpeedState;
+usageReportSpeedSetSelection(['a', 'b', 'c', 'd', 'e', 'f', 'g'], {});
+const out = {capped: [...state.selected]};
+usageReportSpeedSetSelection(state.selected.filter((id) => id !== 'c'), state.slots);
+out.afterRemove = {...state.slots};
+usageReportSpeedSetSelection([...state.selected, 'h'], state.slots);
+out.afterAdd = state.slots.h;
+usageReportSpeedSetSelection(['x', 'y'], {x: 4, y: 4});
+out.duplicate = {...state.slots};
+usageReportSpeedSetSelection(['x'], {x: null});
+out.nullSlot = state.slots.x;
+console.log(JSON.stringify(out));
+"""
+    out = _run_node(tmp_path, "selection_slots", script)
+    assert out["capped"] == ["a", "b", "c", "d", "e", "f"]
+    assert out["afterRemove"] == {"a": 0, "b": 1, "d": 3, "e": 4, "f": 5}, "removing one repaints nothing"
+    assert out["afterAdd"] == 2, "the freed colour is reused"
+    assert out["duplicate"] == {"x": 4, "y": 0}
+    assert out["nullSlot"] == 0
+
+
+def test_a_first_visit_charts_the_three_most_measured_rows_once(tmp_path):
+    script = _rows_js() + """
+const state = usageReportSpeedState;
+state.lens = 'combined';
+state.rows = [];
+state.payload = {models: [{model: 'a', speed_calls: 1}, {model: 'b', speed_calls: 9}, {model: 'c', speed_calls: 5},
+                          {model: 'd', speed_calls: 7}, {model: 'e', speed_calls: 0}]};
+state.loadedKey = 'w1';
+usageReportSpeedSeedSelection();
+const out = {seeded: [...state.selected]};
+usageReportSpeedSetSelection([], {});
+usageReportSpeedSeedSelection();
+out.clearedStaysClear = state.selected.length;
+state.loadedKey = 'w2';
+usageReportSpeedSeedSelection();
+out.nextWindow = state.selected.length;
+console.log(JSON.stringify(out));
+"""
+    out = _run_node(tmp_path, "seed_selection", script)
+    assert out["seeded"] == ["all|b", "all|d", "all|c"]
+    assert out["clearedStaysClear"] == 0, "a selection the reader cleared is not refilled on the same window"
+    assert out["nextWindow"] == 3
+
+
+def test_the_period_control_reads_and_writes_the_shared_range(tmp_path):
+    script = STUBS + chr(10).join([
+        "function usageReportToday() { return new Date(2026, 9, 12); }",  # a Monday
+        _extract("function parseDateKey(value)"),
+        _extract("function formatDateKey(date)"),
+        _extract("function startOfWeekMonday(date)"),
+        _extract("function usageReportWindows(period, back = 0)"),
+        _line("const USAGE_REPORT_SPEED_PERIODS ="),
+        _extract("const USAGE_REPORT_SPEED_QUICK_KEYS = {"),
+        _extract("const usageReportSpeedState = {"),
+        _extract("function usageReportSpeedPeriodOf(window)"),
+        _extract("function usageReportSpeedCommitPeriod("),
+        "function usageReportSpeedWritePrefs() {}",
+        "const commits = [];",
+        "function commitDateSelection(start, end, options) { commits.push([formatDateKey(start), formatDateKey(end), options.rangeKey]); }",
+        """
+const of = (from, to) => usageReportSpeedPeriodOf({date_from: from, date_to: to});
+const out = {
+  thisMonth: of('2026-10-01', '2026-10-12'),
+  lastMonth: of('2026-09-01', '2026-09-30'),
+  quarter: of('2026-07-01', '2026-09-30'),
+  year: of('2025-01-01', '2025-12-31'),
+  week: of('2026-10-05', '2026-10-11'),
+  custom: of('2026-10-06', '2026-10-12'),
+  partialPast: of('2026-09-01', '2026-09-15'),
+};
+usageReportSpeedState.period = 'month';
+out.mondayAsMonth = of('2026-10-12', '2026-10-12');
+out.quarterSoFarAsMonth = of('2026-10-01', '2026-10-12');
+usageReportSpeedState.period = 'quarter';
+out.thisQuarter = of('2026-10-01', '2026-10-12');
+usageReportSpeedState.period = 'week';
+out.mondayAsWeek = of('2026-10-12', '2026-10-12');
+usageReportSpeedCommitPeriod('quarter', 1);
+usageReportSpeedCommitPeriod('month', 0);
+usageReportSpeedCommitPeriod('week', 0);
+usageReportSpeedCommitPeriod('day', -3);
+out.commits = commits;
+out.period = usageReportSpeedState.period;
+console.log(JSON.stringify(out));
+""",
+    ])
+    out = _run_node(tmp_path, "period_control", script)
+    assert out["thisMonth"] == {"period": "month", "back": 0}
+    assert out["lastMonth"] == {"period": "month", "back": 1}
+    assert out["quarter"] == {"period": "quarter", "back": 1}
+    assert out["thisQuarter"] == {"period": "quarter", "back": 0}
+    assert out["quarterSoFarAsMonth"] == {"period": "month", "back": 0}
+    assert out["year"] == {"period": "year", "back": 1}
+    assert out["week"] == {"period": "week", "back": 1}
+    assert out["custom"] is None and out["partialPast"] is None, "a range no period describes is custom"
+    assert out["mondayAsMonth"] == {"period": "day", "back": 0}
+    assert out["mondayAsWeek"] == {"period": "week", "back": 0}, "the period last walked wins a tie"
+    assert out["commits"] == [
+        ["2026-07-01", "2026-09-30", None],
+        ["2026-10-01", "2026-10-12", "thisMonth"],
+        ["2026-10-12", "2026-10-12", None],
+        ["2026-10-12", "2026-10-12", "today"],
+    ], "periods that are quick ranges commit under their key, so they keep following today"
+    assert out["period"] == "day"
+
+
+def test_the_grouping_lists_only_what_the_server_offers(tmp_path):
+    script = STUBS + chr(10).join([
+        "function t(key, vars) { return vars ? `${key}:${JSON.stringify(vars)}` : key; }",
+        _extract("const USAGE_REPORT_SPEED_BUCKET_KEYS = {"),
+        _extract("const usageReportSpeedState = {"),
+        _extract("function usageReportSpeedOption(value, label, isSelected)"),
+        _extract("function usageReportRenderSpeedChartControls()"),
+        """
+const select = {replaceChildren(...xs) { this.options = xs; }, value: '', disabled: false, title: ''};
+const wrap = {hidden: false};
+const document = {
+  createElement: () => ({}),
+  getElementById: (id) => (id === 'usageReportSpeedBucket' ? select : id === 'usageReportSpeedBucketWrap' ? wrap : null),
+  querySelectorAll: () => [],
+};
+const state = usageReportSpeedState;
+const out = {};
+usageReportRenderSpeedChartControls();
+out.before = {disabled: select.disabled, options: select.options.map((o) => o.value)};
+state.trend = {auto_bucket: 'day', granularity: 'week', offered_buckets: [{bucket: 'day', count: 14}, {bucket: 'week', count: 2}]};
+state.bucket = 'week';
+usageReportRenderSpeedChartControls();
+out.offered = select.options.map((o) => [o.value, o.textContent, o.selected]);
+state.bucket = 'month';
+usageReportRenderSpeedChartControls();
+out.unoffered = select.options.filter((o) => o.selected).map((o) => o.value);
+state.view = 'hour';
+usageReportRenderSpeedChartControls();
+out.hourHidesGrouping = wrap.hidden;
+console.log(JSON.stringify(out));
+""",
+    ])
+    out = _run_node(tmp_path, "grouping", script)
+    assert out["before"] == {"disabled": True, "options": [""]}
+    assert out["offered"] == [
+        ["", 'usageReportSpeedAuto:{"size":"usageReportSpeedBucketDay"}', False],
+        ["day", "usageReportSpeedBucketDay · 14", False],
+        ["week", "usageReportSpeedBucketWeek · 2", True],
+    ]
+    assert out["unoffered"] == [""], "a size the window does not offer reads as Auto"
+    assert out["hourHidesGrouping"] is True
+
+
+def test_lens_pills_search_and_view_make_no_request(tmp_path):
+    """Only the period and the grouping ask the server; the rest re-reads."""
+    script = _rows_js() + chr(10).join([
+        _extract("function usageReportEnsureTrend("),
+        _extract("function usageReportWireSpeed()"),
+        """
+const listeners = {};
+const node = (key, data = {}) => ({dataset: data, addEventListener(type, fn) { (listeners[`${key}:${type}`] ||= []).push(fn); }});
+const buttons = {
+  '#usageReportSpeedLens button': [node('lens-c', {speedLens: 'combined'}), node('lens-s', {speedLens: 'stream'})],
+  '#usageReportSpeedView button': [node('view-t', {speedView: 'time'}), node('view-h', {speedView: 'hour'})],
+};
+global.document = {
+  hidden: false,
+  addEventListener() {},
+  getElementById: (id) => node(id),
+  querySelectorAll: (selector) => buttons[selector] || [],
+};
+let asks = 0, renders = 0;
+function fetchJsonWithRetry() { asks += 1; return new Promise(() => {}); }
+function usageReportSpeedReadPrefs() {} function usageReportSpeedWritePrefs() {}
+function usageReportRenderSpeed() { renders += 1; } function usageReportRenderSpeedChartControls() {}
+function usageReportRenderSpeedChart() {} function usageReportSpeedIsVisible() { return true; }
+function usageReportSpeedKey() { return 'w'; } function outputSpeedServer() { return {id: 'local'}; }
+function usageReportSpeedQuery() { return 'view=trend'; } function usageReportLoadSpeed() { asks += 1; }
+function usageReportSpeedHidePoint() {} function usageReportSpeedShowPoint() {}
+const fire = (key, event = {}) => (listeners[key] || []).forEach((fn) => fn(event));
+usageReportSpeedState.payload = {rows: [], models: []};
+usageReportWireSpeed();
+fire('lens-s:click');
+fire('lens-c:click');
+fire('usageReportSpeedTools:click', {target: {closest: () => ({dataset: {speedTool: 'codex'}})}});
+fire('usageReportSpeedSearch:input', {target: {value: 'glm'}});
+fire('view-h:click');
+const quiet = {asks, renders, lens: usageReportSpeedState.lens, tool: usageReportSpeedState.tool,
+               query: usageReportSpeedState.query, view: usageReportSpeedState.view};
+fire('usageReportSpeedBucket:change', {target: {value: 'week'}});
+console.log(JSON.stringify({quiet, afterGrouping: asks}));
+""",
+    ])
+    out = _run_node(tmp_path, "quiet_controls", script)
+    assert out["quiet"]["asks"] == 0, "a lens, pill, search or view click asked the server"
+    assert out["quiet"]["renders"] >= 4
+    assert out["quiet"]["lens"] == "combined" and out["quiet"]["tool"] == "codex"
+    assert out["quiet"]["query"] == "glm" and out["quiet"]["view"] == "hour"
+    assert out["afterGrouping"] == 1, "a grouping is a new chart"
+
+
+def test_a_quarter_is_three_calendar_months(tmp_path):
+    script = STUBS + chr(10).join([
+        "function usageReportToday() { return new Date(2026, 9, 11); }",
+        _extract("function formatDateKey(date)"),
+        _extract("function startOfWeekMonday(date)"),
+        _extract("function usageReportWindows(period, back = 0)"),
+        "console.log(JSON.stringify([0, 1, 3, 4].map((back) => usageReportWindows('quarter', back))));",
+    ])
+    out = _run_node(tmp_path, "quarter_windows", script)
+    assert out == [
+        {"date_from": "2026-10-01", "date_to": "2026-10-11"},
+        {"date_from": "2026-07-01", "date_to": "2026-09-30"},
+        {"date_from": "2026-01-01", "date_to": "2026-03-31"},
+        {"date_from": "2025-10-01", "date_to": "2025-12-31"},
+    ]
 
 
 def test_measured_days_counts_the_union_rather_than_the_maximum(tmp_path):
@@ -951,26 +1395,38 @@ def test_the_note_under_the_table_reads_that_union():
 
 def test_absence_sorts_last_in_both_directions(tmp_path):
     script = _rows_js() + """
+usageReportSpeedState.lens = 'stream';
 usageReportSpeedState.rows = [
   {model: 'b', source: 'kimi', output_tok_per_s: 10, speed_calls: 5, coverage: 0.5},
   {model: 'c', source: 'kimi', output_tok_per_s: null, speed_calls: null, coverage: null},
   {model: 'a', source: 'omp', output_tok_per_s: 30, speed_calls: 12, coverage: 1.0},
 ];
 const out = {};
-for (const field of ['output_tok_per_s', 'speed_calls', 'coverage']) {
+for (const field of ['rate', 'speed_calls', 'coverage']) {
   for (const direction of ['desc', 'asc']) {
     usageReportSpeedState.sort = {field, direction};
     out[`${field}/${direction}`] = usageReportSpeedSortedRows().map((r) => r.model);
   }
 }
+// Combined across every harness ranks the merged rows by their combined rate.
+usageReportSpeedState.lens = 'combined';
+usageReportSpeedState.payload = {models: [
+  {model: 'x', combined_tok_per_s: null, speed_calls: 1},
+  {model: 'y', combined_tok_per_s: 50, speed_calls: 2},
+  {model: 'z', combined_tok_per_s: 70, speed_calls: 3},
+]};
+usageReportSpeedState.sort = {field: 'rate', direction: 'asc'};
+out.combined = usageReportSpeedSortedRows().map((r) => r.model);
 console.log(JSON.stringify(out));
 """
     out = _run_node(tmp_path, "sort", script)
+    combined = out.pop("combined")
     for key, order in out.items():
         assert order[-1] == "c", f"{key} put absence at the top"
-    assert out["output_tok_per_s/desc"] == ["a", "b", "c"]
-    assert out["output_tok_per_s/asc"] == ["b", "a", "c"]
+    assert out["rate/desc"] == ["a", "b", "c"]
+    assert out["rate/asc"] == ["b", "a", "c"]
     assert out["speed_calls/desc"] == ["a", "b", "c"]
+    assert combined == ["y", "z", "x"]
 
 
 def test_a_missing_rate_formats_as_a_dash_not_as_zero(tmp_path):
@@ -1143,9 +1599,12 @@ def _i18n_keys() -> dict[str, set[str]]:
 
 
 def test_every_speed_string_ships_in_all_six_languages():
-    used = set(re.findall(r'data-i18n="(usageReportSpeed[A-Za-z]*|sessionSpeed[A-Za-z]*|usageReportSubSpeed)"', SRC))
-    used |= set(re.findall(r"t\('(usageReportSpeed[A-Za-z]*|sessionSpeed[A-Za-z]*|usageReportSubSpeed)'\)", SRC))
+    used = set(re.findall(r'data-i18n(?:-aria|-placeholder)?="(usageReportSpeed[A-Za-z]*|sessionSpeed[A-Za-z]*|usageReportSubSpeed)"', SRC))
+    # With or without interpolation values: t('key') and t('key', {...}).
+    used |= set(re.findall(r"\bt\('(usageReportSpeed[A-Za-z]*|sessionSpeed[A-Za-z]*|speedKind[A-Za-z]*|usageReportSubSpeed)'[,)]", SRC))
     used |= set(re.findall(r"\bt\(`(usageReportSpeed[A-Za-z]*|sessionSpeed[A-Za-z]*)`", SRC))
+    # Keys reached through a lookup table rather than a literal call.
+    used |= set(re.findall(r":\s*'((?:usageReportSpeedBucket|speedKindShort|speedKind)[A-Za-z]+)'", SRC))
     assert len(used) >= 25, f"expected the speed view to carry its own strings, found {len(used)}"
     keys = _i18n_keys()
     for language, language_keys in keys.items():

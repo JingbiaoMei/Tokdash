@@ -49,8 +49,14 @@ is pending and subscribe to job events only while their page is visible.
 
 Model and session rates divide summed measured tokens by summed matched duration.
 Groups retain source, model, measurement kind and token basis so incompatible
-timing windows are not combined. Model/hour results use bounded process caching
-keyed by publication revision, filters and local-clock identity. See
+timing windows are not combined. That per-stream rate sits beside a combined one,
+which divides the same tokens by the union of busy time, so overlapping responses
+count once. `speed_trend.py` rebuilds each busy interval from the stored timestamp
+and duration, anchored at the start or end as the source records it, and buckets
+both rates for the trend view. A model's row merged across harnesses carries only
+the combined rate, since its windows may differ in kind. Model/hour results use
+bounded process caching keyed by publication revision, filters and local-clock
+identity. See
 [the API contract](../reference/API.md#get-apioutput-speed),
 [configuration](../reference/CONFIG.md) and
 [benchmark results](benchmarks/OUTPUT_SPEED.md).

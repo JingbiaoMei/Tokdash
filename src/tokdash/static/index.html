@@ -2676,6 +2676,135 @@
       transform: translateX(0);
     }
 
+    /* Session detail modal (Sessions explorer -> open a session).
+       The markup used to carry a fixed slate-900/indigo palette, so it read as
+       a slab of dark UI dropped onto every light theme and ignored all
+       seventeen style themes. These rules take their colours from the same
+       tokens the rest of the dashboard paints with. */
+    .session-modal-head {
+      border-bottom: 1px solid color-mix(in srgb, var(--color-text) 10%, transparent);
+    }
+    .session-modal-title { color: var(--color-text); }
+    .session-modal-sub { color: var(--color-muted); }
+    .session-modal-icon {
+      background: color-mix(in srgb, var(--color-messages) 16%, transparent);
+      border: 1px solid color-mix(in srgb, var(--color-messages) 32%, transparent);
+      color: var(--color-messages);
+    }
+    /* Same shape as .usage-report-seg, the themed segmented control already in
+       the dashboard. */
+    .session-view-switch {
+      display: inline-flex;
+      padding: 4px;
+      gap: 4px;
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--color-primary) 5%, transparent);
+    }
+    .session-view-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 0;
+      background: transparent;
+      border-radius: 9px;
+      padding: 7px 14px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--color-muted);
+      cursor: pointer;
+      transition: background var(--t-fast) ease, color var(--t-fast) ease;
+    }
+    .session-view-btn:hover { color: var(--color-text); }
+    /* Selected state in the row's own neutral vocabulary -- ink and wash, no
+       hue -- the way .quick-range-btn does it. A saturated primary pill looks
+       right until a theme ships a mid-tone primary (#6366f1 in the default
+       dark), where even the inverted label lands under 4.5:1. */
+    .session-view-btn[aria-pressed="true"] {
+      background: color-mix(in srgb, var(--color-text) 10%, transparent);
+      color: var(--color-text);
+      font-weight: 750;
+    }
+    /* The theme's accent, pulled toward the readable ink. Keeps the hue while
+       clearing the small-text ratio on surfaces where the raw accent is a
+       mid-tone (the default dark's #6366f1 sits at 4.4:1 as text). */
+    .session-chat-chip,
+    .session-chat-card--user .session-chat-role {
+      color: color-mix(in srgb, var(--color-primary) 62%, var(--color-text));
+    }
+    .session-chat-chip--tools,
+    .session-chat-card--assistant .session-chat-role,
+    .session-chat-reasoning {
+      color: color-mix(in srgb, var(--color-messages) 62%, var(--color-text));
+    }
+    .session-share-track { background: color-mix(in srgb, var(--color-text) 12%, transparent); }
+    .session-graph-card { border: 1px solid var(--color-border); }
+    .session-graph-title { color: var(--color-text); }
+    .session-graph-info { color: var(--color-muted); }
+    .session-graph-info:hover { color: var(--color-primary); }
+    .session-graph-expand {
+      background: color-mix(in srgb, var(--color-text) 6%, transparent);
+      border: 1px solid var(--color-border);
+      color: var(--color-muted);
+    }
+    .session-graph-expand:hover {
+      background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+      color: var(--color-text);
+    }
+    /* View Chat: one card shape per message, an accent rail and role badge per
+       role, all from the theme's own accents. */
+    .session-chat-summary {
+      background: color-mix(in srgb, var(--color-text) 4%, transparent);
+      border: 1px solid var(--color-border);
+    }
+    .session-chat-chip {
+      border: 1px solid color-mix(in srgb, var(--color-primary) 32%, transparent);
+      background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+    }
+    .session-chat-chip--tools {
+      border-color: color-mix(in srgb, var(--color-messages) 32%, transparent);
+      background: color-mix(in srgb, var(--color-messages) 12%, transparent);
+    }
+    .session-chat-state,
+    .session-chat-note,
+    .session-chat-meta,
+    .session-chat-time { color: var(--color-muted); }
+    .session-chat-empty {
+      background: color-mix(in srgb, var(--color-text) 3%, transparent);
+      border: 1px solid var(--color-border);
+      color: var(--color-muted);
+      line-height: 1.7;
+    }
+    .session-chat-card {
+      background: color-mix(in srgb, var(--color-surface-glass) 97%, var(--color-bg));
+      border: 1px solid var(--color-border);
+      border-left-width: 4px;
+    }
+    .session-chat-card--user { border-left-color: var(--color-primary); }
+    .session-chat-card--assistant { border-left-color: var(--color-messages); }
+    .session-chat-card--system { border-left-color: var(--color-muted); }
+    .session-chat-card-head {
+      border-bottom: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent);
+    }
+    .session-chat-role {
+      border-color: color-mix(in srgb, var(--color-text) 22%, transparent);
+      color: var(--color-muted);
+    }
+    .session-chat-card--user .session-chat-role {
+      border-color: color-mix(in srgb, var(--color-primary) 38%, transparent);
+    }
+    .session-chat-card--assistant .session-chat-role {
+      border-color: color-mix(in srgb, var(--color-messages) 38%, transparent);
+    }
+    .session-chat-meta-chip {
+      background: color-mix(in srgb, var(--color-text) 6%, transparent);
+      color: var(--color-muted);
+    }
+    .session-chat-reasoning {
+      background: color-mix(in srgb, var(--color-messages) 10%, transparent);
+      border: 1px solid color-mix(in srgb, var(--color-messages) 28%, transparent);
+    }
+
     /* Table styling and row hover */
     .session-table tbody tr {
       cursor: pointer;
@@ -5751,35 +5880,31 @@
   <div id="sessionModal" class="hidden fixed inset-0 z-50">
     <div id="sessionModalBackdrop" class="absolute inset-0 bg-slate-950/70 backdrop-blur-sm"></div>
     <div class="absolute inset-0 p-3 sm:p-6 overflow-y-auto flex items-start justify-center">
-      <div class="w-[96vw] max-w-[96vw] surface p-5 sm:p-7 relative rounded-2xl border border-slate-700/60 shadow-2xl my-2">
+      <div class="w-[96vw] max-w-[96vw] surface p-5 sm:p-7 relative rounded-2xl shadow-2xl my-2">
         <!-- Header -->
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5 pb-4 border-b border-white/5">
+        <div class="session-modal-head flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5 pb-4">
           <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl bg-purple-500/20 border border-purple-500/30 flex items-center justify-center text-purple-400 font-bold flex-shrink-0">
+            <div class="session-modal-icon w-10 h-10 rounded-xl flex items-center justify-center font-bold flex-shrink-0">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>
             </div>
             <div>
-              <h3 id="sessionModalTitle" class="text-lg sm:text-xl font-extrabold mono text-slate-100">Session</h3>
+              <h3 id="sessionModalTitle" class="session-modal-title text-lg sm:text-xl font-extrabold mono">Session</h3>
               <p id="sessionModalMeta" class="text-xs mt-0.5" style="color: var(--color-muted);">-</p>
             </div>
           </div>
           <div class="flex items-center gap-3 flex-wrap">
-            <!-- View Mode Switch: Overview & Charts vs View Chat -->
-            <div class="flex items-center bg-slate-900/80 p-1 rounded-xl border border-slate-800">
-              <button id="sessionModalAnalyticsBtn" type="button" class="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-indigo-600 text-white transition shadow-sm" onclick="setSessionModalView('analytics')">
-                <span class="flex items-center gap-1.5">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/></svg>
-                  Overview & Graphs
-                </span>
+            <!-- View Mode Switch: Overview & Graphs vs View Chat -->
+            <div class="session-view-switch" role="group" data-i18n-aria="sessionViewGroup" aria-label="Session detail view">
+              <button id="sessionModalAnalyticsBtn" type="button" class="session-view-btn" aria-pressed="true" onclick="setSessionModalView('analytics')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/></svg>
+                <span data-i18n="sessionViewAnalytics">Overview &amp; Graphs</span>
               </button>
-              <button id="sessionModalChatToggleBtn" type="button" class="px-3.5 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-slate-200 transition" onclick="setSessionModalView('chat')">
-                <span class="flex items-center gap-1.5">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                  View Chat
-                </span>
+              <button id="sessionModalChatToggleBtn" type="button" class="session-view-btn" aria-pressed="false" onclick="setSessionModalView('chat')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                <span data-i18n="sessionViewChat">View Chat</span>
               </button>
             </div>
-            <button id="sessionModalClose" class="btn btn-ghost !p-2 rounded-xl text-slate-400 hover:text-white" type="button" data-i18n-aria="closeDialog" data-i18n-title="closeDialog" aria-label="Close dialog" title="Close dialog">
+            <button id="sessionModalClose" class="btn btn-ghost !p-2 rounded-xl" type="button" data-i18n-aria="closeDialog" data-i18n-title="closeDialog" aria-label="Close dialog" title="Close dialog">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
             </button>
           </div>
@@ -5820,28 +5945,28 @@
                   <span data-i18n="input">Input</span>
                   <span id="sessionShareInputLabel">-</span>
                 </div>
-                <div class="h-2 rounded-full bg-slate-200/80 overflow-hidden"><div id="sessionShareInputBar" class="h-full rounded-full" style="width:0%; background:#1E40AF;"></div></div>
+                <div class="session-share-track h-2 rounded-full overflow-hidden"><div id="sessionShareInputBar" class="h-full rounded-full" style="width:0%; background:#1E40AF;"></div></div>
               </div>
               <div>
                 <div class="flex items-center justify-between text-sm mb-1">
                   <span data-i18n="cacheRead">Cache Read</span>
                   <span id="sessionShareCacheLabel">-</span>
                 </div>
-                <div class="h-2 rounded-full bg-slate-200/80 overflow-hidden"><div id="sessionShareCacheBar" class="h-full rounded-full" style="width:0%; background:#0F766E;"></div></div>
+                <div class="session-share-track h-2 rounded-full overflow-hidden"><div id="sessionShareCacheBar" class="h-full rounded-full" style="width:0%; background:#0F766E;"></div></div>
               </div>
               <div>
                 <div class="flex items-center justify-between text-sm mb-1">
                   <span data-i18n="output">Output</span>
                   <span id="sessionShareOutputLabel">-</span>
                 </div>
-                <div class="h-2 rounded-full bg-slate-200/80 overflow-hidden"><div id="sessionShareOutputBar" class="h-full rounded-full" style="width:0%; background:#F59E0B;"></div></div>
+                <div class="session-share-track h-2 rounded-full overflow-hidden"><div id="sessionShareOutputBar" class="h-full rounded-full" style="width:0%; background:#F59E0B;"></div></div>
               </div>
               <div>
                 <div class="flex items-center justify-between text-sm mb-1">
                   <span data-i18n="reasoning">Reasoning</span>
                   <span id="sessionShareReasoningLabel">-</span>
                 </div>
-                <div class="h-2 rounded-full bg-slate-200/80 overflow-hidden"><div id="sessionShareReasoningBar" class="h-full rounded-full" style="width:0%; background:#7C3AED;"></div></div>
+                <div class="session-share-track h-2 rounded-full overflow-hidden"><div id="sessionShareReasoningBar" class="h-full rounded-full" style="width:0%; background:#7C3AED;"></div></div>
               </div>
             </div>
           </div>
@@ -5884,18 +6009,18 @@
           <!-- 3 Session Graphs in Responsive Grid with Info Icons & Hover Expanders -->
           <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
             <!-- Graph 1: Turn Trend -->
-            <div class="surface p-4 relative group rounded-xl border border-slate-800/80">
+            <div class="session-graph-card surface p-4 relative group rounded-xl">
               <div class="flex items-center justify-between mb-2">
                 <div>
                   <div class="flex items-center gap-1.5">
-                    <h4 class="text-sm font-extrabold mono text-slate-200" data-i18n="turnTrend">Turn Trend</h4>
-                    <span class="cursor-help text-slate-400 hover:text-indigo-400 transition" data-i18n-title="turnTrendDesc" title="Turn Trend shows the breakdown of input, cache reads, output, and reasoning tokens consumed during each sequential turn.">
+                    <h4 class="session-graph-title text-sm font-extrabold mono" data-i18n="turnTrend">Turn Trend</h4>
+                    <span class="session-graph-info cursor-help transition" data-i18n-title="turnTrendDesc" title="Turn Trend shows the breakdown of input, cache reads, output, and reasoning tokens consumed during each sequential turn.">
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
                     </span>
                   </div>
-                  <div class="text-[11px] text-slate-500 mt-0.5">Tokens per turn</div>
+                  <div class="session-modal-sub text-[11px] mt-0.5" data-i18n="turnTrendSub">Tokens per turn</div>
                 </div>
-                <button type="button" class="p-1.5 rounded-lg bg-slate-800/60 hover:bg-slate-700 text-slate-400 hover:text-white transition opacity-60 group-hover:opacity-100" onclick="expandSessionChart('perTurn')" data-i18n-title="expandFullScreen" title="Expand full screen">
+                <button type="button" class="session-graph-expand p-1.5 rounded-lg transition opacity-60 group-hover:opacity-100" onclick="expandSessionChart('perTurn')" data-i18n-title="expandFullScreen" title="Expand full screen">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
                 </button>
               </div>
@@ -5905,18 +6030,18 @@
             </div>
 
             <!-- Graph 2: Cumulative Turn Trend -->
-            <div class="surface p-4 relative group rounded-xl border border-slate-800/80">
+            <div class="session-graph-card surface p-4 relative group rounded-xl">
               <div class="flex items-center justify-between mb-2">
                 <div>
                   <div class="flex items-center gap-1.5">
-                    <h4 class="text-sm font-extrabold mono text-slate-200" data-i18n="cumulativeTurnTrend">Cumulative Turn Trend</h4>
-                    <span class="cursor-help text-slate-400 hover:text-indigo-400 transition" data-i18n-title="cumulativeTurnTrendDesc" title="Cumulative Turn Trend illustrates how tokens accumulate across conversation turns over the course of the session.">
+                    <h4 class="session-graph-title text-sm font-extrabold mono" data-i18n="cumulativeTurnTrend">Cumulative Turn Trend</h4>
+                    <span class="session-graph-info cursor-help transition" data-i18n-title="cumulativeTurnTrendDesc" title="Cumulative Turn Trend illustrates how tokens accumulate across conversation turns over the course of the session.">
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
                     </span>
                   </div>
-                  <div class="text-[11px] text-slate-500 mt-0.5">Total tokens accumulated by turn</div>
+                  <div class="session-modal-sub text-[11px] mt-0.5" data-i18n="cumulativeTurnTrendSub">Total tokens accumulated by turn</div>
                 </div>
-                <button type="button" class="p-1.5 rounded-lg bg-slate-800/60 hover:bg-slate-700 text-slate-400 hover:text-white transition opacity-60 group-hover:opacity-100" onclick="expandSessionChart('cumulative')" data-i18n-title="expandFullScreen" title="Expand full screen">
+                <button type="button" class="session-graph-expand p-1.5 rounded-lg transition opacity-60 group-hover:opacity-100" onclick="expandSessionChart('cumulative')" data-i18n-title="expandFullScreen" title="Expand full screen">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
                 </button>
               </div>
@@ -5926,18 +6051,18 @@
             </div>
 
             <!-- Graph 3: Cumulative Trend by Time -->
-            <div class="surface p-4 relative group rounded-xl border border-slate-800/80">
+            <div class="session-graph-card surface p-4 relative group rounded-xl">
               <div class="flex items-center justify-between mb-2">
                 <div>
                   <div class="flex items-center gap-1.5">
-                    <h4 class="text-sm font-extrabold mono text-slate-200" data-i18n="cumulativeTrendByTime">Cumulative Trend by Time</h4>
-                    <span class="cursor-help text-slate-400 hover:text-indigo-400 transition" data-i18n-title="cumulativeTrendByTimeDesc" title="Cumulative Trend by Time charts token velocity along the session's actual wall-clock timeline.">
+                    <h4 class="session-graph-title text-sm font-extrabold mono" data-i18n="cumulativeTrendByTime">Cumulative Trend by Time</h4>
+                    <span class="session-graph-info cursor-help transition" data-i18n-title="cumulativeTrendByTimeDesc" title="Cumulative Trend by Time charts token velocity along the session's actual wall-clock timeline.">
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
                     </span>
                   </div>
-                  <div class="text-[11px] text-slate-500 mt-0.5">Tokens accumulated over time</div>
+                  <div class="session-modal-sub text-[11px] mt-0.5" data-i18n="cumulativeTrendByTimeSub">Tokens accumulated over time</div>
                 </div>
-                <button type="button" class="p-1.5 rounded-lg bg-slate-800/60 hover:bg-slate-700 text-slate-400 hover:text-white transition opacity-60 group-hover:opacity-100" onclick="expandSessionChart('timeCumulative')" data-i18n-title="expandFullScreen" title="Expand full screen">
+                <button type="button" class="session-graph-expand p-1.5 rounded-lg transition opacity-60 group-hover:opacity-100" onclick="expandSessionChart('timeCumulative')" data-i18n-title="expandFullScreen" title="Expand full screen">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
                 </button>
               </div>
@@ -5950,15 +6075,15 @@
 
         <!-- View 2: App Chat View -->
         <div id="sessionModalChatView" style="display:none;" class="space-y-4">
-          <div class="flex items-center justify-between p-3.5 rounded-xl bg-slate-900/60 border border-slate-800">
+          <div class="session-chat-summary flex items-center justify-between gap-2 p-3.5 rounded-xl">
             <div class="flex items-center gap-2">
-              <span id="sessionChatMsgCount" class="text-xs font-mono font-bold px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">0 messages</span>
-              <span id="sessionChatToolCount" class="text-xs font-mono font-bold px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">0 tool calls</span>
+              <span id="sessionChatMsgCount" class="session-chat-chip text-xs font-mono font-bold px-2 py-0.5 rounded">0 messages</span>
+              <span id="sessionChatToolCount" class="session-chat-chip session-chat-chip--tools text-xs font-mono font-bold px-2 py-0.5 rounded">0 tool calls</span>
             </div>
-            <div class="text-xs text-slate-400 font-mono">Real Interactive Conversation View</div>
+            <div class="session-chat-note text-xs font-mono" data-i18n="sessionChatViewNote">Interactive conversation view</div>
           </div>
           <div id="sessionChatContainer" class="space-y-4 max-h-[66vh] overflow-y-auto pr-2">
-            <div class="text-xs text-slate-500 text-center py-12 font-mono">Loading conversation history...</div>
+            <div class="session-chat-state text-xs text-center py-12 font-mono" data-i18n="sessionChatLoading">Loading conversation history…</div>
           </div>
         </div>
 
@@ -5968,13 +6093,13 @@
 
   <!-- Fullscreen Graph Expansion Modal -->
   <div id="graphExpandModal" class="hidden fixed inset-0 z-[60] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-8">
-    <div class="w-[95vw] max-w-6xl h-[85vh] surface p-6 rounded-2xl flex flex-col border border-slate-700/60 shadow-2xl relative">
-      <div class="flex items-center justify-between pb-4 mb-4 border-b border-slate-800">
+    <div class="w-[95vw] max-w-6xl h-[85vh] surface p-6 rounded-2xl flex flex-col shadow-2xl relative">
+      <div class="session-modal-head flex items-center justify-between pb-4 mb-4">
         <div>
-          <h3 id="graphExpandTitle" class="text-lg font-extrabold mono text-white">Expanded Chart</h3>
-          <p id="graphExpandSubtitle" class="text-xs text-slate-400 mt-0.5">High-resolution interactive view</p>
+          <h3 id="graphExpandTitle" class="session-modal-title text-lg font-extrabold mono">Expanded chart</h3>
+          <p id="graphExpandSubtitle" class="session-modal-sub text-xs mt-0.5">High-resolution interactive view</p>
         </div>
-        <button type="button" class="btn btn-ghost !p-2 rounded-xl text-slate-400 hover:text-white" onclick="closeGraphExpandModal()" data-i18n-title="closeFullScreen" title="Close full screen view">
+        <button type="button" class="btn btn-ghost !p-2 rounded-xl" onclick="closeGraphExpandModal()" data-i18n-title="closeFullScreen" title="Close full screen view">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
         </button>
       </div>
@@ -7504,6 +7629,32 @@
         turnTrend: 'Turn Trend',
         cumulativeTurnTrend: 'Cumulative Turn Trend',
         cumulativeTrendByTime: 'Cumulative Trend by Time',
+        sessionViewGroup: 'Session detail view',
+        sessionViewAnalytics: 'Overview & Graphs',
+        sessionViewChat: 'View Chat',
+        turnTrendSub: 'Tokens per turn',
+        cumulativeTurnTrendSub: 'Total tokens accumulated by turn',
+        cumulativeTrendByTimeSub: 'Tokens accumulated over time',
+        turnNumber: 'Turn {n}',
+        graphExpandTitle: '{chart} (Full Screen)',
+        graphExpandSubPerTurn: 'Token consumption breakdown per conversation turn',
+        graphExpandSubCumulative: 'Cumulative token accumulation progression by turn',
+        graphExpandSubTimeline: 'Cumulative token accumulation along the actual timeline',
+        sessionChatLoading: 'Loading conversation history…',
+        sessionChatMessages: '{count} messages',
+        sessionChatToolCalls: '{count} tool calls',
+        sessionChatViewNote: 'Interactive conversation view',
+        sessionChatEmpty: 'No conversational transcript stored for this session.',
+        sessionChatEmptyHint: 'Raw tokens and telemetry events are in the Overview & Graphs view.',
+        sessionChatRoleUser: 'User',
+        sessionChatRoleAssistant: 'Assistant',
+        sessionChatRoleSystem: 'System',
+        sessionChatMessageIndex: '{role} #{index}',
+        sessionChatChars: '{count} chars',
+        sessionChatTokens: '{count} tokens',
+        sessionChatToolCallChip: 'tool calls',
+        sessionChatNoContent: 'no content recorded',
+        sessionChatReasoning: 'Reasoning recorded (hidden — transcript text is not exposed)',
         showAll: 'Show all',
         showTop: 'Show top',
         tool: 'Tool',
@@ -8204,6 +8355,32 @@
         turnTrend: '轮次趋势',
         cumulativeTurnTrend: '累计轮次趋势',
         cumulativeTrendByTime: '按时间累计趋势',
+        sessionViewGroup: '会话详情视图',
+        sessionViewAnalytics: '概览与图表',
+        sessionViewChat: '查看对话',
+        turnTrendSub: '每轮令牌数',
+        cumulativeTurnTrendSub: '按轮次累计的令牌总数',
+        cumulativeTrendByTimeSub: '随时间累计的令牌',
+        turnNumber: '第 {n} 轮',
+        graphExpandTitle: '{chart}（全屏）',
+        graphExpandSubPerTurn: '每个对话轮次的令牌消耗明细',
+        graphExpandSubCumulative: '按轮次累计的令牌累积过程',
+        graphExpandSubTimeline: '沿实际时间线的令牌累积',
+        sessionChatLoading: '正在加载对话记录…',
+        sessionChatMessages: '{count} 条消息',
+        sessionChatToolCalls: '{count} 次工具调用',
+        sessionChatViewNote: '交互式对话视图',
+        sessionChatEmpty: '此会话未存储对话记录。',
+        sessionChatEmptyHint: '原始令牌与遥测事件请见「概览与图表」。',
+        sessionChatRoleUser: '用户',
+        sessionChatRoleAssistant: '助手',
+        sessionChatRoleSystem: '系统',
+        sessionChatMessageIndex: '{role} #{index}',
+        sessionChatChars: '{count} 字符',
+        sessionChatTokens: '{count} 令牌',
+        sessionChatToolCallChip: '工具调用',
+        sessionChatNoContent: '未记录内容',
+        sessionChatReasoning: '已记录推理内容（不公开转录文本）',
         showAll: '显示全部',
         showTop: '显示前列',
         tool: '工具',
@@ -8905,6 +9082,32 @@
         turnTrend: 'ターン推移',
         cumulativeTurnTrend: '累計ターン推移',
         cumulativeTrendByTime: '時間別累計推移',
+        sessionViewGroup: 'セッション詳細ビュー',
+        sessionViewAnalytics: '概要とグラフ',
+        sessionViewChat: 'チャットを表示',
+        turnTrendSub: 'ターンあたりのトークン数',
+        cumulativeTurnTrendSub: 'ターンごとに累計されたトークン合計',
+        cumulativeTrendByTimeSub: '時間にわたって累計されたトークン',
+        turnNumber: 'ターン{n}',
+        graphExpandTitle: '{chart}（全画面）',
+        graphExpandSubPerTurn: '各会話ターンのトークン消費内訳',
+        graphExpandSubCumulative: 'ターン別のトークン累計の推移',
+        graphExpandSubTimeline: '実際のタイムラインに沿ったトークン累計',
+        sessionChatLoading: '会話履歴を読み込んでいます…',
+        sessionChatMessages: '{count} 件のメッセージ',
+        sessionChatToolCalls: '{count} 件のツール呼び出し',
+        sessionChatViewNote: '対話ビュー',
+        sessionChatEmpty: 'このセッションの会話トランスクリプトは保存されていません。',
+        sessionChatEmptyHint: '生のトークンとテレメトリ イベントは「概要とグラフ」に表示されます。',
+        sessionChatRoleUser: 'ユーザー',
+        sessionChatRoleAssistant: 'アシスタント',
+        sessionChatRoleSystem: 'システム',
+        sessionChatMessageIndex: '{role} #{index}',
+        sessionChatChars: '{count} 文字',
+        sessionChatTokens: '{count} トークン',
+        sessionChatToolCallChip: 'ツール呼び出し',
+        sessionChatNoContent: 'コンテンツは記録されていません',
+        sessionChatReasoning: '推論を記録済み（トランスクリプト本文は公開されません）',
         showAll: 'すべて表示',
         showTop: '上位を表示',
         tool: 'ツール',
@@ -9606,6 +9809,32 @@
         turnTrend: '턴 추이',
         cumulativeTurnTrend: '누적 턴 추이',
         cumulativeTrendByTime: '시간별 누적 추이',
+        sessionViewGroup: '세션 세부 정보 보기',
+        sessionViewAnalytics: '개요 및 그래프',
+        sessionViewChat: '채팅 보기',
+        turnTrendSub: '턴당 토큰 수',
+        cumulativeTurnTrendSub: '턴별 누적 토큰 총계',
+        cumulativeTrendByTimeSub: '시간에 따른 누적 토큰',
+        turnNumber: '턴 {n}',
+        graphExpandTitle: '{chart} (전체 화면)',
+        graphExpandSubPerTurn: '대화 턴별 토큰 소비 세부',
+        graphExpandSubCumulative: '턴별 토큰 누적 진행',
+        graphExpandSubTimeline: '실제 시간 축을 따른 토큰 누적',
+        sessionChatLoading: '대화 기록을 불러오는 중…',
+        sessionChatMessages: '{count}개 메시지',
+        sessionChatToolCalls: '{count}개 도구 호출',
+        sessionChatViewNote: '인터랙티브 대화 보기',
+        sessionChatEmpty: '이 세션의 대화 전사가 저장되지 않았습니다.',
+        sessionChatEmptyHint: "원시 토큰과 텔레메트리 이벤트는 '개요 및 그래프'에 있습니다.",
+        sessionChatRoleUser: '사용자',
+        sessionChatRoleAssistant: '어시스턴트',
+        sessionChatRoleSystem: '시스템',
+        sessionChatMessageIndex: '{role} #{index}',
+        sessionChatChars: '{count}자',
+        sessionChatTokens: '{count} 토큰',
+        sessionChatToolCallChip: '도구 호출',
+        sessionChatNoContent: '기록된 내용 없음',
+        sessionChatReasoning: '추론이 기록됨(전사 텍스트는 제공되지 않음)',
         showAll: '전체 표시',
         showTop: '상위 표시',
         tool: '도구',
@@ -10307,6 +10536,32 @@
         turnTrend: 'Tendencia de turnos',
         cumulativeTurnTrend: 'Tendencia de turnos acumulada',
         cumulativeTrendByTime: 'Tendencia acumulada por tiempo',
+        sessionViewGroup: 'Vista detallada de la sesión',
+        sessionViewAnalytics: 'Resumen y gráficos',
+        sessionViewChat: 'Ver conversación',
+        turnTrendSub: 'Tokens por turno',
+        cumulativeTurnTrendSub: 'Tokens totales acumulados por turno',
+        cumulativeTrendByTimeSub: 'Tokens acumulados con el tiempo',
+        turnNumber: 'Turno {n}',
+        graphExpandTitle: '{chart} (pantalla completa)',
+        graphExpandSubPerTurn: 'Desglose de consumo de tokens por turno de conversación',
+        graphExpandSubCumulative: 'Progresión de acumulación de tokens por turno',
+        graphExpandSubTimeline: 'Acumulación de tokens a lo largo de la línea de tiempo real',
+        sessionChatLoading: 'Cargando el historial de la conversación…',
+        sessionChatMessages: '{count} mensajes',
+        sessionChatToolCalls: '{count} llamadas a herramientas',
+        sessionChatViewNote: 'Vista de conversación interactiva',
+        sessionChatEmpty: 'No hay transcripción de conversación almacenada para esta sesión.',
+        sessionChatEmptyHint: 'Los tokens sin procesar y los eventos de telemetría están en la vista Resumen y gráficos.',
+        sessionChatRoleUser: 'Usuario',
+        sessionChatRoleAssistant: 'Asistente',
+        sessionChatRoleSystem: 'Sistema',
+        sessionChatMessageIndex: '{role} #{index}',
+        sessionChatChars: '{count} caracteres',
+        sessionChatTokens: '{count} tokens',
+        sessionChatToolCallChip: 'llamadas a herramientas',
+        sessionChatNoContent: 'sin contenido registrado',
+        sessionChatReasoning: 'Razonamiento registrado (el texto de la transcripción no se expone)',
         showAll: 'Mostrar todo',
         showTop: 'Mostrar top',
         tool: 'Herramienta',
@@ -11008,6 +11263,32 @@
         turnTrend: 'Tendência de turnos',
         cumulativeTurnTrend: 'Tendência de turnos cumulativa',
         cumulativeTrendByTime: 'Tendência cumulativa por tempo',
+        sessionViewGroup: 'Visão detalhada da sessão',
+        sessionViewAnalytics: 'Visão geral e gráficos',
+        sessionViewChat: 'Ver conversa',
+        turnTrendSub: 'Tokens por turno',
+        cumulativeTurnTrendSub: 'Tokens totais acumulados por turno',
+        cumulativeTrendByTimeSub: 'Tokens acumulados ao longo do tempo',
+        turnNumber: 'Turno {n}',
+        graphExpandTitle: '{chart} (tela cheia)',
+        graphExpandSubPerTurn: 'Detalhamento do consumo de tokens por turno de conversa',
+        graphExpandSubCumulative: 'Progressão da acumulação de tokens por turno',
+        graphExpandSubTimeline: 'Acumulação de tokens ao longo da linha do tempo real',
+        sessionChatLoading: 'Carregando o histórico da conversa…',
+        sessionChatMessages: '{count} mensagens',
+        sessionChatToolCalls: '{count} chamadas de ferramentas',
+        sessionChatViewNote: 'Vista de conversa interativa',
+        sessionChatEmpty: 'Nenhuma transcrição de conversa armazenada para esta sessão.',
+        sessionChatEmptyHint: 'Tokens brutos e eventos de telemetria estão na vista Visão geral e gráficos.',
+        sessionChatRoleUser: 'Usuário',
+        sessionChatRoleAssistant: 'Assistente',
+        sessionChatRoleSystem: 'Sistema',
+        sessionChatMessageIndex: '{role} #{index}',
+        sessionChatChars: '{count} caracteres',
+        sessionChatTokens: '{count} tokens',
+        sessionChatToolCallChip: 'chamadas de ferramentas',
+        sessionChatNoContent: 'sem conteúdo registrado',
+        sessionChatReasoning: 'Raciocínio registrado (o texto da transcrição não é exposto)',
         showAll: 'Mostrar tudo',
         showTop: 'Mostrar top',
         tool: 'Ferramenta',
@@ -13334,6 +13615,14 @@
         usageReportRenderHeat(usageReportState.model);
         usageReportRenderShare(usageReportState.model).catch(() => {});
       }
+      // The session modal paints its charts with the theme's own ink, so an open
+      // modal follows a light/dark switch instead of keeping the old tick and
+      // series colours.
+      const sessionModalOpen = document.getElementById('sessionModal');
+      if (activeSessionDetail && sessionModalOpen && !sessionModalOpen.classList.contains('hidden')) {
+        renderSessionCharts((activeSessionDetail.data || {}).turns || []);
+        if (graphExpandChartType) expandSessionChart(graphExpandChartType);
+      }
     }
 
     function rerenderTokenPresentation() {
@@ -13372,6 +13661,8 @@
         setShareBar('sessionShareReasoning', session.tokens_reasoning || 0, total);
         renderSessionCharts(turns);
         if (sessionSpeedModalState.payload) renderSessionSpeedTimeline(sessionSpeedModalState.payload);
+        if (sessionChatPayload) renderSessionChat(sessionChatPayload.messages, sessionChatPayload.toolCalls);
+        if (graphExpandChartType) expandSessionChart(graphExpandChartType);
       }
 
       const dayDetails = document.getElementById('dayDetails');
@@ -16630,6 +16921,9 @@
     }
 
     let graphExpandChartInstance = null;
+    // Which chart the fullscreen modal shows: a language or light/dark switch
+    // rebuilds it so the title, axis labels and ink all follow.
+    let graphExpandChartType = null;
 
     function setSessionModalView(mode) {
       const aView = document.getElementById('sessionModalAnalyticsView');
@@ -16638,38 +16932,44 @@
       const cBtn = document.getElementById('sessionModalChatToggleBtn');
       if (!aView || !cView) return;
 
-      if (mode === 'chat') {
+      const chat = mode === 'chat';
+      if (chat) {
         sessionSpeedModalState.controller?.abort();
         sessionSpeedModalState.request += 1; sessionSpeedModalState.loading = false;
         sessionSpeedModalState.stopJob?.(); sessionSpeedModalState.stopJob = null;
-        aView.style.display = 'none';
-        cView.style.display = 'block';
-        if (aBtn) aBtn.className = "px-3.5 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-slate-200 transition";
-        if (cBtn) cBtn.className = "px-3.5 py-1.5 text-xs font-bold rounded-lg bg-indigo-600 text-white transition shadow-sm";
-      } else {
-        aView.style.display = 'block';
-        cView.style.display = 'none';
-        if (aBtn) aBtn.className = "px-3.5 py-1.5 text-xs font-bold rounded-lg bg-indigo-600 text-white transition shadow-sm";
-        if (cBtn) cBtn.className = "px-3.5 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-slate-200 transition";
-        if (sessionSpeedModalState.payload || activeSessionDetail) loadSessionSpeedTimeline(sessionSpeedModalState.token, false, sessionSpeedModalState.requestedGroup);
+      }
+      aView.style.display = chat ? 'none' : 'block';
+      cView.style.display = chat ? 'block' : 'none';
+      // aria-pressed selects the styled state in .session-view-btn, so the switch
+      // follows the active style theme instead of a hardcoded indigo pill.
+      if (aBtn) aBtn.setAttribute('aria-pressed', chat ? 'false' : 'true');
+      if (cBtn) cBtn.setAttribute('aria-pressed', chat ? 'true' : 'false');
+      if (!chat && (sessionSpeedModalState.payload || activeSessionDetail)) {
+        loadSessionSpeedTimeline(sessionSpeedModalState.token, false, sessionSpeedModalState.requestedGroup);
       }
     }
 
+    // The transcript is painted imperatively, so the last payload is kept for
+    // applyI18n to repaint it: switching language with the chat open would
+    // otherwise leave every label in the previous language.
+    let sessionChatPayload = null;
+
     function renderSessionChat(messages, toolCalls) {
+      sessionChatPayload = { messages: messages || [], toolCalls: toolCalls || [] };
       const container = document.getElementById('sessionChatContainer');
       const msgCountEl = document.getElementById('sessionChatMsgCount');
       const toolCountEl = document.getElementById('sessionChatToolCount');
       if (!container) return;
 
-      if (msgCountEl) msgCountEl.textContent = `${(messages || []).length} messages`;
-      if (toolCountEl) toolCountEl.textContent = `${(toolCalls || []).length} tool calls`;
+      if (msgCountEl) msgCountEl.textContent = t('sessionChatMessages', { count: (messages || []).length });
+      if (toolCountEl) toolCountEl.textContent = t('sessionChatToolCalls', { count: (toolCalls || []).length });
 
       if (!messages || !messages.length) {
         container.innerHTML = `
-          <div class="p-8 text-center rounded-2xl bg-slate-900/40 border border-slate-800 text-slate-400 font-mono text-xs">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mx-auto mb-2 text-slate-500"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            No conversational transcripts stored for this telemetry session.<br/>
-            Raw tokens and telemetry events are visualized in the Overview & Graphs view.
+          <div class="session-chat-empty p-8 text-center rounded-2xl text-xs">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mx-auto mb-2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            ${escapeHtml(t('sessionChatEmpty'))}<br/>
+            ${escapeHtml(t('sessionChatEmptyHint'))}
           </div>
         `;
         return;
@@ -16678,44 +16978,35 @@
       container.innerHTML = messages.map((m, idx) => {
         const isUser = m.role === 'user';
         const isSystem = m.role === 'system';
-        const roleLabel = isUser ? 'User' : isSystem ? 'System' : 'Assistant';
-        const roleBadge = isUser
-          ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
-          : isSystem
-          ? 'bg-slate-700/40 text-slate-300 border-slate-600'
-          : 'bg-purple-500/20 text-purple-300 border-purple-500/30';
-        const cardStyle = isUser
-          ? 'bg-indigo-950/20 border-indigo-500/30 border-l-4 border-l-indigo-500'
-          : isSystem
-          ? 'bg-slate-900/30 border-slate-800 border-l-4 border-l-slate-600'
-          : 'bg-slate-900/40 border-slate-800/80 border-l-4 border-l-purple-500';
+        const roleKey = isUser ? 'sessionChatRoleUser' : isSystem ? 'sessionChatRoleSystem' : 'sessionChatRoleAssistant';
+        const variant = isUser ? 'session-chat-card--user' : isSystem ? 'session-chat-card--system' : 'session-chat-card--assistant';
 
         const reasoningHtml = m.has_reasoning ? `
-          <div class="my-3 rounded-xl bg-purple-950/25 border border-purple-500/25 px-3.5 py-2.5 text-xs font-semibold text-purple-300 flex items-center gap-2">
+          <div class="session-chat-reasoning my-3 rounded-xl px-3.5 py-2.5 text-xs font-semibold flex items-center gap-2">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-            Reasoning recorded (hidden — transcript text is not exposed)
+            ${escapeHtml(t('sessionChatReasoning'))}
           </div>
         ` : '';
 
         const metaChips = [
-          m.content_chars ? `${Number(m.content_chars).toLocaleString()} chars` : '',
-          m.token_count ? `${Number(m.token_count).toLocaleString()} tokens` : '',
-          m.has_tool_calls ? 'tool calls' : '',
-        ].filter(Boolean).map(c => `<span class="text-[10px] px-2 py-0.5 rounded bg-slate-800/60 text-slate-400 font-mono">${c}</span>`).join(' ');
+          m.content_chars ? t('sessionChatChars', { count: Number(m.content_chars).toLocaleString() }) : '',
+          m.token_count ? t('sessionChatTokens', { count: Number(m.token_count).toLocaleString() }) : '',
+          m.has_tool_calls ? t('sessionChatToolCallChip') : '',
+        ].filter(Boolean).map((c) => `<span class="session-chat-meta-chip text-[10px] px-2 py-0.5 rounded font-mono">${escapeHtml(c)}</span>`).join(' ');
 
         return `
-          <div class="surface p-4 sm:p-5 rounded-2xl border ${cardStyle} shadow-md transition">
-            <div class="flex items-center justify-between mb-3 pb-2 border-b border-white/5">
+          <div class="session-chat-card ${variant} p-4 sm:p-5 rounded-2xl shadow-md transition">
+            <div class="session-chat-card-head flex items-center justify-between mb-3 pb-2">
               <div class="flex items-center gap-2.5">
-                <span class="px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold uppercase tracking-wider border ${roleBadge}">
-                  ${roleLabel} #${idx + 1}
+                <span class="session-chat-role px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold uppercase tracking-wider border">
+                  ${escapeHtml(t('sessionChatMessageIndex', { role: t(roleKey), index: idx + 1 }))}
                 </span>
-                ${m.model ? `<span class="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">${escapeHtml(m.model)}</span>` : ''}
+                ${m.model ? `<span class="session-chat-meta-chip text-[10px] px-2 py-0.5 rounded font-mono">${escapeHtml(m.model)}</span>` : ''}
               </div>
-              <span class="text-[11px] text-slate-500 font-mono">${escapeHtml(String(m.timestamp || ''))}</span>
+              <span class="session-chat-time text-[11px] font-mono">${escapeHtml(String(m.timestamp || ''))}</span>
             </div>
             ${reasoningHtml}
-            <div class="flex flex-wrap items-center gap-2 text-xs text-slate-400">${metaChips || '<span class="text-slate-500 font-mono">no content recorded</span>'}</div>
+            <div class="session-chat-meta flex flex-wrap items-center gap-2 text-xs">${metaChips || `<span class="session-chat-time font-mono">${escapeHtml(t('sessionChatNoContent'))}</span>`}</div>
           </div>
         `;
       }).join('');
@@ -16765,6 +17056,7 @@
       }
 
       modal.classList.remove('hidden');
+      graphExpandChartType = type;
       if (type === 'speed' && sessionOutputSpeedChart) {
         if (titleEl) titleEl.textContent = t('sessionSpeedTitle');
         if (subEl) subEl.textContent = t('sessionSpeedEntireSession');
@@ -16779,36 +17071,37 @@
       canvas.onkeydown = null; canvas.onblur = null;
 
       const turns = activeSessionDetail?.data?.turns || [];
-      const labels = turns.map((_, i) => `Turn ${i + 1}`);
+      const labels = turns.map((_, i) => t('turnNumber', { n: i + 1 }));
+      const barColors = turnSeriesColors();
 
       if (type === 'perTurn') {
-        if (titleEl) titleEl.textContent = `${t('turnTrend')} (Full Screen)`;
-        if (subEl) subEl.textContent = 'Token consumption breakdown per conversation turn';
+        if (titleEl) titleEl.textContent = t('graphExpandTitle', { chart: t('turnTrend') });
+        if (subEl) subEl.textContent = t('graphExpandSubPerTurn');
         graphExpandChartInstance = createChart(canvas.getContext('2d'), {
           type: 'bar',
           data: {
             labels,
             datasets: [
-              { label: t('input'), data: turns.map(t => Number(t.tokens_in || 0)), backgroundColor: '#1E40AF', borderRadius: 4 },
-              { label: t('cacheRead'), data: turns.map(t => Number(t.tokens_cache || 0)), backgroundColor: '#0F766E', borderRadius: 4 },
-              { label: t('output'), data: turns.map(t => Number(t.tokens_out || 0)), backgroundColor: '#F59E0B', borderRadius: 4 },
-              { label: t('reasoning'), data: turns.map(t => Number(t.tokens_reasoning || 0)), backgroundColor: '#7C3AED', borderRadius: 4 },
+              { label: t('input'), data: turns.map(turn => Number(turn.tokens_in || 0)), backgroundColor: barColors.input, borderRadius: 4 },
+              { label: t('cacheRead'), data: turns.map(turn => Number(turn.tokens_cache || 0)), backgroundColor: barColors.cache, borderRadius: 4 },
+              { label: t('output'), data: turns.map(turn => Number(turn.tokens_out || 0)), backgroundColor: barColors.output, borderRadius: 4 },
+              { label: t('reasoning'), data: turns.map(turn => Number(turn.tokens_reasoning || 0)), backgroundColor: barColors.reasoning, borderRadius: 4 },
             ]
           },
-          options: buildTurnChartOptions('Turn', { stacked: true })
+          options: buildTurnChartOptions(t('sessionSpeedColTurn'), { stacked: true })
         });
       } else if (type === 'cumulative') {
-        if (titleEl) titleEl.textContent = `${t('cumulativeTurnTrend')} (Full Screen)`;
-        if (subEl) subEl.textContent = 'Cumulative token accumulation progression by turn';
+        if (titleEl) titleEl.textContent = t('graphExpandTitle', { chart: t('cumulativeTurnTrend') });
+        if (subEl) subEl.textContent = t('graphExpandSubCumulative');
         const cumulativeSeries = buildCumulativeTurnSeries(turns);
         graphExpandChartInstance = createChart(canvas.getContext('2d'), {
           type: 'line',
           data: { labels, datasets: makeTurnDatasets(cumulativeSeries) },
-          options: buildTurnChartOptions('Turn')
+          options: buildTurnChartOptions(t('sessionSpeedColTurn'))
         });
       } else {
-        if (titleEl) titleEl.textContent = `${t('cumulativeTrendByTime')} (Full Screen)`;
-        if (subEl) subEl.textContent = 'Cumulative token accumulation along actual timeline';
+        if (titleEl) titleEl.textContent = t('graphExpandTitle', { chart: t('cumulativeTrendByTime') });
+        if (subEl) subEl.textContent = t('graphExpandSubTimeline');
         const timeSeries = buildCumulativeTimeSeries(turns);
         graphExpandChartInstance = createChart(canvas.getContext('2d'), {
           type: 'line',
@@ -16823,6 +17116,7 @@
       if (canvas) { canvas.onkeydown = null; canvas.onblur = null; }
       const modal = document.getElementById('graphExpandModal');
       if (modal) modal.classList.add('hidden');
+      graphExpandChartType = null;
       if (graphExpandChartInstance) {
         graphExpandChartInstance.destroy();
         graphExpandChartInstance = null;
@@ -16947,18 +17241,48 @@
       return { labels: buildTimeBucketLabels(bucketTimes), cumulative };
     }
 
+    // Input / cache read / output / reasoning / total. The light set is the one
+    // the token-share bars already use; dark themes need its brighter siblings,
+    // or a #111827 "total" line vanishes into the surface.
+    function turnSeriesColors() {
+      return isDark()
+        ? { input: "#60A5FA", cache: "#34D399", output: "#FBBF24", reasoning: "#C4B5FD", total: "#E2E8F0" }
+        : { input: "#1E40AF", cache: "#0F766E", output: "#F59E0B", reasoning: "#7C3AED", total: "#111827" };
+    }
+
+    // 8-digit hex: 1F is the ~12% series fill these charts have always used.
+    function turnSeriesFill(hex) {
+      return hex + "1F";
+    }
+
     function makeTurnDatasets(series) {
+      const c = turnSeriesColors();
       return [
-        { label: t("input"), data: series.input, borderColor: "#1E40AF", backgroundColor: "rgba(30,64,175,0.12)", tension: 0.25, pointRadius: 2 },
-        { label: t("cacheRead"), data: series.cache, borderColor: "#0F766E", backgroundColor: "rgba(15,118,110,0.12)", tension: 0.25, pointRadius: 2 },
-        { label: t("output"), data: series.output, borderColor: "#F59E0B", backgroundColor: "rgba(245,158,11,0.12)", tension: 0.25, pointRadius: 2 },
-        { label: t("reasoning"), data: series.reasoning, borderColor: "#7C3AED", backgroundColor: "rgba(124,58,237,0.12)", tension: 0.25, pointRadius: 2 },
-        { label: t("total"), data: series.total, borderColor: "#111827", backgroundColor: "rgba(17,24,39,0.12)", tension: 0.25, pointRadius: 2, borderDash: [6, 4] },
+        { label: t("input"), data: series.input, borderColor: c.input, backgroundColor: turnSeriesFill(c.input), tension: 0.25, pointRadius: 2 },
+        { label: t("cacheRead"), data: series.cache, borderColor: c.cache, backgroundColor: turnSeriesFill(c.cache), tension: 0.25, pointRadius: 2 },
+        { label: t("output"), data: series.output, borderColor: c.output, backgroundColor: turnSeriesFill(c.output), tension: 0.25, pointRadius: 2 },
+        { label: t("reasoning"), data: series.reasoning, borderColor: c.reasoning, backgroundColor: turnSeriesFill(c.reasoning), tension: 0.25, pointRadius: 2 },
+        { label: t("total"), data: series.total, borderColor: c.total, backgroundColor: turnSeriesFill(c.total), tension: 0.25, pointRadius: 2, borderDash: [6, 4] },
       ];
+    }
+
+    // Chart ink read from the same tokens the CSS paints with: a fixed #475569
+    // nearly vanished on a dark surface and near-white gridlines vanished on a
+    // light one. Canvas fills take hex/rgba, so the grid stays a flat blend.
+    function sessionChartInk() {
+      const dark = isDark();
+      const muted = getCssVar('--color-muted') || (dark ? '#94A3B8' : '#475569');
+      const text = getCssVar('--color-text') || (dark ? '#E2E8F0' : '#0F172A');
+      return {
+        tick: muted,
+        legend: text,
+        grid: dark ? 'rgba(148,163,184,0.2)' : 'rgba(100,116,139,0.24)',
+      };
     }
 
     function buildTurnChartOptions(xAxisTitle, options = {}) {
       const maxTicksLimit = Number(options.maxTicksLimit || 0) || undefined;
+      const ink = sessionChartInk();
       return {
         responsive: true,
         maintainAspectRatio: false,
@@ -16967,17 +17291,17 @@
         scales: {
           x: {
             title: { display: true, text: xAxisTitle },
-            ticks: { color: "#475569", maxTicksLimit, autoSkip: true },
-            grid: { color: "rgba(226,232,240,0.55)" },
+            ticks: { color: ink.tick, maxTicksLimit, autoSkip: true },
+            grid: { color: ink.grid },
           },
           y: {
             beginAtZero: true,
-            ticks: { color: "#475569", callback: (value) => formatTokenCount(value) },
-            grid: { color: "rgba(226,232,240,0.55)" },
+            ticks: { color: ink.tick, callback: (value) => formatTokenCount(value) },
+            grid: { color: ink.grid },
           },
         },
         plugins: {
-          legend: { position: "bottom" },
+          legend: { position: "bottom", labels: { color: ink.legend } },
           tooltip: { callbacks: { label: (context) => `${context.dataset.label}: ${formatTokenCount(context.raw || 0)}` } },
         },
       };
@@ -16998,12 +17322,12 @@
       sessionPerTurnChart = createChart(perTurnCanvas.getContext("2d"), {
         type: "line",
         data: { labels, datasets: makeTurnDatasets(perTurn) },
-        options: buildTurnChartOptions("Turn", { maxTicksLimit: 12 }),
+        options: buildTurnChartOptions(t("sessionSpeedColTurn"), { maxTicksLimit: 12 }),
       });
       sessionCumulativeChart = createChart(cumulativeCanvas.getContext("2d"), {
         type: "line",
         data: { labels, datasets: makeTurnDatasets(cumulative) },
-        options: buildTurnChartOptions("Turn", { maxTicksLimit: 12 }),
+        options: buildTurnChartOptions(t("sessionSpeedColTurn"), { maxTicksLimit: 12 }),
       });
       sessionTimeCumulativeChart = createChart(timeCumulativeCanvas.getContext("2d"), {
         type: "line",

@@ -84,6 +84,7 @@ a failed download preserves the installed copy. `TOKDASH_CJK_WEIGHTS` selects th
 weights (default `400;500;700`). Keep the same weights when repairing an installed
 upstream version, because its stylesheet URL is cached as immutable. This script
 affects a source-tree run; it does not modify an installed pipx service.
+The optional font directory is also excluded from wheels and source archives.
 
 ## Releases
 

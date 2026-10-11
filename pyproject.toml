@@ -62,6 +62,9 @@ tokdash = [
   "static/**/*",
 ]
 
+[tool.setuptools.exclude-package-data]
+tokdash = ["static/vendor/fonts/*", "static/vendor/fonts/**/*"]
+
 [tool.pytest.ini_options]
 # Keep only failed tests' tmp dirs (dead per-test Chrome profiles used to
 # accumulate gigabytes under /tmp/pytest-of-<user>).

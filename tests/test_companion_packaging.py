@@ -5,6 +5,7 @@ package is built from ``src/``. ``MANIFEST.in`` has ``prune companion``; this
 test builds both distributions and asserts no companion path leaked in.
 """
 import re
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -15,10 +16,10 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def _build_dists(tmp_path: Path) -> tuple[Path, Path]:
+def _build_dists(tmp_path: Path, root: Path = REPO_ROOT) -> tuple[Path, Path]:
     """Build wheel + sdist into tmp_path; return (wheel, sdist) paths."""
     subprocess.run(
-        [sys.executable, "-m", "build", "--outdir", str(tmp_path), str(REPO_ROOT)],
+        [sys.executable, "-m", "build", "--outdir", str(tmp_path), str(root)],
         check=True,
         capture_output=True,
     )
@@ -74,3 +75,24 @@ def test_sdist_excludes_companion(tmp_path: Path) -> None:
 def test_manifest_in_prunes_companion() -> None:
     manifest = (REPO_ROOT / "MANIFEST.in").read_text(encoding="utf-8")
     assert "prune companion" in manifest, "MANIFEST.in missing 'prune companion'"
+
+
+def test_optional_local_fonts_stay_out_of_distributions(tmp_path: Path) -> None:
+    """Installing the optional face locally must not change release contents."""
+    source = tmp_path / "source"
+    shutil.copytree(
+        REPO_ROOT / "src" / "tokdash", source / "src" / "tokdash",
+        ignore=shutil.ignore_patterns("__pycache__", "fonts"),
+    )
+    for name in ("pyproject.toml", "MANIFEST.in", "README.md", "LICENSE"):
+        shutil.copy2(REPO_ROOT / name, source / name)
+    optional = source / "src/tokdash/static/vendor/fonts/noto-sans-sc-v41"
+    optional.mkdir(parents=True)
+    for name in ("slice.woff2", "noto-sans-sc.css", "OFL.txt"):
+        (optional / name).write_bytes(b"optional local font asset")
+    dist = tmp_path / "dist"
+    wheel, sdist = _build_dists(dist, source)
+    for label, names in (("wheel", _wheel_names(wheel)), ("sdist", _sdist_names(sdist))):
+        leaks = sorted(name for name in names if "/static/vendor/fonts/" in name)
+        assert not leaks, f"{label} contains optional local fonts: {leaks}"
+        assert any(name.endswith("/static/vendor/NOTICE.txt") for name in names)

@@ -2732,10 +2732,12 @@
     .session-chat-card--user .session-chat-role {
       color: color-mix(in srgb, var(--color-primary) 62%, var(--color-text));
     }
+    /* The messages accent runs lighter than the primary in several light
+       themes (liquid's tool chip sat at 4.4:1 on its tinted wash at 62%). */
     .session-chat-chip--tools,
     .session-chat-card--assistant .session-chat-role,
     .session-chat-reasoning {
-      color: color-mix(in srgb, var(--color-messages) 62%, var(--color-text));
+      color: color-mix(in srgb, var(--color-messages) 52%, var(--color-text));
     }
     .session-share-track { background: color-mix(in srgb, var(--color-text) 12%, transparent); }
     .session-graph-card { border: 1px solid var(--color-border); }
@@ -2796,9 +2798,11 @@
     .session-chat-card--assistant .session-chat-role {
       border-color: color-mix(in srgb, var(--color-messages) 38%, transparent);
     }
+    /* Muted ink on its own wash: a fifth of the text ink keeps it clear of
+       4.5:1 where the muted token is already close (light obsidian). */
     .session-chat-meta-chip {
       background: color-mix(in srgb, var(--color-text) 6%, transparent);
-      color: var(--color-muted);
+      color: color-mix(in srgb, var(--color-muted) 80%, var(--color-text));
     }
     .session-chat-reasoning {
       background: color-mix(in srgb, var(--color-messages) 10%, transparent);
@@ -17290,7 +17294,7 @@
         interaction: { mode: "index", intersect: false },
         scales: {
           x: {
-            title: { display: true, text: xAxisTitle },
+            title: { display: true, text: xAxisTitle, color: ink.tick },
             ticks: { color: ink.tick, maxTicksLimit, autoSkip: true },
             grid: { color: ink.grid },
           },

@@ -122,16 +122,17 @@ def _i18n_keys() -> dict[str, list[str]]:
     end = source.index("\n    };", start)
     # `end + 6` keeps the object's closing brace but drops its semicolon.
     # The literal is too big for an -e argument, so it goes through a file.
-    program = Path(tempfile.mkdtemp()) / "i18n_keys.js"
-    program.write_text(
-        source[start : end + 6]
-        + ";\nconsole.log(JSON.stringify(Object.fromEntries("
-        + "Object.keys(I18N).map((lang) => [lang, Object.keys(I18N[lang])]))));\n",
-        encoding="utf-8",
-    )
-    result = subprocess.run(
-        ["node", str(program)], capture_output=True, text=True, check=True
-    )
+    with tempfile.TemporaryDirectory() as scratch:
+        program = Path(scratch) / "i18n_keys.js"
+        program.write_text(
+            source[start : end + 6]
+            + ";\nconsole.log(JSON.stringify(Object.fromEntries("
+            + "Object.keys(I18N).map((lang) => [lang, Object.keys(I18N[lang])]))));\n",
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            ["node", str(program)], capture_output=True, text=True, check=True
+        )
     return json.loads(result.stdout)
 
 
@@ -188,6 +189,9 @@ def test_session_chart_ink_reads_the_theme_tokens(source: str) -> None:
     assert "#475569" not in options, "hardcoded tick ink returns on dark themes"
     assert "rgba(226,232,240" not in options, "near-white gridlines vanish on light surfaces"
     assert "labels: { color: ink.legend }" in options
+    # Without a colour Chart.js draws the axis title in its own #666, which sits
+    # under 3.5:1 on every dark theme's card.
+    assert "text: xAxisTitle, color: ink.tick" in options, "the axis title ignores the theme ink"
 
 
 def test_turn_series_colors_split_by_mode(source: str) -> None:
@@ -205,24 +209,26 @@ def test_turn_series_colors_split_by_mode(source: str) -> None:
 
 def test_an_open_modal_follows_a_language_or_theme_switch(source: str) -> None:
     """Both repaint paths rebuild the modal; a stale one keeps the old colours."""
-    assert "renderSessionChat(sessionChatPayload.messages" in source
-    i18n_pass = source[source.index("function applyI18n()") : source.index("const TOOL_BRAND_META")]
-    theme_pass = source[source.index("function rerenderPresentation()") : source.index("function rerenderTokenPresentation()")]
-    for name, block in (("applyI18n", i18n_pass), ("rerenderPresentation", theme_pass)):
+    # A language switch reaches the modal through applyI18n's token pass.
+    assert "rerenderTokenPresentation();" in _function("applyI18n", source)
+    i18n_pass = _function("rerenderTokenPresentation", source)
+    theme_pass = _function("rerenderPresentation", source)
+    for name, block in (("rerenderTokenPresentation", i18n_pass), ("rerenderPresentation", theme_pass)):
         assert "renderSessionCharts(" in block, name + " no longer repaints the modal charts"
-    assert "graphExpandChartType" in i18n_pass
-    assert "graphExpandChartType" in theme_pass
+        assert "expandSessionChart(graphExpandChartType)" in block, name + " leaves the expanded chart stale"
+    assert "renderSessionChat(sessionChatPayload.messages" in i18n_pass
 
 
 # --- every modal string goes through a dictionary ---------------------------
 
 
-def test_modal_markup_translates_every_hook_key(modal_region: str) -> None:
+def test_modal_markup_translates_every_hook_key(modal_region: str, _dictionary_keys) -> None:
     keys = set()
     for attribute in TRANSLATION_ATTRS:
         keys |= set(re.findall(attribute + r'="([^"]+)"', modal_region))
     assert keys, "the modal lost every translation hook"
-    unknown = sorted(k for k in keys if k not in _known_keys())
+    known = set(_dictionary_keys["en"])
+    unknown = sorted(k for k in keys if k not in known)
     assert not unknown, f"data-i18n hooks with no dictionary entry: {unknown}"
 
 
@@ -273,10 +279,6 @@ def _dictionary_keys() -> dict[str, list[str]]:
     if shutil.which("node") is None:
         pytest.skip("node not available")
     return _i18n_keys()
-
-
-def _known_keys() -> set[str]:
-    return set(_i18n_keys()["en"])
 
 
 def test_modal_keys_exist_in_all_six_languages(_dictionary_keys) -> None:

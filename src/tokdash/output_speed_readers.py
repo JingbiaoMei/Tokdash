@@ -221,6 +221,27 @@ def clipped_union_ms(intervals, start, end):
     return total
 
 
+def _codex_tool_work_ms(item):
+    """Work a Codex tool item reports, in ms; 0 when it reports none.
+
+    A value that cannot be read, or a bare `duration` number with no unit to
+    trust, may hide real work, so it counts as more than any stamp can hide.
+    """
+    duration = item.get('duration_ms', item.get('duration'))
+    if isinstance(duration, dict):
+        parts = ((duration.get('secs'), 1000), (duration.get('nanos'), 1e-6))
+    else:
+        parts = ((duration, 1 if 'duration_ms' in item else math.inf),)
+    work = 0.0
+    for value, scale in parts:
+        n = number(value)
+        if value is not None and n is None:
+            return math.inf
+        if n:
+            work += n * scale
+    return work
+
+
 class CodexResponseAssociation:
     """Explicit response marker owns timed model items and one counted snapshot.
 
@@ -316,10 +337,10 @@ class CodexResponseAssociation:
                 return
             if item_kind in self.TOOL_ITEMS:
                 # A collapsed clock cannot bound a tool that reports real work.
-                duration = item.get('duration_ms', item.get('duration'))
-                duration_nonzero = (any(number(duration.get(k)) not in (None, 0) for k in ('secs','nanos'))
-                                    if isinstance(duration, dict) else number(duration) not in (None, 0))
-                if interval[0] == interval[1] and duration_nonzero:
+                # The stamps are whole milliseconds, so a tool reporting under
+                # 1 ms (Codex often reports ~16 us for a command) shares one
+                # stamp legitimately.
+                if interval[0] == interval[1] and _codex_tool_work_ms(item) >= 1:
                     self.invalid_tool_turns.add(turn)
                 self.tools[turn].append(interval)
             elif not turn or turn != self.turn:

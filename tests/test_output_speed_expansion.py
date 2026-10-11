@@ -146,6 +146,33 @@ def test_codex_collapsed_or_malformed_late_tool_clock_excludes_owned_response():
         a.observe(tool)
         assert a.resolve()['call']['speed_status']=='invalid_timing'
 
+@pytest.mark.parametrize('duration,status', [
+    ({'duration': {'secs': 0, 'nanos': 16_400}}, 'measured'),
+    ({'duration': {'secs': 0, 'nanos': 999_999}}, 'measured'),
+    ({'duration_ms': 0.5}, 'measured'),
+    ({'duration': {'secs': 0, 'nanos': 1_000_000}}, 'invalid_timing'),
+    ({'duration_ms': 1}, 'invalid_timing'),
+    ({'duration': 0.5}, 'invalid_timing'),  # no unit, so it cannot be shown to be under 1 ms
+    ({'duration': {'secs': 'x', 'nanos': 16_400}}, 'invalid_timing'),  # unreadable may hide work
+    ({'duration': {'secs': -1, 'nanos': 16_400}}, 'invalid_timing'),
+])
+def test_codex_submillisecond_tool_may_share_one_clock_stamp(duration, status):
+    # Codex stamps items in whole ms and often reports ~16 us for a command, so the
+    # command starts and completes on one stamp. Reading that as a broken clock
+    # voided every response in its turn, not only the one it sat in.
+    tool = event('item_completed', turn_id='turn', item={'type': 'CommandExecution', 'id': 'quick', **duration},
+                 started_at_ms=70, completed_at_ms=70)
+    a = CodexResponseAssociation(); a.observe(event('task_started', turn_id='turn'))
+    a.observe(item('AgentMessage', 10, 30)); a.observe(owner(rid='first'))
+    a.register('first', {'last_token_usage': TOKENS, 'total_token_usage': TOKENS})
+    a.observe(tool); a.observe(item('AgentMessage', 50, 100, 'second')); a.observe(owner(rid='second'))
+    a.register('second', {'last_token_usage': TOKENS, 'total_token_usage': TOKENS})
+    speeds = a.resolve()
+    assert [speeds[r]['speed_status'] for r in ('first', 'second')] == [status, status]
+    if status == 'measured':
+        # The tool sits inside the second window and, having no width, removes nothing.
+        assert [speeds[r]['speed_ms'] for r in ('first', 'second')] == [20, 50]
+
 def qwen_records():
     usage = {'promptTokenCount':100,'candidatesTokenCount':40,'thoughtsTokenCount':20,'totalTokenCount':160}
     telemetry={'type':'system','uuid':'clock','sessionId':'session', 'systemPayload':{'uiEvent':{

@@ -1841,7 +1841,14 @@ const usageReportShare = (f) => (Number(f) * 100).toFixed(1) + '%';
         line + "\n"
         for line in source.splitlines()
         if line.strip().startswith(
-            ('const USAGE_REPORT_SANS = ', 'const USAGE_REPORT_MONO = ', 'const usageReportMeasureCtx = ')
+            (
+                'const USAGE_REPORT_CJK_SC = ',
+                'const USAGE_REPORT_CJK_BY_LANG = ',
+                'const USAGE_REPORT_CJK = ',
+                'const USAGE_REPORT_SANS = ',
+                'const USAGE_REPORT_MONO = ',
+                'const usageReportMeasureCtx = ',
+            )
         )
     )
     return (

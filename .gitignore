@@ -63,3 +63,7 @@ docs/local/
 .cosyncing/
 
 scratchpad/
+
+# Optional CJK face fetched by scripts/vendor_cjk_fonts.sh (OFL 1.1, see
+# static/vendor/NOTICE.txt). The dashboard serves it when it is present.
+src/tokdash/static/vendor/fonts/

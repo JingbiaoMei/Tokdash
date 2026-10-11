@@ -17,6 +17,21 @@ Flatpickr 4.6.13 (flatpickr-4.6.13.min.css has no license banner):
 Copyright (c) 2017 Gregory Petrosyan
 https://github.com/flatpickr/flatpickr/blob/v4.6.13/LICENSE.md
 
+Optional CJK face (SIL Open Font License 1.1, not in this repository)
+
+scripts/vendor_cjk_fonts.sh can fetch Noto Sans SC, the Simplified-Chinese sans the
+dashboard's font stacks name, into static/vendor/fonts/. The repository ships no font
+binaries, so the face exists only on a machine where someone ran that script.
+
+Noto Sans SC, as served by Google Fonts; upstream:
+https://github.com/google/fonts/tree/main/ofl/notosanssc
+Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'
+
+That license permits embedding and redistribution and requires each copy to carry the
+license, which is why the script downloads OFL.txt next to the font files. It writes
+them unmodified. Font Software under that license stays under it, so these files are
+not covered by the MIT license below.
+
 MIT License
 
 Permission is hereby granted, free of charge, to any person obtaining a copy

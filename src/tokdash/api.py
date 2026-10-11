@@ -30,11 +30,13 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from . import __version__
 from .assets import (
+    CJK_FONT_CSS_PLACEHOLDER,
     NO_CACHE_HEADERS,
     STATIC_DIR,
     SW_CACHE_NAME_PLACEHOLDER,
     VENDOR_CACHE_HEADERS,
     get_static_cache_name,
+    local_cjk_font_css,
 )
 from .compute import (
     compute_stats,
@@ -2608,7 +2610,11 @@ def _render_dashboard_html(base_path: str) -> str:
     html_path = STATIC_DIR / "index.html"
     if not html_path.exists():
         return "<h1>Dashboard not found</h1><p>Please create static/index.html</p>"
-    return html_path.read_text(encoding="utf-8").replace(BASE_PATH_PLACEHOLDER, base_path)
+    return (
+        html_path.read_text(encoding="utf-8")
+        .replace(BASE_PATH_PLACEHOLDER, base_path)
+        .replace(CJK_FONT_CSS_PLACEHOLDER, local_cjk_font_css())
+    )
 
 
 def _render_manifest(base_path: str) -> str:

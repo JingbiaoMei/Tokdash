@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -37,3 +38,30 @@ def get_static_cache_name() -> str:
         digest.update(path.read_bytes())
     _static_cache_name = f"tokdash-{digest.hexdigest()[:12]}"
     return _static_cache_name
+
+
+# scripts/vendor_cjk_fonts.sh can vendor a Simplified-Chinese sans face for a
+# machine with no CJK font of its own and no path to a font CDN. The directory
+# carries the upstream version in its name because /static/vendor/ is cached for
+# a year, and a re-download must not be answerable under a stale cached name.
+CJK_FONT_CSS_PLACEHOLDER = "__TOKDASH_CJK_FONTS__"
+CJK_FONT_CSS_GLOB = "vendor/fonts/noto-sans-sc-*/noto-sans-sc.css"
+
+
+def _cjk_font_css_rank(path: Path) -> tuple[int, str]:
+    """Order vendored font directories by the upstream version in the name."""
+    digits = "".join(char for char in path.parent.name if char.isdigit())
+    return (int(digits) if digits else 0, path.parent.name)
+
+
+@lru_cache(maxsize=1)
+def local_cjk_font_css() -> str:
+    """Return the URL of a vendored CJK stylesheet, or '' when none is installed.
+
+    Cached for the process lifetime, so installing a face takes a restart of the
+    dashboard rather than a reload.
+    """
+    candidates = sorted(STATIC_DIR.glob(CJK_FONT_CSS_GLOB), key=_cjk_font_css_rank)
+    if not candidates:
+        return ""
+    return "/static/" + candidates[-1].relative_to(STATIC_DIR).as_posix()

@@ -20,17 +20,28 @@
         ? `${url}?base=${encodeURIComponent(window.TOKDASH_BASE_PATH)}`
         : url;
     };
+    // Present only when scripts/vendor_cjk_fonts.sh has vendored a CJK face;
+    // the server leaves the placeholder empty otherwise. See assets.local_cjk_font_css.
+    const cjkFontCss = "__TOKDASH_CJK_FONTS__";
+    if (cjkFontCss.startsWith("/")) {
+      document.write(`<link rel="stylesheet" href="${window.tokdashPath(cjkFontCss)}" />`);
+    }
     document.write(`<link rel="manifest" href="${window.tokdashAssetWithBase('/manifest.webmanifest')}" />`);
     document.write(`<link rel="icon" href="${window.tokdashPath('/static/icons/icon-192.png')}" sizes="192x192" />`);
   </script>
 
-  <!-- Fonts (Design System: Fira Code / Fira Sans) -->
+  <!-- Fonts (Design System: Fira Code / Fira Sans, plus Noto Sans SC so Han
+       glyphs have a face to land on). Inter and Plus Jakarta Sans were still
+       being fetched here although no rule ever named them. -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700;800&family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
 
   <script>document.write(`<script src="${window.tokdashPath('/static/vendor/tailwindcss-3.4.17.js')}"><\/script>`);</script>
-  <script>if (window.tailwind) tailwind.config = { darkMode: 'class' }</script>
+  <script>if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { fontFamily: {
+    sans: ['ui-sans-serif', 'system-ui', 'var(--font-cjk)', 'sans-serif', '"Apple Color Emoji"', '"Segoe UI Emoji"', '"Segoe UI Symbol"', '"Noto Color Emoji"'],
+    mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', '"Liberation Mono"', '"Courier New"', 'var(--font-cjk)', 'monospace'],
+  } } } }</script>
   <script>document.write(`<script src="${window.tokdashPath('/static/vendor/chart-4.4.0.umd.min.js')}"><\/script>`);</script>
   <script>document.write(`<script src="${window.tokdashPath('/static/vendor/three-0.160.0.min.js')}"><\/script>`);</script>
 
@@ -44,6 +55,17 @@
 
   <style>
     :root {
+      /* Latin and CJK need different families here: Fira ships no Han glyph, so
+         the tail of each stack decides whether Chinese reads as a sans that
+         matches the UI or as whatever serif the browser falls back to. The tail
+         is its own property because Han characters are shared by three of the
+         six languages this UI ships, and each writes some of them differently. */
+      --font-cjk-sc: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Microsoft JhengHei", "Noto Sans SC", "Source Han Sans SC", "Noto Sans CJK SC";
+      --font-cjk-ja: "Hiragino Sans", "Yu Gothic", "Noto Sans JP", "Source Han Sans JP";
+      --font-cjk-ko: "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR";
+      --font-cjk: var(--font-cjk-sc);
+      --font-sans: "Fira Sans", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", var(--font-cjk), "Apple Color Emoji", "Segoe UI Emoji";
+      --font-mono: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", "Sarasa Mono SC", "Noto Sans Mono CJK SC", var(--font-cjk), monospace;
       --color-primary: #1E40AF;
       --color-secondary: #3B82F6;
       --color-cta: #F59E0B;
@@ -90,6 +112,18 @@
       --datepickr-range-join-size: 5px;
     }
 
+    /* The primary CJK face follows the interface language, with Simplified Chinese
+       kept behind it for any character a Japanese or Korean face does not carry.
+       Below :root, not inside it: these override one property of that block. */
+    html:lang(ja) {
+      --font-cjk: var(--font-cjk-ja), var(--font-cjk-sc);
+    }
+
+    html:lang(ko) {
+      --font-cjk: var(--font-cjk-ko), var(--font-cjk-sc);
+    }
+
+
     html {
       min-height: 100%;
       background: var(--color-bg);
@@ -99,7 +133,7 @@
 
     body {
       min-height: 100%;
-      font-family: "Fira Sans", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+      font-family: var(--font-sans);
       background: radial-gradient(1200px 600px at 20% -10%, rgba(59,130,246,0.16), transparent 65%),
                   radial-gradient(900px 600px at 90% 10%, rgba(245,158,11,0.12), transparent 55%),
                   var(--color-bg);
@@ -108,6 +142,24 @@
       color: var(--color-text);
       overflow-x: clip;
       max-width: 100vw;
+    }
+
+    /* Simplified Chinese, Japanese and Korean. Translated labels sit on the mono
+       stack and on uppercase tracking, neither of which a Han glyph is drawn
+       well by: the mono stack is Latin-only, 800 is past the heaviest weight a
+       CJK face ships, and tracking turns 构成 into 构 成. Numbers and IDs keep
+       their monospace alignment because only translated text is retargeted. */
+    html:lang(zh-CN) .mono[data-i18n],
+    html:lang(ja) .mono[data-i18n],
+    html:lang(ko) .mono[data-i18n] {
+      font-family: var(--font-sans);
+      font-weight: 700;
+    }
+
+    html:lang(zh-CN) [data-i18n],
+    html:lang(ja) [data-i18n],
+    html:lang(ko) [data-i18n] {
+      letter-spacing: normal;
     }
 
     .session-table {
@@ -250,7 +302,7 @@
       50% { background-position: 100% 0; }
     }
 
-    .mono { font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .mono { font-family: var(--font-mono); }
 
     /* Card system */
     .surface {
@@ -774,7 +826,7 @@
     .server-row-copy { display: flex; align-items: baseline; min-width: 0; gap: 5px; line-height: 1.2; }
     .server-row-name { flex: 0 0 auto; max-width: 42%; overflow: hidden; color: var(--color-text); font-size: 12px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
     .server-row-separator { flex: 0 0 auto; color: var(--color-muted); font-size: 10px; }
-    .server-row-host { min-width: 0; overflow: hidden; color: var(--color-muted); font-family: "Fira Code",ui-monospace,monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .server-row-host { min-width: 0; overflow: hidden; color: var(--color-muted); font-family: var(--font-mono); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
     .server-remove { width: 34px; height: 34px; }
     .server-remove { display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: 8px; color: var(--color-muted); background: transparent; cursor: pointer; transition: color var(--t-fast) ease,background var(--t-fast) ease,border-color var(--t-fast) ease; }
     .server-remove:is(:hover,:focus-visible) { outline: none; border-color: color-mix(in srgb,#D94848 25%,var(--color-border)); background: color-mix(in srgb,#D94848 8%,transparent); color: #C93636; }
@@ -784,10 +836,10 @@
     /* Keep host actions on a separate track and addresses aligned with the name. */
     .server-route-list { display: grid; gap: 2px; margin: 0 8px 8px 30px; }
     .server-route-row { display: grid; grid-template-columns: minmax(0,1fr) auto auto auto; align-items: center; gap: 7px; min-height: 30px; }
-    .server-route-url { min-width: 0; overflow: hidden; color: var(--color-muted); font-family: "Fira Code",ui-monospace,monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .server-route-url { min-width: 0; overflow: hidden; color: var(--color-muted); font-family: var(--font-mono); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
     .server-route-url[data-invalid="true"] { color: #B42318; }
     html.dark .server-route-url[data-invalid="true"] { color: #F87171; }
-    .server-route-ms { color: var(--color-text); font-family: "Fira Code",ui-monospace,monospace; font-size: 10px; font-variant-numeric: tabular-nums; }
+    .server-route-ms { color: var(--color-text); font-family: var(--font-mono); font-size: 10px; font-variant-numeric: tabular-nums; }
     .server-route-badge { padding: 1px 6px; border: 1px solid color-mix(in srgb,var(--color-border) 80%,transparent); border-radius: 999px; color: var(--color-muted); font-size: 9px; font-weight: 750; white-space: nowrap; }
     .server-route-badge[data-badge="active"] { border-color: color-mix(in srgb,#2F9E5B 40%,transparent); background: color-mix(in srgb,#2F9E5B 10%,transparent); color: #267C4A; }
     html.dark .server-route-badge[data-badge="active"] { color: #6EE7B7; }
@@ -806,7 +858,7 @@
     .server-route-note { margin: 2px 0 0; color: var(--color-muted); font-size: 10px; font-weight: 650; line-height: 1.4; }
     .server-route-note[data-tone="warn"], .server-route-note[data-tone="error"] { color: #D12F2F; }
     .server-inline-editor { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 4px 0 6px; }
-    .server-inline-editor .ui-input { flex: 1 1 180px; min-width: 0; min-height: 32px; padding: 5px 8px; font-size: 11px; font-family: "Fira Code",ui-monospace,monospace; }
+    .server-inline-editor .ui-input { flex: 1 1 180px; min-width: 0; min-height: 32px; padding: 5px 8px; font-size: 11px; font-family: var(--font-mono); }
     .server-inline-editor .btn { min-height: 32px; padding: 5px 10px; font-size: 11px; }
     .server-host-actions { display: inline-flex; align-items: center; gap: 2px; }
     .server-add-form { display: grid; gap: 7px; margin-top: 16px; }
@@ -1353,11 +1405,11 @@
     .servers-routes { display: grid; gap: 3px; margin: 6px 0 0; padding: 7px 0 0; border-top: 1px solid color-mix(in srgb,var(--color-border) 70%,transparent); }
     .servers-route { display: flex; align-items: center; gap: 7px; min-width: 0; }
     .servers-route .server-health-dot { flex: 0 0 auto; width: 7px; height: 7px; }
-    .servers-route-url { min-width: 0; overflow: hidden; color: var(--color-muted); font-family: "Fira Code",ui-monospace,monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .servers-route-url { min-width: 0; overflow: hidden; color: var(--color-muted); font-family: var(--font-mono); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
     .servers-route-ms { flex: 0 0 auto; font-size: 10px; }
     .servers-route-when { flex: 0 0 auto; margin-left: auto; color: var(--color-muted); font-size: 9px; }
     .servers-card-who { min-width: 0; }
-    .servers-card-who .name { font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 700; font-size: 15px; }
+    .servers-card-who .name { font-family: var(--font-mono); font-weight: 700; font-size: 15px; }
     .servers-host { font-size: 12px; color: var(--color-muted); margin-top: 2px; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .servers-when { margin-left: auto; text-align: right; font-size: 12px; color: var(--color-muted); white-space: nowrap; }
     .servers-when .mono { font-weight: 600; }
@@ -1365,30 +1417,30 @@
     .servers-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
     .servers-kpi { border: 1px solid var(--color-border); border-radius: 12px; padding: 10px 12px; background: color-mix(in srgb, var(--color-text) 2%, transparent); }
     .servers-kpi .k { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-label); }
-    .servers-kpi .v { font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 700; font-size: 16px; margin-top: 3px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+    .servers-kpi .v { font-family: var(--font-mono); font-weight: 700; font-size: 16px; margin-top: 3px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
     .servers-kpi .v.cost { color: var(--color-cost); }
-    .servers-delta { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 1px 8px; font-family: "Fira Sans", ui-sans-serif, system-ui, sans-serif; }
+    .servers-delta { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 1px 8px; font-family: var(--font-sans); }
     /* Same semantics as the Overview KPI deltas: up is red, down is green, and the
        dark theme gets the lighter pair. The old amber/green predated that rework. */
     .servers-delta.up { color: #B42318; background: color-mix(in srgb, #DC2626 10%, transparent); }
     .servers-delta.down { color: #15803D; background: color-mix(in srgb, #16A34A 10%, transparent); }
     html.dark .servers-delta.up { color: #F87171; }
     html.dark .servers-delta.down { color: #4ADE80; }
-    .servers-stale-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #B42318; border: 1px solid color-mix(in srgb, #DC2626 40%, transparent); border-radius: 6px; padding: 1px 6px; font-family: "Fira Sans", ui-sans-serif, system-ui, sans-serif; }
+    .servers-stale-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #B42318; border: 1px solid color-mix(in srgb, #DC2626 40%, transparent); border-radius: 6px; padding: 1px 6px; font-family: var(--font-sans); }
     html.dark .servers-stale-tag { color: #F87171; border-color: color-mix(in srgb, #F87171 40%, transparent); }
     .servers-share-row { display: grid; grid-template-columns: 100px 1fr 52px; align-items: center; gap: 10px; font-size: 12px; color: var(--color-muted); }
     .servers-share-row + .servers-share-row { margin-top: 6px; }
     .servers-bar-track { height: 7px; border-radius: 999px; background: color-mix(in srgb, var(--color-text) 8%, transparent); overflow: hidden; }
     .servers-bar-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--color-primary), var(--color-secondary)); }
-    .servers-share-row .pct { text-align: right; font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 600; color: var(--color-text); }
+    .servers-share-row .pct { text-align: right; font-family: var(--font-mono); font-weight: 600; color: var(--color-text); }
     .servers-card h4 { margin: 2px 0 8px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--color-label); }
     .servers-tool-row { display: grid; grid-template-columns: 128px 1fr 74px 66px; gap: 10px; align-items: center; font-size: 12.5px; padding: 3px 0; }
-    .servers-tool-row .n, .servers-model-row .n { font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .servers-tool-row .tk, .servers-model-row .tk { text-align: right; color: var(--color-muted); font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
-    .servers-tool-row .cs, .servers-model-row .cs { text-align: right; color: var(--color-cost); font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 600; font-size: 12px; }
+    .servers-tool-row .n, .servers-model-row .n { font-family: var(--font-mono); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .servers-tool-row .tk, .servers-model-row .tk { text-align: right; color: var(--color-muted); font-family: var(--font-mono); font-size: 12px; }
+    .servers-tool-row .cs, .servers-model-row .cs { text-align: right; color: var(--color-cost); font-family: var(--font-mono); font-weight: 600; font-size: 12px; }
     .servers-model-row { display: grid; grid-template-columns: 1fr 74px 66px; gap: 10px; font-size: 12.5px; padding: 3px 0; }
     .servers-meta { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; border-top: 1px solid var(--color-border); padding-top: 12px; font-size: 12.5px; color: var(--color-muted); }
-    .servers-meta b { color: var(--color-text); font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .servers-meta b { color: var(--color-text); font-family: var(--font-mono); }
     .servers-quota-link { color: var(--color-primary); cursor: pointer; font-weight: 600; background: none; border: 0; padding: 0; font: inherit; }
     .servers-quota-link:hover { text-decoration: underline; }
     .servers-src-errors { display: flex; gap: 4px; align-items: baseline; font-size: 12px; color: #B45309; }
@@ -1403,9 +1455,9 @@
     .servers-compare th, .servers-compare td { padding: 8px 14px; text-align: right; white-space: nowrap; }
     .servers-compare th { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-label); border-bottom: 1px solid var(--color-border); }
     .servers-compare th:first-child, .servers-compare td:first-child { text-align: left; }
-    .servers-compare td { font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    .servers-compare td { font-family: var(--font-mono); font-size: 12px; }
     .servers-compare td.row-label { font-family: inherit; color: var(--color-muted); font-weight: 600; }
-    .servers-compare td .st, .servers-strip .st { color: #B42318; font-size: 9px; vertical-align: super; margin-left: 2px; cursor: help; font-family: "Fira Sans", ui-sans-serif, system-ui, sans-serif; }
+    .servers-compare td .st, .servers-strip .st { color: #B42318; font-size: 9px; vertical-align: super; margin-left: 2px; cursor: help; font-family: var(--font-sans); }
     html.dark .servers-compare td .st, html.dark .servers-strip .st { color: #F87171; }
     .servers-compare th.combined, .servers-compare td.combined { background: color-mix(in srgb, var(--color-primary) 5%, transparent); }
     .servers-compare th.combined { color: var(--color-primary); }
@@ -1422,7 +1474,7 @@
     html.dark .session-panel-summary:hover { background: rgba(148,163,184,0.07); }
     .session-panel-summary h2 { margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46vw; }
     .session-panel-count {
-      font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-family: var(--font-mono);
       font-size: 11px; font-weight: 600; color: var(--color-muted);
       border: 1px solid var(--color-border); border-radius: 999px; padding: 2px 10px;
       background: color-mix(in srgb, var(--color-text) 3%, transparent); white-space: nowrap;
@@ -1461,7 +1513,7 @@
       border: 1px solid var(--datepickr-panel-border);
       border-radius: var(--datepickr-radius);
       box-shadow: var(--shadow-lg);
-      font-family: "Fira Sans", sans-serif;
+      font-family: var(--font-sans);
       overflow: hidden;
     }
 
@@ -22913,8 +22965,15 @@
       green: { light: '#15803D', dark: '#4ADE80' },
       amber: { light: '#B45309', dark: '#FBBF24' },
     };
-    const USAGE_REPORT_SANS = '"Fira Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI","Noto Sans CJK SC",sans-serif';
-    const USAGE_REPORT_MONO = '"Fira Code",ui-monospace,SFMono-Regular,Menlo,monospace';
+    // The card painter measures text through these, and its layout-free harness
+    // has no CSSOM to read, so the stacks are literals rather than the custom
+    // properties above. The CJK tail follows the interface language the same way
+    // --font-cjk does; tests/test_cjk_font_stacks.py fails on any drift.
+    const USAGE_REPORT_CJK_SC = '"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Microsoft JhengHei","Noto Sans SC","Source Han Sans SC","Noto Sans CJK SC"';
+    const USAGE_REPORT_CJK_BY_LANG = { ja: '"Hiragino Sans","Yu Gothic","Noto Sans JP","Source Han Sans JP",' + USAGE_REPORT_CJK_SC, ko: '"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",' + USAGE_REPORT_CJK_SC };
+    const USAGE_REPORT_CJK = USAGE_REPORT_CJK_BY_LANG[currentLang] || USAGE_REPORT_CJK_SC;
+    const USAGE_REPORT_SANS = '"Fira Sans",ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial,"Noto Sans",' + USAGE_REPORT_CJK + ',"Apple Color Emoji","Segoe UI Emoji"';
+    const USAGE_REPORT_MONO = '"Fira Code",ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New","Sarasa Mono SC","Noto Sans Mono CJK SC",' + USAGE_REPORT_CJK + ',monospace';
 
     function usageReportCardFont(size, weight, mono) {
       return `${weight || 400} ${size}px ${mono ? USAGE_REPORT_MONO : USAGE_REPORT_SANS}`;
@@ -26428,7 +26487,7 @@
       labelsContainer.style.width = '100%';
       labelsContainer.style.height = '100%';
       labelsContainer.style.pointerEvents = 'none';
-      labelsContainer.style.fontFamily = '"Fira Sans", sans-serif';
+      labelsContainer.style.fontFamily = USAGE_REPORT_SANS;
       
       // Helper to project 3D position to 2D screen coordinates
       function project3DTo2D(x, y, z) {

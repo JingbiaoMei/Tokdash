@@ -824,7 +824,7 @@ html[data-ui-theme="terminal"] {
 }
 
 html[data-ui-theme="terminal"] body {
-  font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: var(--font-mono);
   background:
     linear-gradient(180deg, rgba(20,122,67,0.04), rgba(20,122,67,0.04)),
     repeating-linear-gradient(180deg, rgba(20,122,67,0.04) 0, rgba(20,122,67,0.04) 1px, transparent 1px, transparent 3px),
@@ -925,7 +925,7 @@ html.dark[data-ui-theme="terminal"] {
 }
 
 html.dark[data-ui-theme="terminal"] body {
-  font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: var(--font-mono);
   background:
     linear-gradient(180deg, rgba(82,247,143,0.03), rgba(82,247,143,0.03)),
     repeating-linear-gradient(180deg, rgba(82,247,143,0.05) 0, rgba(82,247,143,0.05) 1px, transparent 1px, transparent 3px),
@@ -2256,7 +2256,7 @@ html[data-ui-theme="amber"] {
 }
 
 html[data-ui-theme="amber"] body {
-  font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: var(--font-mono);
   background:
     radial-gradient(900px 480px at 12% -8%, rgba(158,102,0,0.06), transparent 58%),
     linear-gradient(180deg, #FBF7EF 0%, #F4ECDC 100%);
@@ -2358,7 +2358,7 @@ html.dark[data-ui-theme="amber"] {
 }
 
 html.dark[data-ui-theme="amber"] body {
-  font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: var(--font-mono);
   background:
     linear-gradient(180deg, rgba(255,192,0,0.03), rgba(255,192,0,0.03)),
     repeating-linear-gradient(180deg, rgba(255,192,0,0.04) 0, rgba(255,192,0,0.04) 1px, transparent 1px, transparent 3px),

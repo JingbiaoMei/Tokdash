@@ -8,7 +8,7 @@ the page. These tests keep:
 
 - one definition of each stack, reachable through `--font-sans` / `--font-mono`;
 - a CJK family in the tail of both, covering each supported platform's own face;
-- the Report tab's literal copies, which must not drift from those stacks;
+- the Report and 3D fonts, which resolve the current stylesheet stacks;
 - the locale rules that take translated labels off the mono stack and off tracking;
 - the optional vendored face: its placeholder, its discovery rule, and the fetch
   script's licence handling.
@@ -64,30 +64,21 @@ def _declaration(name: str) -> str:
     return match.group(1).strip()
 
 
-def _token(name: str) -> str:
+def _token(name: str, lang: str | None = None) -> str:
     """A custom property with any nested `var(--...)` expanded once."""
-    value = _declaration(name)
+    overrides = {}
+    if lang:
+        block = re.search(rf"html:lang\({lang}\)\s*\{{([^}}]+)\}}", _source())
+        if block:
+            overrides = dict(re.findall(r"(--font[\w-]+):([^;]+);", block.group(1)))
+    value = overrides.get(name, _declaration(name))
     for _ in range(4):
         referenced = re.findall(r"var\((--[^)]+)\)", value)
         if not referenced:
             return value
         for reference in referenced:
-            value = value.replace(f"var({reference})", _declaration(reference))
+            value = value.replace(f"var({reference})", overrides.get(reference, _declaration(reference)))
     raise AssertionError(f"{name} nests more than four custom properties deep")
-
-
-def _js_literal(name: str) -> str:
-    """A single-line constant, with any `' + OTHER + '` pieces joined back in."""
-    line = re.search(rf"^\s*const {name} = (.+);$", _source(), re.MULTILINE)
-    assert line, f"{name} is not a single-line constant in index.html"
-    fallback = re.search(r"\|\| (USAGE_REPORT_[A-Z_]+)$", line.group(1))
-    if fallback:
-        return _js_literal(fallback.group(1))
-    pieces = re.findall(r"'([^']*)'", line.group(1))
-    assert pieces, f"{name} holds no string literal"
-    for reference in re.findall(r"\+ (USAGE_REPORT_[A-Z_]+) \+", line.group(1)):
-        pieces.insert(len(pieces) - 1, _js_literal(reference))
-    return "".join(pieces)
 
 
 def _families(stack: str) -> list[str]:
@@ -173,8 +164,8 @@ def test_every_shipped_cjk_language_has_its_own_faces_named():
     """Each language group covers the faces its platforms ship."""
     expected = {
         "--font-cjk-sc": ("pingfang sc", "microsoft yahei", "microsoft jhenghei", "noto sans sc"),
-        "--font-cjk-ja": ("hiragino sans", "yu gothic", "noto sans jp"),
-        "--font-cjk-ko": ("apple sd gothic neo", "malgun gothic", "noto sans kr"),
+        "--font-cjk-ja": ("hiragino sans", "yu gothic", "noto sans jp", "noto sans cjk jp"),
+        "--font-cjk-ko": ("apple sd gothic neo", "malgun gothic", "noto sans kr", "noto sans cjk kr"),
     }
     for name, families in expected.items():
         declared = _families(_declaration(name))
@@ -198,14 +189,23 @@ def test_each_cjk_language_gets_its_own_glyph_variants(lang, first_cjk):
     assert first_cjk in _families(_declaration(f"--font-cjk-{lang}")), lang
 
 
-def test_report_tab_literals_match_the_stylesheet_stacks():
-    """The card painter measures with these literals, so a drift is a layout bug.
+@pytest.mark.parametrize(("lang", "region"), (("ja", "jp"), ("ko", "kr")))
+def test_locale_fonts_precede_chinese_in_sans_and_mono(lang, region):
+    for token in ("--font-sans", "--font-mono"):
+        families = _families(_token(token, lang))
+        assert families.index(f"noto sans cjk {region}") < families.index("noto sans sc")
+    mono = _families(_token("--font-mono", lang))
+    assert f"noto sans mono cjk {region}" in mono
+    assert "sarasa mono sc" not in mono
+    assert "noto sans mono cjk sc" not in mono
 
-    Its test harness has no CSSOM, which is why the stacks are copied rather than
-    read at runtime; this test is what keeps the copy honest.
-    """
-    assert _families(_js_literal("USAGE_REPORT_SANS")) == _families(_token("--font-sans"))
-    assert _families(_js_literal("USAGE_REPORT_MONO")) == _families(_token("--font-mono"))
+
+def test_report_and_3d_fonts_use_stylesheet_stacks():
+    source = _source()
+    assert "getPropertyValue(mono ? '--font-mono' : '--font-sans')" in source
+    assert "${usageReportFontFamily(mono)}" in source
+    assert "labelsContainer.style.fontFamily = 'var(--font-sans)'" in source
+    assert "const USAGE_REPORT_SANS" not in source
 
 
 @pytest.mark.parametrize("lang", ("zh-CN", "ja", "ko"))
@@ -308,7 +308,7 @@ def test_vendoring_script_keeps_the_font_license_with_the_font():
     """OFL 1.1 lets the face be embedded, provided the license travels with it."""
     script = VENDOR_SCRIPT.read_text(encoding="utf-8")
     assert "OFL.txt" in script, "the fetch must include the license"
-    assert "--fail" in script, "a partial download must not leave a half-vendored face"
+    assert "--fail" in script, "HTTP errors must fail the fetch"
     assert "noto-sans-sc-$version" in script, "versioned directory: /static/vendor/ caches for a year"
     assert "fonts.gstatic.com" in script
     assert "OFL" in NOTICE.read_text(encoding="utf-8"), "NOTICE.txt must name the face"

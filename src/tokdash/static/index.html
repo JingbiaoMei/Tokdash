@@ -40,7 +40,7 @@
   <script>document.write(`<script src="${window.tokdashPath('/static/vendor/tailwindcss-3.4.17.js')}"><\/script>`);</script>
   <script>if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { fontFamily: {
     sans: ['ui-sans-serif', 'system-ui', 'var(--font-cjk)', 'sans-serif', '"Apple Color Emoji"', '"Segoe UI Emoji"', '"Segoe UI Symbol"', '"Noto Color Emoji"'],
-    mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', '"Liberation Mono"', '"Courier New"', 'var(--font-cjk)', 'monospace'],
+    mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', '"Liberation Mono"', '"Courier New"', 'var(--font-cjk-mono)', 'var(--font-cjk)', 'monospace'],
   } } } }</script>
   <script>document.write(`<script src="${window.tokdashPath('/static/vendor/chart-4.4.0.umd.min.js')}"><\/script>`);</script>
   <script>document.write(`<script src="${window.tokdashPath('/static/vendor/three-0.160.0.min.js')}"><\/script>`);</script>
@@ -61,11 +61,15 @@
          is its own property because Han characters are shared by three of the
          six languages this UI ships, and each writes some of them differently. */
       --font-cjk-sc: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Microsoft JhengHei", "Noto Sans SC", "Source Han Sans SC", "Noto Sans CJK SC";
-      --font-cjk-ja: "Hiragino Sans", "Yu Gothic", "Noto Sans JP", "Source Han Sans JP";
-      --font-cjk-ko: "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR";
+      --font-cjk-ja: "Hiragino Sans", "Yu Gothic", "Noto Sans JP", "Noto Sans CJK JP", "Source Han Sans JP";
+      --font-cjk-ko: "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", "Noto Sans CJK KR", "Source Han Sans KR";
       --font-cjk: var(--font-cjk-sc);
+      --font-cjk-mono-sc: "Sarasa Mono SC", "Noto Sans Mono CJK SC";
+      --font-cjk-mono-ja: "Sarasa Mono J", "Noto Sans Mono CJK JP";
+      --font-cjk-mono-ko: "Sarasa Mono K", "Noto Sans Mono CJK KR";
+      --font-cjk-mono: var(--font-cjk-mono-sc);
       --font-sans: "Fira Sans", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", var(--font-cjk), "Apple Color Emoji", "Segoe UI Emoji";
-      --font-mono: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", "Sarasa Mono SC", "Noto Sans Mono CJK SC", var(--font-cjk), monospace;
+      --font-mono: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", var(--font-cjk-mono), var(--font-cjk), monospace;
       --color-primary: #1E40AF;
       --color-secondary: #3B82F6;
       --color-cta: #F59E0B;
@@ -117,10 +121,12 @@
        Below :root, not inside it: these override one property of that block. */
     html:lang(ja) {
       --font-cjk: var(--font-cjk-ja), var(--font-cjk-sc);
+      --font-cjk-mono: var(--font-cjk-mono-ja);
     }
 
     html:lang(ko) {
       --font-cjk: var(--font-cjk-ko), var(--font-cjk-sc);
+      --font-cjk-mono: var(--font-cjk-mono-ko);
     }
 
 
@@ -22965,18 +22971,15 @@
       green: { light: '#15803D', dark: '#4ADE80' },
       amber: { light: '#B45309', dark: '#FBBF24' },
     };
-    // The card painter measures text through these, and its layout-free harness
-    // has no CSSOM to read, so the stacks are literals rather than the custom
-    // properties above. The CJK tail follows the interface language the same way
-    // --font-cjk does; tests/test_cjk_font_stacks.py fails on any drift.
-    const USAGE_REPORT_CJK_SC = '"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Microsoft JhengHei","Noto Sans SC","Source Han Sans SC","Noto Sans CJK SC"';
-    const USAGE_REPORT_CJK_BY_LANG = { ja: '"Hiragino Sans","Yu Gothic","Noto Sans JP","Source Han Sans JP",' + USAGE_REPORT_CJK_SC, ko: '"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",' + USAGE_REPORT_CJK_SC };
-    const USAGE_REPORT_CJK = USAGE_REPORT_CJK_BY_LANG[currentLang] || USAGE_REPORT_CJK_SC;
-    const USAGE_REPORT_SANS = '"Fira Sans",ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial,"Noto Sans",' + USAGE_REPORT_CJK + ',"Apple Color Emoji","Segoe UI Emoji"';
-    const USAGE_REPORT_MONO = '"Fira Code",ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New","Sarasa Mono SC","Noto Sans Mono CJK SC",' + USAGE_REPORT_CJK + ',monospace';
+    // Resolve at render time: a language switch changes the root font tokens.
+    // Canvas fonts need the expanded family list rather than a CSS var().
+    function usageReportFontFamily(mono = false) {
+      return getComputedStyle(document.documentElement)
+        .getPropertyValue(mono ? '--font-mono' : '--font-sans').trim();
+    }
 
     function usageReportCardFont(size, weight, mono) {
-      return `${weight || 400} ${size}px ${mono ? USAGE_REPORT_MONO : USAGE_REPORT_SANS}`;
+      return `${weight || 400} ${size}px ${usageReportFontFamily(mono)}`;
     }
 
     const usageReportMeasureCtx = document.createElement('canvas').getContext('2d');
@@ -23012,10 +23015,8 @@
     // Webfonts must be in before the first measure, or the layout is computed
     // against a fallback metric and the paint does not match it.
     function usageReportCardFonts() {
-      if (!usageReportState.fonts) {
-        usageReportState.fonts = (document.fonts && document.fonts.ready) || Promise.resolve();
-      }
-      return usageReportState.fonts;
+      // A language switch can start loading new unicode-range slices.
+      return (document.fonts && document.fonts.ready) || Promise.resolve();
     }
 
     /* Brand marks reuse the same-origin blob URLs the DOM already fetched, which
@@ -26487,7 +26488,7 @@
       labelsContainer.style.width = '100%';
       labelsContainer.style.height = '100%';
       labelsContainer.style.pointerEvents = 'none';
-      labelsContainer.style.fontFamily = USAGE_REPORT_SANS;
+      labelsContainer.style.fontFamily = 'var(--font-sans)';
       
       // Helper to project 3D position to 2D screen coordinates
       function project3DTo2D(x, y, z) {

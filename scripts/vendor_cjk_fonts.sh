@@ -25,7 +25,8 @@ css_url="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@${weights}&d
 license_url=https://raw.githubusercontent.com/google/fonts/main/ofl/notosanssc/OFL.txt
 
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+stage=''
+trap 'rm -rf "$work"; if [ -n "$stage" ]; then rm -rf "$stage"; fi' EXIT
 
 curl --fail --location --retry 3 -A "$ua" --output "$work/upstream.css" "$css_url"
 
@@ -33,15 +34,11 @@ curl --fail --location --retry 3 -A "$ua" --output "$work/upstream.css" "$css_ur
 # the slices it needs. The version in the file URLs (.../s/notosanssc/v41/...) names
 # the local directory: /static/vendor/ is cached by the browser for a year, so a
 # later version must not be able to answer under a name already cached.
-version=$(grep -o '/s/notosanssc/v[0-9]\{1,\}/' "$work/upstream.css" | head -1 | grep -o 'v[0-9]\{1,\}')
-if [ -z "$version" ]; then
+version=$(sed -n 's|.*https://fonts.gstatic.com/s/notosanssc/\(v[0-9][0-9]*\)/.*|\1|p' "$work/upstream.css" | sort -u)
+if [[ ! "$version" =~ ^v[0-9]+$ ]]; then
   echo "cannot tell which Noto Sans SC version upstream serves" >&2
   exit 1
 fi
-
-font_dir=src/tokdash/static/vendor/fonts/noto-sans-sc-$version
-rm -rf "$font_dir"
-mkdir -p "$font_dir"
 
 grep -o 'https://fonts.gstatic.com/[^)]*\.woff2' "$work/upstream.css" | sort -u > "$work/urls"
 if [ ! -s "$work/urls" ]; then
@@ -49,17 +46,38 @@ if [ ! -s "$work/urls" ]; then
   exit 1
 fi
 
+font_root=src/tokdash/static/vendor/fonts
+font_dir=$font_root/noto-sans-sc-$version
+mkdir -p "$font_root"
+# Stage on the destination filesystem so the first install is one rename. The
+# hidden directory cannot match the server's published-stylesheet discovery.
+stage=$(mktemp -d "$font_root/.noto-sans-sc-${version}.XXXXXX")
+
 while IFS= read -r url; do
   # Each slice keeps the name Google gives it, which is what the rewritten CSS points at.
-  curl --fail --location --retry 3 --output "$font_dir/$(basename "$url")" "$url"
+  curl --fail --location --retry 3 --output "$stage/$(basename "$url")" "$url"
 done < "$work/urls"
 
-sed "s|https://fonts.gstatic.com/s/notosanssc/${version}/||g" "$work/upstream.css" > "$font_dir/noto-sans-sc.css"
-curl --fail --location --retry 3 --output "$font_dir/OFL.txt" "$license_url"
+sed "s|https://fonts.gstatic.com/s/notosanssc/${version}/||g" "$work/upstream.css" > "$stage/noto-sans-sc.css"
+curl --fail --location --retry 3 --output "$stage/OFL.txt" "$license_url"
 
-if grep -q 'https://fonts.gstatic.com' "$font_dir/noto-sans-sc.css"; then
+if grep -q 'https://fonts.gstatic.com' "$stage/noto-sans-sc.css"; then
   echo "the rewritten stylesheet still points at the CDN" >&2
   exit 1
+fi
+
+if [ -d "$font_dir" ]; then
+  # Published vendor URLs are immutable. Refuse a different weight set under
+  # the same URL, and repair matching installs with atomic file replacements.
+  if [ -f "$font_dir/noto-sans-sc.css" ] && ! cmp -s "$font_dir/noto-sans-sc.css" "$stage/noto-sans-sc.css"; then
+    echo "Noto Sans SC $version is already installed with different CSS; keep its original TOKDASH_CJK_WEIGHTS until the upstream version changes" >&2
+    exit 1
+  fi
+  mv "$stage/"*.woff2 "$font_dir/"
+  mv "$stage/OFL.txt" "$font_dir/OFL.txt"
+  mv "$stage/noto-sans-sc.css" "$font_dir/noto-sans-sc.css"
+else
+  mv "$stage" "$font_dir"
 fi
 
 printf 'vendored Noto Sans SC %s (%s weights, %s slices, %s) into %s\n' \

@@ -1758,6 +1758,7 @@ CARD_SIGNATURES = (
     "function usageReportThemeTokens(theme, dark) {",
     "function usageReportCardPalette(mode) {",
     "const USAGE_REPORT_TIER_ACCENT = {",
+    "function usageReportFontFamily(mono = false) {",
     "function usageReportCardFont(size, weight, mono) {",
     "function usageReportTextWidth(text, font) {",
     "function usageReportWrapText(text, font, maxWidth) {",
@@ -1809,6 +1810,7 @@ def _card_harness(source: str) -> str:
 const DEFAULT_HEAT_COLORS_LIGHT = ['#EEF2F7','#E0E7FF','#C7D2FE','#A5B4FC','#60A5FA','#3B82F6','#2563EB','#1E40AF'];
 const DEFAULT_HEAT_COLORS_DARK = ['#172033','#1E293B','#1D4ED8','#2563EB','#3B82F6','#60A5FA','#93C5FD','#BFDBFE'];
 const currentLang = 'en';
+let fontTokensUnderTest = __FONT_TOKENS__;
 const usageReportState = { includeCost: false, nickname: 'wsl-box', version: '2.5.1' };
 let serverUnderTest = { id: 'local', label: 'Local', baseUrl: '' };
 const usageReportServer = () => serverUnderTest;
@@ -1818,13 +1820,17 @@ function t(key, vars) {
   Object.keys(vars || {}).forEach((name) => { out = out.split('{' + name + '}').join(String(vars[name])); });
   return out;
 }
-const document = { createElement: () => ({ getContext: () => ({
+const document = { documentElement: {}, createElement: () => ({ getContext: () => ({
   font: '400 10px sans-serif',
   measureText(text) {
     const size = parseFloat(String(this.font).split(' ')[1]) || 10;
     return { width: String(text).length * size * 0.55 };
   },
 }) }) };
+function getComputedStyle(element) {
+  if (element !== document.documentElement) throw new Error('expected root font tokens');
+  return { getPropertyValue: (name) => fontTokensUnderTest[name] || '' };
+}
 const parseDateKey = (value) => new Date(value + 'T00:00:00');
 const formatTokenCount = (n) => (Number(n) >= 1e6 ? (Number(n) / 1e6).toFixed(1) + 'M' : String(n));
 const formatNumber = (n) => String(n);
@@ -1837,19 +1843,18 @@ const usageReportToolLabel = (tool) => String(tool);
 const usageReportShare = (f) => (Number(f) * 100).toFixed(1) + '%';
 """
     prelude = prelude.replace("__COPY__", json.dumps(_i18n_english_copy(source), ensure_ascii=False))
+
+    def resolve_font(name: str) -> str:
+        value = re.search(rf"^\s*{name}:([^;]+);", source, re.MULTILINE).group(1).strip()
+        return re.sub(r"var\((--font[\w-]+)\)", lambda match: resolve_font(match.group(1)), value)
+
+    prelude = prelude.replace("__FONT_TOKENS__", json.dumps({
+        name: resolve_font(name) for name in ("--font-sans", "--font-mono")
+    }))
     constants = "\n".join(
         line + "\n"
         for line in source.splitlines()
-        if line.strip().startswith(
-            (
-                'const USAGE_REPORT_CJK_SC = ',
-                'const USAGE_REPORT_CJK_BY_LANG = ',
-                'const USAGE_REPORT_CJK = ',
-                'const USAGE_REPORT_SANS = ',
-                'const USAGE_REPORT_MONO = ',
-                'const usageReportMeasureCtx = ',
-            )
-        )
+        if line.strip().startswith('const usageReportMeasureCtx = ')
     )
     return (
         prelude
@@ -1922,6 +1927,45 @@ def _card_audit(tmp_path: Path, extra: str = "") -> dict:
     source = _source()
     body = _card_harness(source) + CARD_FIXTURE + extra
     return json.loads(_run_node(tmp_path, "usage-report-cards.js", body))
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_share_card_fonts_follow_language_style_changes(tmp_path: Path) -> None:
+    report = _card_audit(tmp_path, """
+const out = [];
+for (const region of ['SC', 'JP', 'KR', 'SC']) {
+  fontTokensUnderTest = {
+    '--font-sans': '"Test Sans ' + region + '"',
+    '--font-mono': '"Test Mono ' + region + '"',
+  };
+  const card = usageReportBuildCard(busy, 'green', 'light');
+  out.push({
+    sans: usageReportCardFont(16, 700, false),
+    mono: usageReportCardFont(16, 500, true),
+    fonts: card.ops.filter(op => op.k === 'text').map(op => op.font),
+  });
+}
+process.stdout.write(JSON.stringify(out));
+""")
+    for region, snapshot in zip(("SC", "JP", "KR", "SC"), report):
+        assert snapshot["sans"] == f'700 16px "Test Sans {region}"'
+        assert snapshot["mono"] == f'500 16px "Test Mono {region}"'
+        assert snapshot["fonts"]
+        assert all(f' {region}"' in font for font in snapshot["fonts"])
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_share_cards_wait_for_current_font_loads_after_switching_language(tmp_path: Path) -> None:
+    body = "const document = { fonts: { ready: Promise.resolve('initial') } };\n"
+    body += _extract_js_function(_source(), "function usageReportCardFonts() {")
+    body += """
+const first = usageReportCardFonts();
+document.fonts.ready = Promise.resolve('new language');
+const second = usageReportCardFonts();
+process.stdout.write(JSON.stringify({ fresh: first !== second, current: second === document.fonts.ready }));
+"""
+    report = json.loads(_run_node(tmp_path, "share-font-ready.js", body))
+    assert report == {"fresh": True, "current": True}
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")

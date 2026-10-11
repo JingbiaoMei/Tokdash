@@ -1820,7 +1820,7 @@ function t(key, vars) {
   Object.keys(vars || {}).forEach((name) => { out = out.split('{' + name + '}').join(String(vars[name])); });
   return out;
 }
-const document = { documentElement: {}, createElement: () => ({ getContext: () => ({
+const document = { documentElement: { dataset: {} }, createElement: () => ({ getContext: () => ({
   font: '400 10px sans-serif',
   measureText(text) {
     const size = parseFloat(String(this.font).split(' ')[1]) || 10;

@@ -1767,3 +1767,222 @@ console.log(JSON.stringify(seen));
     ]
     for key in ("usageReportSpeedLiveDeferredOne", "usageReportSpeedLiveDeferred"):
         assert len(re.findall(rf"^\s+{key}: '", SRC, re.M)) == len(LANGUAGES), key
+
+
+# --------------------------------------------------------------------------
+# Spread: the shaded band under each per-stream line
+# --------------------------------------------------------------------------
+
+def _spread_trend_js() -> str:
+    """A two-bucket-plus trend whose codex series carries a spread."""
+    return """
+const nulls = (n) => Array(n).fill(null);
+const hours = (value) => Array(24).fill(null).map((_, h) => h === 9 ? value : null);
+state.payload = {models: []};
+state.rows = [{source: 'codex', model: 'm', measurement_kind: 'request_window', token_basis: 'b'}];
+state.trend = {
+  granularity: 'day',
+  spread: {quantiles: [10, 25, 50, 75, 90], min_responses: 30, weight: 'duration'},
+  buckets: ['01', '02', '03', '04', '05'].map((d) => ({key: `2026-10-${d}`, from: `2026-10-${d}`, to: `2026-10-${d}`})),
+  series: [{source: 'codex', model: 'm', measurement_kind: 'request_window', token_basis: 'b',
+            combined: [20, 22, null, 21, 23], per_stream: [10, 12, null, 11, 13], parallelism: nulls(5), calls: [40, 40, 0, 40, 3],
+            spread: {p10: [6, 7, null, 8, null], p25: [8, 9, null, 9, null], p50: [10, 11, null, 10, null],
+                     p75: [12, 13, null, 12, null], p90: [100, 15, null, 14, null]},
+            hours: {combined: hours(30), per_stream: hours(15), parallelism: nulls(24), calls: hours(40),
+                    spread: {p10: hours(5), p25: hours(9), p50: hours(15), p75: hours(18), p90: hours(20)}}}],
+  model_series: [{model: 'm', sources: ['codex'], combined: [20, 22, null, 21, 23], parallelism: nulls(5), calls: [40, 40, 0, 40, 3],
+                  hours: {combined: hours(30), parallelism: nulls(24), calls: hours(40)}}],
+};
+state.selected = ['codex|m|request_window|b'];
+state.slots = {'codex|m|request_window|b': 0};
+"""
+
+
+def test_the_chart_model_carries_a_spread_only_for_per_stream_lines_with_spread_on(tmp_path):
+    script = _chart_model_js() + "const state = usageReportSpeedState;\n" + _spread_trend_js() + """
+const pick = (id) => { state.selected = [id]; return usageReportSpeedChartModel(); };
+const out = {};
+state.lens = 'stream';
+const stream = pick('codex|m|request_window|b');
+out.spread = stream.spread;
+out.minResponses = stream.minResponses;
+out.kind = stream.series[0].kind;
+out.p10 = stream.series[0].bands.p10;
+out.p90 = stream.series[0].bands.p90;
+out.merged = pick('all|m').series[0].bands;
+state.lens = 'combined';
+out.combined = pick('codex|m|request_window|b');
+state.lens = 'stream';
+state.spread = false;
+out.off = pick('codex|m|request_window|b');
+state.spread = true;
+state.view = 'hour';
+out.hour9 = pick('codex|m|request_window|b').series[0].bands.p75[9];
+console.log(JSON.stringify(out));
+"""
+    out = _run_node(tmp_path, "spread_model", script)
+    assert out["spread"] is True and out["minResponses"] == 30
+    assert out["kind"] == "request_window"
+    assert out["p10"] == [6, 7, None, 8, None], "a bucket without a spread is null, not zero"
+    assert out["p90"] == [100, 15, None, 14, None]
+    assert out["merged"] is None, "a merged model has no per-stream line, so no spread"
+    assert out["combined"]["spread"] is False and out["combined"]["series"][0]["bands"] is None, \
+        "Combined is one rate over busy time: it has no spread"
+    assert out["off"]["spread"] is False and out["off"]["series"][0]["bands"] is None
+    assert out["hour9"] == 18, "the by-hour view reads the hours' own spread"
+
+
+def _draw_js() -> str:
+    return _chart_model_js() + chr(10).join([
+        _extract("function usageReportSpeedNiceScale(max)"),
+        _extract("function usageReportSpeedSvg(tag, attrs, text)"),
+        _extract("function usageReportSpeedColor(id)"),
+        _extract("function usageReportSpeedText(text, className)"),
+        _extract("function usageReportSpeedCell(text, isUnmeasured)"),
+        _extract("function usageReportSpeedFormatRate(rate)"),
+        _extract("function usageReportDrawSpeedChart()"),
+        _extract("function usageReportSpeedShowPoint(index)"),
+        _extract("function usageReportRenderSpeedChartData()"),
+        _extract("function usageReportRenderSpeedSpreadNote()"),
+        """
+function t(key, vars) { return vars ? `${key}:${JSON.stringify(vars)}` : key; }
+function el(tag) {
+  const node = {tag, className: '', attrs: {}, children: [], style: {setProperty(k, v) { this[k] = v; }}, hidden: false,
+    offsetWidth: 120, clientWidth: 900,
+    setAttribute(k, v) { this.attrs[k] = String(v); }, getAttribute(k) { return this.attrs[k]; },
+    appendChild(child) { this.children.push(child); return child; },
+    append(...children) { this.children.push(...children); },
+    replaceChildren(...children) { this.children = children; },
+    querySelector(sel) { const cls = sel.slice(1); const walk = (n) => n && typeof n === 'object'
+      && (((n.attrs && n.attrs.class) || n.className || '').split(' ').includes(cls) ? n : (n.children || []).map(walk).find(Boolean));
+      return walk(this); },
+    set textContent(value) { this.children = [String(value)]; },
+    get textContent() { return this.children.map((c) => (typeof c === 'string' ? c : c.textContent || '')).join(''); }};
+  return node;
+}
+const nodes = {usageReportSpeedChart: el('div'), usageReportSpeedChartData: el('div'), usageReportSpeedSpreadNote: el('p')};
+global.document = {createElement: el, createElementNS: (_ns, tag) => el(tag),
+                   createTextNode: (value) => ({textContent: String(value)}), getElementById: (id) => nodes[id] || null};
+const state = usageReportSpeedState;
+""",
+    ]) + _spread_trend_js()
+
+
+def test_bands_are_drawn_under_the_lines_split_at_gaps_and_counted_in_the_scale(tmp_path):
+    script = _draw_js() + """
+state.lens = 'stream';
+state.chart = usageReportSpeedChartModel();
+usageReportDrawSpeedChart();
+const svg = nodes.usageReportSpeedChart.children[0];
+const kinds = svg.children.map((n) => (n.attrs.class || ''));
+const bands = svg.children.filter((n) => kinds[svg.children.indexOf(n)].startsWith('speed-band'));
+const firstLine = kinds.indexOf('speed-line');
+const lastBand = Math.max(...kinds.map((k, i) => (k.startsWith('speed-band') ? i : -1)));
+const ticks = svg.children.filter((n) => n.attrs.class === 'speed-tick').map((n) => n.textContent);
+const out = {
+  outer: bands.filter((n) => n.attrs.class.includes('outer')).map((n) => n.tag),
+  inner: bands.filter((n) => n.attrs.class.includes('inner')).map((n) => n.tag),
+  fill: bands[0].attrs.style,
+  below: lastBand < firstLine,
+  ticks,
+};
+state.lens = 'combined';
+state.chart = usageReportSpeedChartModel();
+usageReportDrawSpeedChart();
+out.combinedBands = nodes.usageReportSpeedChart.children[0].children.filter((n) => (n.attrs.class || '').startsWith('speed-band')).length;
+console.log(JSON.stringify(out));
+"""
+    out = _run_node(tmp_path, "spread_draw", script)
+    # Buckets 0-1 are a run (one shape); bucket 3 stands alone (a bar); 2 and 4 have none.
+    assert out["outer"] == ["path", "rect"] and out["inner"] == ["path", "rect"]
+    assert out["fill"] == "fill:var(--speed-s1)", "a band takes its line's colour"
+    assert out["below"], "every band is drawn before, so under, every line"
+    assert "100" in out["ticks"], "the scale reaches the top of the highest band, not just the line"
+    assert out["combinedBands"] == 0
+
+
+def test_the_tooltip_and_the_table_give_the_spread_and_name_the_first_token_wait(tmp_path):
+    script = _draw_js() + """
+state.lens = 'stream';
+state.chart = usageReportSpeedChartModel();
+usageReportDrawSpeedChart();
+usageReportSpeedShowPoint(0);
+const tip = nodes.usageReportSpeedChart.querySelector('.speed-tip');
+const texts = tip.children.map((n) => n.textContent);
+usageReportSpeedShowPoint(4);
+const sparse = nodes.usageReportSpeedChart.querySelector('.speed-tip').children.map((n) => n.textContent);
+usageReportRenderSpeedChartData();
+const table = nodes.usageReportSpeedChartData.children[0];
+const caption = table.children[0];
+const body = table.children.find((n) => n.tag === 'tbody');
+usageReportRenderSpeedSpreadNote();
+const note = {hidden: nodes.usageReportSpeedSpreadNote.hidden, text: nodes.usageReportSpeedSpreadNote.textContent};
+state.trend.series[0].spread = {p10: nulls(5), p25: nulls(5), p50: nulls(5), p75: nulls(5), p90: nulls(5)};
+state.chart = usageReportSpeedChartModel();
+usageReportRenderSpeedSpreadNote();
+const none = nodes.usageReportSpeedSpreadNote.textContent;
+state.lens = 'combined';
+state.chart = usageReportSpeedChartModel();
+usageReportRenderSpeedSpreadNote();
+console.log(JSON.stringify({texts, sparse, caption: caption.tag + ':' + caption.textContent,
+  cell0: body.children[0].children[1].textContent, cell4: body.children[4].children[1].textContent,
+  note, none, combinedNote: nodes.usageReportSpeedSpreadNote.hidden}));
+"""
+    out = _run_node(tmp_path, "spread_tip", script)
+    spread_line = 'usageReportSpeedTipSpread:{"p10":"6.0","p25":"8.0","p75":"12.0","p90":"100.0"}'
+    assert spread_line in out["texts"]
+    assert "usageReportSpeedTipSpreadWait" in out["texts"], "a whole-request spread holds the first-token wait"
+    assert not any(text.startswith("usageReportSpeedTipSpread") for text in out["sparse"]), \
+        "a bucket without a spread says nothing about one"
+    assert out["caption"] == "caption:usageReportSpeedSpreadCaption"
+    assert out["cell0"] == "10.0 (6.0–100.0)"
+    assert out["cell4"] == "13.0", "no range where the bucket has no spread"
+    assert out["note"] == {"hidden": False, "text": 'usageReportSpeedSpreadNote:{"n":"30"}'}
+    assert out["none"] == 'usageReportSpeedSpreadNone:{"n":"30"}', "an empty chart of bands says why"
+    assert out["combinedNote"] is True
+
+
+def test_the_spread_toggle_shows_only_with_per_stream_and_is_remembered(tmp_path):
+    script = _chart_model_js() + chr(10).join([
+        _line("const USAGE_REPORT_SPEED_PREFS_KEY ="),
+        _line("const USAGE_REPORT_SPEED_PERIODS ="),
+        _extract("function usageReportSpeedOption("),
+        _extract("function usageReportRenderSpeedChartControls()"),
+        _extract("function usageReportSpeedReadPrefs()"),
+        _extract("function usageReportSpeedWritePrefs()"),
+        """
+function usageReportSpeedSetSelection(ids) { usageReportSpeedState.selected = ids; }
+function el(tag) {
+  return {tag, hidden: false, disabled: false, attrs: {}, dataset: {}, children: [],
+    setAttribute(k, v) { this.attrs[k] = String(v); }, replaceChildren(...c) { this.children = c; }};
+}
+const nodes = {usageReportSpeedSpreadWrap: el('div'), usageReportSpeedSpread: el('button'),
+               usageReportSpeedBucketWrap: el('label'), usageReportSpeedBucket: el('select')};
+const store = {};
+global.localStorage = {getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = v; }};
+global.document = {createElement: el, getElementById: (id) => nodes[id] || null, querySelectorAll: () => []};
+const state = usageReportSpeedState;
+state.payload = {models: []};
+const out = {};
+state.lens = 'combined';
+usageReportRenderSpeedChartControls();
+out.combinedHidden = nodes.usageReportSpeedSpreadWrap.hidden;
+state.lens = 'stream';
+usageReportRenderSpeedChartControls();
+out.streamHidden = nodes.usageReportSpeedSpreadWrap.hidden;
+out.pressedOn = nodes.usageReportSpeedSpread.attrs['aria-pressed'];
+state.spread = false;
+usageReportRenderSpeedChartControls();
+out.pressedOff = nodes.usageReportSpeedSpread.attrs['aria-pressed'];
+usageReportSpeedWritePrefs();
+state.spread = true;
+usageReportSpeedReadPrefs();
+out.remembered = state.spread;
+console.log(JSON.stringify(out));
+""",
+    ])
+    out = _run_node(tmp_path, "spread_toggle", script)
+    assert out["combinedHidden"] is True, "Combined has no spread to toggle"
+    assert out["streamHidden"] is False
+    assert out["pressedOn"] == "true" and out["pressedOff"] == "false"
+    assert out["remembered"] is False, "turning the spread off survives a reload"

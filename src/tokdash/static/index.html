@@ -2174,6 +2174,11 @@
     .speed-base { stroke: var(--color-border); stroke-width: 1; }
     .speed-tick { fill: var(--color-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
     .speed-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+    /* The spread under a per-stream line: translucent, so overlapping bands of
+       two series stay readable and the lines on top keep their full ink. */
+    .speed-band { stroke: none; }
+    .speed-band-outer { fill-opacity: .13; }
+    .speed-band-inner { fill-opacity: .24; }
     .speed-point { stroke: var(--color-surface); stroke-width: 2; }
     .speed-xhair { stroke: var(--color-muted); stroke-width: 1; }
     .speed-end-label { fill: var(--color-muted); font-size: 11.5px; font-weight: 600; }
@@ -2182,7 +2187,7 @@
     .speed-tip-title { margin-bottom: 5px; font-size: 11.5px; font-weight: 700; color: var(--color-label); }
     .speed-tip-row { display: flex; align-items: center; gap: 7px; }
     .speed-tip-row .speed-tip-value { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; }
-    .speed-tip-sub { padding-left: 16px; color: var(--color-muted); font-size: 11.5px; }
+    .speed-tip-sub { display: block; padding-left: 16px; color: var(--color-muted); font-size: 11.5px; }
     .speed-swatch { width: 9px; height: 9px; border-radius: 3px; flex: none; display: inline-block; background: var(--speed-series, var(--color-muted)); }
     .speed-muted { color: var(--color-muted); }
     .speed-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 8px; }
@@ -5803,10 +5808,14 @@
                 <button type="button" data-speed-view="time" aria-pressed="true" data-i18n="usageReportSpeedViewTime">Over time</button>
                 <button type="button" data-speed-view="hour" aria-pressed="false" data-i18n="usageReportSpeedViewHour">By hour</button>
               </div>
+              <div class="usage-report-seg" id="usageReportSpeedSpreadWrap" hidden>
+                <button type="button" id="usageReportSpeedSpread" aria-pressed="true" data-i18n="usageReportSpeedSpread" data-i18n-title="usageReportSpeedSpreadHint" title="Shade how individual responses vary around each line">Spread</button>
+              </div>
             </div>
             <div class="speed-chart" id="usageReportSpeedChart"></div>
             <div class="speed-legend" id="usageReportSpeedLegend"></div>
             <p class="usage-report-note" id="usageReportSpeedMixed" hidden style="margin-top:8px"></p>
+            <p class="usage-report-note" id="usageReportSpeedSpreadNote" hidden style="margin-top:8px"></p>
             <p class="usage-report-note" data-i18n="usageReportSpeedGapNote" style="margin-top:8px">A gap in a line means nothing was measured there, which is not a speed of zero.</p>
             <details class="speed-chart-data">
               <summary data-i18n="usageReportSpeedChartData">Chart data as a table</summary>
@@ -7636,6 +7645,13 @@
         usageReportSpeedChartAria: 'Output tokens per second, {lens}, {n} series. Arrow keys step through the points.',
         usageReportSpeedChartEmpty: 'Tick a model in the table below to chart it.',
         usageReportSpeedGapNote: 'A gap in a line means nothing was measured there, which is not a speed of zero.',
+        usageReportSpeedSpread: 'Spread',
+        usageReportSpeedSpreadHint: 'Shade how individual responses vary around each line',
+        usageReportSpeedSpreadNote: 'Shaded: the middle 50% (darker) and middle 80% (lighter) of responses in each period, weighted by how long each ran. Drawn where a period has at least {n} responses.',
+        usageReportSpeedSpreadNone: 'No period here has the {n} responses a spread needs, so no shading is drawn.',
+        usageReportSpeedTipSpread: 'Middle 50%: {p25}–{p75} · middle 80%: {p10}–{p90}',
+        usageReportSpeedTipSpreadWait: 'Includes the wait for the first token',
+        usageReportSpeedSpreadCaption: 'In brackets: the middle 80% of responses (p10–p90), weighted by duration.',
         usageReportSpeedChartData: 'Chart data as a table',
         usageReportSpeedNothingCharted: 'Nothing is charted.',
         usageReportSpeedColPeriod: 'Period',
@@ -8413,6 +8429,13 @@
         usageReportSpeedChartAria: '每秒输出 token，{lens}，{n} 条序列。方向键可逐点查看。',
         usageReportSpeedChartEmpty: '在下方表格中勾选模型即可绘制。',
         usageReportSpeedGapNote: '线条中的空缺表示该处没有测量数据，并不代表速度为零。',
+        usageReportSpeedSpread: '分布',
+        usageReportSpeedSpreadHint: '用阴影显示单个响应在每条线周围的分布',
+        usageReportSpeedSpreadNote: '阴影：每个时段中间 50%（较深）和中间 80%（较浅）的响应，按各自耗时加权。仅在时段内至少有 {n} 个响应时绘制。',
+        usageReportSpeedSpreadNone: '这里没有哪个时段达到绘制分布所需的 {n} 个响应，因此不显示阴影。',
+        usageReportSpeedTipSpread: '中间 50%：{p25}–{p75} · 中间 80%：{p10}–{p90}',
+        usageReportSpeedTipSpreadWait: '包含等待首个 token 的时间',
+        usageReportSpeedSpreadCaption: '括号内：中间 80% 的响应（p10–p90），按耗时加权。',
         usageReportSpeedChartData: '以表格查看图表数据',
         usageReportSpeedNothingCharted: '尚未绘制任何内容。',
         usageReportSpeedColPeriod: '时间段',
@@ -9191,6 +9214,13 @@
         usageReportSpeedChartAria: '毎秒の出力トークン、{lens}、{n} 系列。矢印キーで各点を移動できます。',
         usageReportSpeedChartEmpty: '下の表でモデルにチェックを入れるとグラフに表示されます。',
         usageReportSpeedGapNote: '線の途切れは、そこで何も測定されなかったことを示します。速度ゼロではありません。',
+        usageReportSpeedSpread: 'ばらつき',
+        usageReportSpeedSpreadHint: '各線のまわりで個々の応答がどれだけばらつくかを網掛けで示します',
+        usageReportSpeedSpreadNote: '網掛け：各期間の応答のうち中央 50%（濃い）と中央 80%（薄い）を、それぞれの所要時間で重み付けして示します。期間内に {n} 件以上の応答がある場合のみ描画します。',
+        usageReportSpeedSpreadNone: 'ばらつきの表示に必要な {n} 件の応答がある期間がないため、網掛けは描画されません。',
+        usageReportSpeedTipSpread: '中央 50%：{p25}–{p75} · 中央 80%：{p10}–{p90}',
+        usageReportSpeedTipSpreadWait: '最初のトークンまでの待ち時間を含みます',
+        usageReportSpeedSpreadCaption: '括弧内：応答の中央 80%（p10–p90）、所要時間で重み付け。',
         usageReportSpeedChartData: 'グラフのデータを表で見る',
         usageReportSpeedNothingCharted: 'グラフに表示中の項目はありません。',
         usageReportSpeedColPeriod: '期間',
@@ -9969,6 +9999,13 @@
         usageReportSpeedChartAria: '초당 출력 토큰, {lens}, 계열 {n}개. 화살표 키로 각 지점을 이동합니다.',
         usageReportSpeedChartEmpty: '아래 표에서 모델을 체크하면 차트에 표시됩니다.',
         usageReportSpeedGapNote: '선이 끊긴 곳은 측정된 것이 없다는 뜻이며, 속도가 0이라는 뜻이 아닙니다.',
+        usageReportSpeedSpread: '분포',
+        usageReportSpeedSpreadHint: '각 선 주변에서 개별 응답이 얼마나 퍼져 있는지 음영으로 표시합니다',
+        usageReportSpeedSpreadNote: '음영: 각 기간 응답의 가운데 50%(진하게)와 가운데 80%(연하게)이며, 각 응답의 소요 시간으로 가중합니다. 기간에 응답이 {n}개 이상일 때만 그립니다.',
+        usageReportSpeedSpreadNone: '분포에 필요한 응답 {n}개를 채운 기간이 없어 음영을 그리지 않습니다.',
+        usageReportSpeedTipSpread: '가운데 50%: {p25}–{p75} · 가운데 80%: {p10}–{p90}',
+        usageReportSpeedTipSpreadWait: '첫 토큰까지의 대기 시간을 포함합니다',
+        usageReportSpeedSpreadCaption: '괄호 안: 응답의 가운데 80%(p10–p90), 소요 시간 가중.',
         usageReportSpeedChartData: '차트 데이터를 표로 보기',
         usageReportSpeedNothingCharted: '차트에 표시된 항목이 없습니다.',
         usageReportSpeedColPeriod: '기간',
@@ -10747,6 +10784,13 @@
         usageReportSpeedChartAria: 'Tokens de salida por segundo, {lens}, {n} series. Las flechas recorren los puntos.',
         usageReportSpeedChartEmpty: 'Marca un modelo en la tabla de abajo para graficarlo.',
         usageReportSpeedGapNote: 'Un hueco en una línea significa que ahí no se midió nada, no una velocidad de cero.',
+        usageReportSpeedSpread: 'Dispersión',
+        usageReportSpeedSpreadHint: 'Sombrea cuánto varían las respuestas individuales alrededor de cada línea',
+        usageReportSpeedSpreadNote: 'Sombreado: el 50 % central (más oscuro) y el 80 % central (más claro) de las respuestas de cada periodo, ponderadas por lo que duró cada una. Se dibuja donde un periodo tiene al menos {n} respuestas.',
+        usageReportSpeedSpreadNone: 'Ningún periodo de aquí tiene las {n} respuestas que necesita una dispersión, así que no se dibuja sombreado.',
+        usageReportSpeedTipSpread: '50 % central: {p25}–{p75} · 80 % central: {p10}–{p90}',
+        usageReportSpeedTipSpreadWait: 'Incluye la espera hasta el primer token',
+        usageReportSpeedSpreadCaption: 'Entre paréntesis: el 80 % central de las respuestas (p10–p90), ponderado por duración.',
         usageReportSpeedChartData: 'Datos del gráfico como tabla',
         usageReportSpeedNothingCharted: 'No hay nada graficado.',
         usageReportSpeedColPeriod: 'Periodo',
@@ -11525,6 +11569,13 @@
         usageReportSpeedChartAria: 'Tokens de saída por segundo, {lens}, {n} séries. As setas percorrem os pontos.',
         usageReportSpeedChartEmpty: 'Marque um modelo na tabela abaixo para exibi-lo no gráfico.',
         usageReportSpeedGapNote: 'Uma lacuna na linha significa que nada foi medido ali, não uma velocidade zero.',
+        usageReportSpeedSpread: 'Dispersão',
+        usageReportSpeedSpreadHint: 'Sombreia quanto as respostas individuais variam em torno de cada linha',
+        usageReportSpeedSpreadNote: 'Sombreado: os 50% centrais (mais escuro) e os 80% centrais (mais claro) das respostas de cada período, ponderados pela duração de cada uma. Desenhado quando um período tem pelo menos {n} respostas.',
+        usageReportSpeedSpreadNone: 'Nenhum período aqui tem as {n} respostas de que uma dispersão precisa, então nenhum sombreado é desenhado.',
+        usageReportSpeedTipSpread: '50% centrais: {p25}–{p75} · 80% centrais: {p10}–{p90}',
+        usageReportSpeedTipSpreadWait: 'Inclui a espera pelo primeiro token',
+        usageReportSpeedSpreadCaption: 'Entre parênteses: os 80% centrais das respostas (p10–p90), ponderados pela duração.',
         usageReportSpeedChartData: 'Dados do gráfico em tabela',
         usageReportSpeedNothingCharted: 'Nada no gráfico.',
         usageReportSpeedColPeriod: 'Período',
@@ -21294,6 +21345,8 @@
       // The chart: over time or by hour of day, a grouping ('' is Auto), and its
       // own request per window and grouping.
       view: 'time',
+      // Per stream only: shade each line's spread of response rates.
+      spread: true,
       bucket: '',
       trendToken: 0,
       trendKey: '',
@@ -21311,6 +21364,7 @@
         if (raw.tool) state.tool = String(raw.tool);
         if (raw.lens === 'combined' || raw.lens === 'stream') state.lens = raw.lens;
         if (raw.view === 'time' || raw.view === 'hour') state.view = raw.view;
+        if (typeof raw.spread === 'boolean') state.spread = raw.spread;
         if (USAGE_REPORT_SPEED_PERIODS.includes(raw.period)) state.period = raw.period;
         if (Array.isArray(raw.selected)) {
           usageReportSpeedSetSelection(raw.selected.filter((id) => typeof id === 'string' && id),
@@ -21326,6 +21380,7 @@
           tool: state.tool || '',
           lens: state.lens,
           view: state.view,
+          spread: state.spread,
           period: state.period,
           selected: state.selected,
           slots: state.slots,
@@ -21706,6 +21761,12 @@
           usageReportRenderSpeedChartControls();
           usageReportRenderSpeedChart();
         });
+      });
+      document.getElementById('usageReportSpeedSpread')?.addEventListener('click', () => {
+        state.spread = !state.spread;
+        usageReportSpeedWritePrefs();
+        usageReportRenderSpeedChartControls();
+        usageReportRenderSpeedChart();
       });
       document.getElementById('usageReportSpeedBucket')?.addEventListener('change', (event) => {
         state.bucket = event.target.value || '';
@@ -22567,6 +22628,10 @@
       });
       const wrap = document.getElementById('usageReportSpeedBucketWrap');
       if (wrap) wrap.hidden = state.view !== 'time';
+      // Combined is one rate over the union of busy time: it has no spread.
+      const spreadWrap = document.getElementById('usageReportSpeedSpreadWrap');
+      if (spreadWrap) spreadWrap.hidden = usageReportSpeedLens() !== 'stream';
+      document.getElementById('usageReportSpeedSpread')?.setAttribute('aria-pressed', String(!!state.spread));
       const select = document.getElementById('usageReportSpeedBucket');
       if (!select) return;
       const trend = state.trend && !state.trend.__error ? state.trend : null;
@@ -22637,6 +22702,7 @@
       const trend = state.trend && !state.trend.__error ? state.trend : null;
       if (!trend) return null;
       const lens = usageReportSpeedLens();
+      const spreadShown = lens === 'stream' && !!state.spread;
       let labels;
       let titles;
       if (state.view === 'hour') {
@@ -22653,15 +22719,22 @@
         const part = found ? (state.view === 'hour' ? found.hours : found) : null;
         const raw = part ? (lens === 'combined' ? part.combined : part.per_stream) : null;
         const at = (list, index) => (Array.isArray(list) ? list[index] : null);
+        const spread = spreadShown && part && part.spread ? part.spread : null;
+        const band = (key) => labels.map((_, index) => usageReportSpeedRateValue(at(spread[key], index)));
         return {
           id,
           ...usageReportSpeedName(id),
+          kind: found ? String(found.measurement_kind || '') : '',
+          // Null without a spread to show; inside, null where a bucket has too
+          // few responses for one.
+          bands: spread ? { p10: band('p10'), p25: band('p25'), p50: band('p50'), p75: band('p75'), p90: band('p90') } : null,
           values: labels.map((_, index) => usageReportSpeedRateValue(at(raw, index))),
           calls: labels.map((_, index) => Number(at(part && part.calls, index) || 0)),
           parallelism: labels.map((_, index) => usageReportSpeedRateValue(at(part && part.parallelism, index))),
         };
       });
-      return { labels, titles, series, lens };
+      const minResponses = trend.spread && Number(trend.spread.min_responses) > 0 ? Number(trend.spread.min_responses) : null;
+      return { labels, titles, series, lens, spread: spreadShown, minResponses };
     }
 
     function usageReportSpeedNiceScale(max) {
@@ -22683,6 +22756,7 @@
       state.chart = usageReportSpeedChartModel();
       usageReportDrawSpeedChart();
       usageReportRenderSpeedLegend();
+      usageReportRenderSpeedSpreadNote();
       usageReportRenderSpeedChartData();
       const sub = document.getElementById('usageReportSpeedChartSub');
       if (sub) {
@@ -22691,6 +22765,20 @@
         sub.textContent = state.view === 'hour' ? `${lens} · ${t('usageReportSpeedHourOfDay')}`
           : granularity ? `${lens} · ${t(granularity)}` : lens;
       }
+    }
+
+    // What the shading means, and why there is none when no bucket holds enough
+    // responses to have a spread.
+    function usageReportRenderSpeedSpreadNote() {
+      const note = document.getElementById('usageReportSpeedSpreadNote');
+      if (!note) return;
+      const model = usageReportSpeedState.chart;
+      const shown = !!(model && model.spread && model.series.length);
+      note.hidden = !shown;
+      if (!shown) { note.textContent = ''; return; }
+      const drawn = model.series.some((entry) => entry.bands && entry.bands.p50.some((value) => value !== null));
+      const n = formatNumber(model.minResponses || 0);
+      note.textContent = t(drawn ? 'usageReportSpeedSpreadNote' : 'usageReportSpeedSpreadNone', { n });
     }
 
     // Lines with gaps: a bucket with nothing measured breaks its line rather than
@@ -22716,7 +22804,8 @@
       const plotWidth = width - margin.left - margin.right;
       const plotHeight = height - margin.top - margin.bottom;
       const count = Math.max(1, labels.length);
-      const values = series.flatMap((entry) => entry.values.filter((value) => value !== null));
+      const values = series.flatMap((entry) => [...entry.values, ...(entry.bands ? entry.bands.p90 : [])]
+        .filter((value) => value !== null));
       const { step, top } = usageReportSpeedNiceScale(values.length ? Math.max(...values) * 1.08 : 100);
       const x = (index) => margin.left + ((index + 0.5) * plotWidth) / count;
       const y = (value) => margin.top + plotHeight - (value / top) * plotHeight;
@@ -22746,6 +22835,40 @@
         svg.appendChild(usageReportSpeedSvg('text', { class: 'speed-empty', x: margin.left + plotWidth / 2, y: margin.top + plotHeight / 2, 'text-anchor': 'middle' },
           t('usageReportSpeedChartEmpty')));
       }
+      // Bands first, so every line is drawn over every band. A run of buckets is
+      // one shape; a bucket alone between gaps is a short bar.
+      const barWidth = Math.min(12, Math.max(4, (plotWidth / count) * 0.45));
+      series.forEach((entry) => {
+        if (!entry.bands) return;
+        const color = usageReportSpeedColor(entry.id);
+        [['p10', 'p90', 'speed-band-outer'], ['p25', 'p75', 'speed-band-inner']].forEach(([lowKey, highKey, layer]) => {
+          const low = entry.bands[lowKey];
+          const high = entry.bands[highKey];
+          let run = [];
+          const flush = () => {
+            if (run.length === 1) {
+              const index = run[0];
+              svg.appendChild(usageReportSpeedSvg('rect', {
+                class: `speed-band ${layer}`, x: (x(index) - barWidth / 2).toFixed(1), y: y(high[index]).toFixed(1),
+                width: barWidth.toFixed(1), height: Math.max(1, y(low[index]) - y(high[index])).toFixed(1), rx: 2,
+                style: `fill:${color}`,
+              }));
+            } else if (run.length > 1) {
+              const top = run.map((index) => `${x(index).toFixed(1)},${y(high[index]).toFixed(1)}`);
+              const bottom = run.slice().reverse().map((index) => `${x(index).toFixed(1)},${y(low[index]).toFixed(1)}`);
+              svg.appendChild(usageReportSpeedSvg('path', {
+                class: `speed-band ${layer}`, d: `M${top.join('L')}L${bottom.join('L')}Z`, style: `fill:${color}`,
+              }));
+            }
+            run = [];
+          };
+          labels.forEach((_, index) => {
+            if (low[index] === null || high[index] === null) flush();
+            else run.push(index);
+          });
+          flush();
+        });
+      });
       const ends = [];
       series.forEach((entry) => {
         const color = usageReportSpeedColor(entry.id);
@@ -22826,6 +22949,16 @@
           : `${t('usageReportSpeedTipCalls', { n: formatNumber(entry.calls[index]) })}`
             + (model.lens === 'combined' && par !== null ? ` · ${t('usageReportSpeedTipParallel', { par: usageReportSpeedFormatRate(par) })}` : '');
         lines.push(row, usageReportSpeedText(sub, 'speed-tip-sub'));
+        const bands = entry.bands;
+        if (value !== null && bands && bands.p25[index] !== null) {
+          const rate = (key) => usageReportSpeedFormatRate(bands[key][index]);
+          lines.push(usageReportSpeedText(t('usageReportSpeedTipSpread', {
+            p10: rate('p10'), p25: rate('p25'), p75: rate('p75'), p90: rate('p90'),
+          }), 'speed-tip-sub'));
+          // A whole-request window holds the wait for the first token, which
+          // varies with load and prompt size far more than decoding does.
+          if (entry.kind === 'request_window') lines.push(usageReportSpeedText(t('usageReportSpeedTipSpreadWait'), 'speed-tip-sub'));
+        }
       });
       tip.replaceChildren(...lines);
       tip.hidden = false;
@@ -22936,10 +23069,22 @@
       model.titles.forEach((title, index) => {
         const tr = document.createElement('tr');
         tr.appendChild(usageReportSpeedCell(title));
-        model.series.forEach((entry) => tr.appendChild(usageReportSpeedCell(
-          usageReportSpeedFormatRate(entry.values[index]), entry.values[index] === null)));
+        model.series.forEach((entry) => {
+          const value = entry.values[index];
+          const low = entry.bands ? entry.bands.p10[index] : null;
+          const high = entry.bands ? entry.bands.p90[index] : null;
+          const text = value !== null && low !== null && high !== null
+            ? `${usageReportSpeedFormatRate(value)} (${usageReportSpeedFormatRate(low)}–${usageReportSpeedFormatRate(high)})`
+            : usageReportSpeedFormatRate(value);
+          tr.appendChild(usageReportSpeedCell(text, value === null));
+        });
         tbody.appendChild(tr);
       });
+      if (model.series.some((entry) => entry.bands && entry.bands.p10.some((value) => value !== null))) {
+        const caption = document.createElement('caption');
+        caption.textContent = t('usageReportSpeedSpreadCaption');
+        table.appendChild(caption);
+      }
       table.append(thead, tbody);
       host.replaceChildren(table);
     }

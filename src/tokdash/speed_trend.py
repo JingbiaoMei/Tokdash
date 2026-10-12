@@ -42,6 +42,17 @@ harness's responses for a model, matched by the same normalisation Combined
 Models uses. Their per-stream rate is deliberately absent -- harnesses time
 responses different ways, and pooling a decode window with a whole-request
 window measures nothing -- but their parallelism and combined rate are defined.
+
+Spread: each per-stream point is the duration-weighted mean of its responses'
+own rates (SUM(tokens) / SUM(duration) is exactly that mean), so its spread is
+taken with the same weights. ``spread`` gives the duration-weighted p10, p25,
+p50, p75 and p90 of the bucket's response rates: the rate below which that
+share of the bucket's generation time ran. Weighting keeps the band honest
+around its line: a burst of short, fast responses cannot drag an unweighted
+quantile away from where most of the time was spent. A bucket with fewer than
+``SPREAD_MIN_RESPONSES`` responses has no spread (null), because a tail
+quantile of a handful of responses is one outlier. Combined has no spread: it
+is one rate over a union of busy time, not a distribution of responses.
 """
 from __future__ import annotations
 
@@ -71,6 +82,11 @@ LADDER: tuple[tuple[str, int, int], ...] = (
     ("quarter", 24, 184),
 )
 BUCKETS = tuple(name for name, _cap, _min in LADDER)
+
+#: The quantiles ``spread`` reports, in percent, and the fewest responses a
+#: bucket needs before it reports any.
+SPREAD_QUANTILES = (10, 25, 50, 75, 90)
+SPREAD_MIN_RESPONSES = 30
 
 
 def busy_interval(source: str, timestamp: float, duration_ms: float,
@@ -112,6 +128,37 @@ def sweep(intervals: Iterable[tuple[float, float]]) -> tuple[float, int]:
     if cur_end is not None:
         busy += cur_end - cur_start
     return busy, peak
+
+
+def weighted_quantiles(samples: list[tuple[float, float]], quantiles: Iterable[float] = SPREAD_QUANTILES) -> list[float]:
+    """Weighted quantiles of (value, weight) samples, one per percent given.
+
+    The q-th quantile is the smallest value whose cumulative weight reaches q%
+    of the total. With equal weights that is the ordinary lower quantile.
+    """
+    ordered = sorted(samples)
+    total = sum(weight for _value, weight in ordered)
+    # A rounding hair below a target must not push its pick one sample on.
+    targets = [total * q / 100.0 - total * 1e-12 for q in quantiles]
+    out = [ordered[-1][0]] * len(targets)
+    pending = sorted(range(len(targets)), key=targets.__getitem__)
+    running = 0.0
+    for value, weight in ordered:
+        running += weight
+        while pending and running >= targets[pending[0]]:
+            out[pending.pop(0)] = value
+        if not pending:
+            break
+    return out
+
+
+def _spread(groups: list[list[tuple[float, float]]]) -> dict[str, list]:
+    out: dict[str, list] = {f"p{q}": [] for q in SPREAD_QUANTILES}
+    for samples in groups:
+        values = weighted_quantiles(samples) if len(samples) >= SPREAD_MIN_RESPONSES else [None] * len(SPREAD_QUANTILES)
+        for q, value in zip(SPREAD_QUANTILES, values):
+            out[f"p{q}"].append(_round(value, 1))  # the precision of the per-stream line
+    return out
 
 
 def _combined(tokens: float, ms: float, busy: float) -> dict[str, Any]:
@@ -341,19 +388,23 @@ def _round(value: Optional[float], digits: int) -> Optional[float]:
 
 
 class _Series:
-    """Per-bucket and per-hour-of-day sums for one key, plus raw intervals."""
+    """Per-bucket and per-hour-of-day sums for one key, plus raw intervals and,
+    for the per-stream spread, each response's (rate, duration)."""
 
-    __slots__ = ("tokens", "ms", "calls", "intervals", "h_tokens", "h_ms", "h_calls", "h_intervals")
+    __slots__ = ("tokens", "ms", "calls", "intervals", "samples",
+                 "h_tokens", "h_ms", "h_calls", "h_intervals", "h_samples")
 
     def __init__(self, n: int):
         self.tokens = [0] * n
         self.ms = [0.0] * n
         self.calls = [0] * n
         self.intervals: list[list] = [[] for _ in range(n)]
+        self.samples: list[list] = [[] for _ in range(n)]
         self.h_tokens = [0] * 24
         self.h_ms = [0.0] * 24
         self.h_calls = [0] * 24
         self.h_intervals: list[list] = [[] for _ in range(24)]
+        self.h_samples: list[list] = [[] for _ in range(24)]
 
     def add(self, b: int, hour: int, start: float, end: float, tokens: int, ms: float, calls: int):
         self.tokens[b] += tokens
@@ -364,8 +415,13 @@ class _Series:
         self.h_ms[hour] += ms
         self.h_calls[hour] += calls
         self.h_intervals[hour].append((start, end))
+        if tokens > 0 and ms > 0:
+            sample = (1000.0 * tokens / ms, ms)
+            self.samples[b].append(sample)
+            self.h_samples[hour].append(sample)
 
     def merge(self, other: "_Series"):
+        # A merged model has no per-stream rate, so it needs no samples either.
         for b in range(len(self.tokens)):
             self.tokens[b] += other.tokens[b]
             self.ms[b] += other.ms[b]
@@ -378,7 +434,7 @@ class _Series:
             self.h_intervals[h].extend(other.h_intervals[h])
 
     @staticmethod
-    def _arrays(tokens, ms, calls, intervals, per_stream: bool) -> dict[str, list]:
+    def _arrays(tokens, ms, calls, intervals, samples, per_stream: bool) -> dict[str, list]:
         out = {"combined": [], "parallelism": [], "calls": list(calls)}
         if per_stream:
             out["per_stream"] = []
@@ -389,11 +445,13 @@ class _Series:
             out["parallelism"].append(_round(combined["parallelism"], 3))
             if per_stream:
                 out["per_stream"].append(_round(rate_from_totals(tokens[i], ms[i]) if calls[i] else None, 2))
+        if per_stream:
+            out["spread"] = _spread(samples)
         return out
 
     def render(self, per_stream: bool) -> dict[str, Any]:
-        out = self._arrays(self.tokens, self.ms, self.calls, self.intervals, per_stream)
-        out["hours"] = self._arrays(self.h_tokens, self.h_ms, self.h_calls, self.h_intervals, per_stream)
+        out = self._arrays(self.tokens, self.ms, self.calls, self.intervals, self.samples, per_stream)
+        out["hours"] = self._arrays(self.h_tokens, self.h_ms, self.h_calls, self.h_intervals, self.h_samples, per_stream)
         return out
 
 
@@ -461,6 +519,8 @@ def trend_rows(
         "offered_buckets": [{"bucket": e["bucket"], "count": e["count"]} for e in offer if e["offered"]],
         "buckets": edges,
         "timestamp_basis": "usage_timestamp",
+        "spread": {"quantiles": list(SPREAD_QUANTILES), "min_responses": SPREAD_MIN_RESPONSES,
+                   "weight": "duration"},
         "series": rows,
         "model_series": model_rows,
     }

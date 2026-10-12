@@ -67,8 +67,10 @@ which divides the same tokens by the union of busy time, so overlapping response
 count once. `speed_trend.py` rebuilds each busy interval from the stored timestamp
 and duration, anchored at the start or end as the source records it (Claude Code
 and Codex record where each window opened), and buckets
-both rates for the trend view. A model's row merged across harnesses carries only
-the combined rate, since its windows may differ in kind. Model/hour results use
+both rates for the trend view, with each per-stream bucket's duration-weighted
+spread of response rates (p10 to p90) once it holds 30 responses. A model's row
+merged across harnesses carries only the combined rate, since its windows may differ
+in kind. Model/hour results use
 bounded process caching keyed by publication revision, filters and local-clock
 identity. See
 [the API contract](../reference/API.md#get-apioutput-speed),

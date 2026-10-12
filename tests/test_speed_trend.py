@@ -239,3 +239,82 @@ def test_a_source_filter_scopes_the_combined_pass_too(client):
     (model,) = payload["models"]
     assert model["sources"] == ["codex"]
     assert model["busy_ms"] == pytest.approx(20_000.0)
+
+
+# --------------------------------------------------------------------------
+# Spread
+# --------------------------------------------------------------------------
+
+def test_weighted_quantiles_are_ordinary_lower_quantiles_with_equal_weights():
+    samples = [(float(v), 1.0) for v in (40, 10, 30, 20)]
+    assert speed_trend.weighted_quantiles(samples, (10, 25, 50, 75, 90)) == [10, 10, 20, 30, 40]
+
+
+def test_weighted_quantiles_follow_where_the_time_was_spent():
+    # Nine seconds at 10 tok/s and one at 100: the slow stretch is 90% of the
+    # time, so the median and even p90 stay on it; only p95 reaches the burst.
+    samples = [(100.0, 1_000.0), (10.0, 9_000.0)]
+    assert speed_trend.weighted_quantiles(samples, (50, 90, 95)) == [10.0, 10.0, 100.0]
+
+
+def test_weighted_quantiles_survive_float_rounding():
+    samples = [(float(v), 0.1) for v in range(10)]
+    # 0.1 * 3 lands a hair under 0.3 in binary; p30 is still the third value.
+    assert speed_trend.weighted_quantiles(samples, (30,)) == [2.0]
+
+
+def _spread_corpus(n_busy=None, n_sparse=3):
+    """One harness, two days. The busy day has enough responses for a spread:
+    a long slow majority and a short fast minority. The sparse day does not."""
+    if n_busy is None:
+        n_busy = speed_trend.SPREAD_MIN_RESPONSES
+    rows = []
+    busy_day = _ms("2026-03-03", 12)
+    for i in range(n_busy):
+        fast = i % 5 == 0
+        ms = 1_000.0 if fast else 10_000.0
+        tokens = 100 if fast else 200          # 100 tok/s, or 20 tok/s
+        rows.append(_measured(_entry(source="codex", model="qwen-test", ts=busy_day + i * 60_000),
+                              tokens, ms, kind=KIND_RESPONSE_WINDOW, basis=BASIS_INCLUDING))
+    sparse_day = _ms("2026-03-05", 12)
+    for i in range(n_sparse):
+        rows.append(_measured(_entry(source="codex", model="qwen-test", ts=sparse_day + i * 60_000),
+                              300, 10_000.0, kind=KIND_RESPONSE_WINDOW, basis=BASIS_INCLUDING))
+    return rows
+
+
+def test_trend_series_carry_a_duration_weighted_spread_where_enough_was_measured(client):
+    _seed(_spread_corpus())
+    payload = _get(client, view="trend", date_from=DAY_FROM, date_to=DAY_TO)
+    assert payload["spread"] == {"quantiles": [10, 25, 50, 75, 90],
+                                 "min_responses": speed_trend.SPREAD_MIN_RESPONSES, "weight": "duration"}
+    (codex,) = payload["series"]
+    spread = codex["spread"]
+    assert set(spread) == {"p10", "p25", "p50", "p75", "p90"}
+    busy, sparse = 1, 3
+    # 24 slow responses hold 240 s of the busy day's 246 s, so every quantile
+    # through p90 sits on the slow rate; the fast fifth of responses is 2% of
+    # the time and moves none of them.
+    assert [spread[k][busy] for k in ("p10", "p25", "p50", "p75", "p90")] == [20.0] * 5
+    line = codex["per_stream"][busy]
+    assert spread["p10"][busy] <= line, "the weighted line sits at or above its p10"
+    assert line == speed_trend.rate_from_totals(24 * 200 + 6 * 100, 24 * 10_000.0 + 6 * 1_000.0)
+    # Three responses are too few for a tail quantile: the spread is absent, not guessed.
+    assert codex["per_stream"][sparse] == 30.0
+    assert all(spread[k][sparse] is None for k in spread)
+    assert all(spread[k][0] is None for k in spread), "an unmeasured day has no spread"
+
+    hour_of_local, _ = speed_report.local_clock()
+    hour = hour_of_local(_ms("2026-03-03", 12))
+    hours = codex["hours"]["spread"]
+    assert hours["p50"][hour] == 20.0
+    (merged,) = payload["model_series"]
+    assert "spread" not in merged and "spread" not in merged["hours"], "combined has no per-response spread"
+
+
+def test_a_bucket_one_response_short_of_the_minimum_has_no_spread(client):
+    _seed(_spread_corpus(n_busy=speed_trend.SPREAD_MIN_RESPONSES - 1))
+    payload = _get(client, view="trend", date_from=DAY_FROM, date_to=DAY_TO)
+    (codex,) = payload["series"]
+    assert codex["calls"][1] == speed_trend.SPREAD_MIN_RESPONSES - 1
+    assert codex["spread"]["p50"][1] is None

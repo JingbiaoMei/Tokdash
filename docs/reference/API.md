@@ -693,6 +693,14 @@ per-model merges, with no `per_stream` array. Each also has `hours`, the same ar
 over the 24 local hours of the day, from the same read. A bucket's busy time is the
 union of its own responses; empty buckets are `null`.
 
+Each `series` entry, and its `hours`, also has `spread`: `p10`, `p25`, `p50`, `p75`
+and `p90` arrays aligned like `per_stream`. They are duration-weighted quantiles of
+the bucket's per-response rates, the rate below which that share of the bucket's
+generation time ran; `per_stream` is the duration-weighted mean of the same rates.
+A bucket with fewer than `spread.min_responses` (30) responses has `null` in every
+quantile. `model_series` has no `spread`, since it has no per-stream rate. The
+top-level `spread` names the quantiles, the minimum and the weight (`duration`).
+
 Time-of-day responses include `selected_key`, 24 `hourly` buckets and four
 `six_hour` buckets, with the same totals and coverage fields. Buckets use the
 server's local clock. `days_with_measurements` counts distinct measured dates;

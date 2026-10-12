@@ -526,6 +526,26 @@ def test_session_load_failure_is_translated(source: str, _dictionary_keys) -> No
         assert "sessionDetailLoadFailed" in _dictionary_keys[lang], lang
 
 
+def test_an_open_modal_retranslates_its_meta_line_but_not_a_failure(source: str) -> None:
+    """The meta line is written from t(), so a language switch must write it
+    again; the failure line has its own data-i18n hook and must survive."""
+    helper = _function("renderSessionModalMeta", source)
+    assert 'hasAttribute("data-i18n")' in helper, "a rewrite would replace the failure line"
+    assert 't("events")' in helper and 't("activeTime")' in helper
+    assert "renderSessionModalMeta(activeSessionDetail.tool, session)" in _function("rerenderTokenPresentation", source)
+    opener = _function("openSessionModal", source)
+    assert "renderSessionModalMeta(tool, session)" in opener
+    assert 't("events")' not in opener, "the meta line is built in one place"
+
+
+def test_a_new_open_clears_the_last_sessions_bars_and_charts(source: str) -> None:
+    opener = _function("openSessionModal", source)
+    reset = opener.index("renderSessionCharts([])")
+    assert reset < opener.index("fetchFromHost("), "the old charts stay up while the next session loads"
+    assert '"sessionShareInput", "sessionShareCache", "sessionShareOutput", "sessionShareReasoning"' in opener
+    assert 'bar.style.width = "0%"' in opener
+
+
 def test_script_written_modal_labels_are_marked_for_the_cjk_rules(source: str, modal_region: str) -> None:
     """#215's CJK rules key off data-i18n, which these labels cannot carry."""
     for element_id in ("graphExpandTitle", "sessionChatMsgCount", "sessionChatToolCount", "sessionSpeedCoverage"):

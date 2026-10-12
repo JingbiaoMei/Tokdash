@@ -14087,6 +14087,7 @@
       if (activeSessionDetail && modal && !modal.classList.contains('hidden')) {
         const { session = {}, turns = [] } = activeSessionDetail.data || {};
         const total = Number(session.tokens || 0);
+        renderSessionModalMeta(activeSessionDetail.tool, session);
         document.getElementById('sessionModalInput').textContent = formatTokenCount(session.tokens_in || 0);
         document.getElementById('sessionModalCache').textContent = formatTokenCount(session.tokens_cache || 0);
         document.getElementById('sessionModalOutput').textContent = formatTokenCount(session.tokens_out || 0);
@@ -18177,6 +18178,15 @@
       });
     }
 
+    // Built from t() rather than a data-i18n hook, so a language switch has to
+    // write it again; the failure line carries its own hook and is left alone.
+    function renderSessionModalMeta(tool, session) {
+      const modalMeta = document.getElementById("sessionModalMeta");
+      if (!modalMeta || modalMeta.hasAttribute("data-i18n")) return;
+      modalMeta.textContent = `${formatToolName(tool)} · ${session.project || "—"} · ${session.model || "—"} · ${formatNumber(session.token_events || 0)} ${t("events")} · ${t("activeTime")} ${formatDuration(session.active_ms)}`;
+      modalMeta.title = `${t("activeTimeHint")}\n${t("span")}: ${formatDuration(session.span_ms)}`;
+    }
+
     async function openSessionModal(tool, sessionId, ownerServer = null) {
       retireSessionSpeedModal();
       retireSessionSpeedList();
@@ -18198,6 +18208,15 @@
       document.getElementById("sessionModalOutputPct").textContent = "-";
       document.getElementById("sessionModalTotal").textContent = "-";
       document.getElementById("sessionModalReasoningPct").textContent = "-";
+      // The last session's bars and turn charts must not stand under this one's
+      // loading line, or under its failure line if the read fails.
+      ["sessionShareInput", "sessionShareCache", "sessionShareOutput", "sessionShareReasoning"].forEach((prefix) => {
+        const label = document.getElementById(`${prefix}Label`);
+        const bar = document.getElementById(`${prefix}Bar`);
+        if (label) label.textContent = "-";
+        if (bar) bar.style.width = "0%";
+      });
+      renderSessionCharts([]);
       const speedPanelReset = document.getElementById("sessionSpeedPanel");
       if (speedPanelReset) speedPanelReset.hidden = true;
 
@@ -18212,9 +18231,7 @@
         const session = data.session || {};
         const turns = data.turns || [];
         document.getElementById("sessionModalTitle").textContent = sessionDisplayName(session);
-        const modalMeta = document.getElementById("sessionModalMeta");
-        modalMeta.textContent = `${formatToolName(tool)} · ${session.project || "—"} · ${session.model || "—"} · ${formatNumber(session.token_events || 0)} ${t("events")} · ${t("activeTime")} ${formatDuration(session.active_ms)}`;
-        modalMeta.title = `${t("activeTimeHint")}\n${t("span")}: ${formatDuration(session.span_ms)}`;
+        renderSessionModalMeta(tool, session);
         document.getElementById("sessionModalInput").textContent = formatTokenCount(session.tokens_in || 0);
         document.getElementById("sessionModalCache").textContent = formatTokenCount(session.tokens_cache || 0);
         document.getElementById("sessionModalOutput").textContent = formatTokenCount(session.tokens_out || 0);

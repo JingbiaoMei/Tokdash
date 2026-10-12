@@ -6,7 +6,7 @@ Run from the project root:
 
 Only generated transcripts and temporary usage databases are opened. JSON output
 includes raw samples, timings, peak Python allocations, and regression checks.
-Single-file and warm checks alternate both readers in one process to control noise.
+Regression checks alternate both readers in one process to control scheduling noise.
 """
 from __future__ import annotations
 
@@ -124,6 +124,37 @@ def paired_warm_worker(args):
                     assert value["total_messages"] == args.files * args.rows_per_file
         results[metric] = {label: summarize(values) for label, values in samples.items()}
     return results
+
+
+def paired_corpus_worker(args):
+    """Compare genuinely cold parser caches under one scheduler/allocator."""
+    import importlib.util
+
+    sys.path.insert(0, str(Path(args.repo) / "src"))
+    from tokdash.sources import openclaw
+
+    name = "tokdash.sources._openclaw_benchmark_baseline"
+    spec = importlib.util.spec_from_file_location(name, args.baseline / "src/tokdash/sources/openclaw.py")
+    baseline = importlib.util.module_from_spec(spec)
+    sys.modules[name] = baseline
+    spec.loader.exec_module(baseline)
+    cases = [("baseline_plain", baseline, "plain"), ("candidate_plain", openclaw, "plain"),
+             ("candidate_compressed", openclaw, "compressed")]
+    samples = {label: [] for label, _, _ in cases}
+    for block in range(args.rounds):
+        for label, reader, layout in (cases if block % 2 == 0 else list(reversed(cases))):
+            baseline._ENTRY_CACHE.clear()
+            openclaw._ENTRY_CACHE.clear()
+            value = None
+            gc.collect()
+            dirs = [str(args.fixture / layout)]
+            start = time.perf_counter()
+            value = reader.collect_session_corpus(dirs)
+            samples[label].append((time.perf_counter() - start) * 1000)
+            assert len(value.rows) == args.files * args.rows_per_file and not value.failed
+            assert sum(row['input_raw'] + row['cache_write'] + row['output'] + row['cache_read']
+                       for row in value.rows) == args.files * args.rows_per_file * 180
+    return {label: summarize(values) for label, values in samples.items()}
 
 
 def build_fixtures(root, args):
@@ -249,6 +280,8 @@ def run_child(args, root, repo, layout, memory=False):
             command.extend(["--paired-file-only", "--baseline", str(args.baseline.resolve())])
         if args.paired_warm_only:
             command.extend(["--paired-warm-only", "--baseline", str(args.baseline.resolve())])
+        if args.paired_corpus_only:
+            command.extend(["--paired-corpus-only", "--baseline", str(args.baseline.resolve())])
         result = subprocess.run(command, cwd=repo, env=env, text=True, capture_output=True, check=True)
         return json.loads(result.stdout)
 
@@ -268,8 +301,10 @@ def main():
     parser.add_argument("--max-regression-percent", type=float, default=10)
     parser.add_argument("--noise-floor-ms", type=float, default=.25)
     parser.add_argument("--temp-dir", type=Path, help="Filesystem for generated transcripts and temporary databases")
-    parser.add_argument("--paired-file-only", action="store_true", help="Control single-file noise by alternating both readers in one process")
-    parser.add_argument("--paired-warm-only", action="store_true", help="Control warm-path noise with paired readers and separate databases")
+    paired = parser.add_mutually_exclusive_group()
+    paired.add_argument("--paired-file-only", action="store_true", help="Control single-file noise by alternating both readers in one process")
+    paired.add_argument("--paired-warm-only", action="store_true", help="Control warm-path noise with paired readers and separate databases")
+    paired.add_argument("--paired-corpus-only", action="store_true", help="Control cold-corpus noise with paired readers and empty parser caches")
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--memory", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--repo", type=Path, help=argparse.SUPPRESS)
@@ -277,13 +312,16 @@ def main():
     parser.add_argument("--layout", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.worker:
-        result = (paired_warm_worker(args) if args.paired_warm_only else
+        result = (paired_corpus_worker(args) if args.paired_corpus_only else
+                  paired_warm_worker(args) if args.paired_warm_only else
                   paired_file_worker(args) if args.paired_file_only else
                   memory_worker(args) if args.memory else worker(args))
         print(json.dumps(result))
         return
     if args.baseline is None:
         parser.error("--baseline is required")
+    if args.temp_dir is not None:
+        args.temp_dir = args.temp_dir.resolve()
     if not (0 < args.archive_files <= args.files and args.rows_per_file > 0 and args.payload_bytes >= 4
             and args.rounds > 0 and args.blocks > 0 and args.warm_repeats > 0):
         parser.error("positive corpus/repetition sizes and 1 <= archive-files <= files are required")
@@ -317,7 +355,7 @@ def main():
                 print(f"{row['metric']}: {row['baseline_ms']:.3f} -> {row['candidate_ms']:.3f} ms ({row['change_percent']:+.1f}%)")
             print(f"Results: {args.output}")
             raise SystemExit(0 if report["passed"] else 1)
-        if args.paired_file_only:
+        if args.paired_file_only or args.paired_corpus_only:
             measurements = run_child(args, root, candidate, "plain")
             before = measurements["baseline_plain"]["median_ms"]
             after = measurements["candidate_plain"]["median_ms"]
@@ -325,9 +363,12 @@ def main():
             report = {"baseline": str(baseline), "candidate": str(candidate), "fixture": fixture,
                       "measurements": measurements, "change_percent": (after / before - 1) * 100,
                       "passed": after - before <= limit,
-                      "timing_scope": "Both readers alternate in one process; each sample is a batch average."}
+                      "timing_scope": ("Both readers alternate in one process with parser caches cleared before every sample."
+                                       if args.paired_corpus_only else
+                                       "Both readers alternate in one process; each sample is a batch average.")}
             args.output.write_text(json.dumps(report, indent=2) + "\n")
-            print(f"Paired file parsing: {before:.3f} -> {after:.3f} ms ({report['change_percent']:+.1f}%)")
+            label = "corpus" if args.paired_corpus_only else "file"
+            print(f"Paired {label} parsing: {before:.3f} -> {after:.3f} ms ({report['change_percent']:+.1f}%)")
             print(f"Compressed equivalent: {measurements['candidate_compressed']['median_ms']:.3f} ms")
             print(f"Results: {args.output}")
             raise SystemExit(0 if report["passed"] else 1)
@@ -351,11 +392,17 @@ def main():
         paired_args.paired_file_only = False
         paired_args.paired_warm_only = True
         paired_warm = run_child(paired_args, root, candidate, "plain")
+        paired_args.paired_warm_only = False
+        paired_args.paired_corpus_only = True
+        paired_corpora = run_child(paired_args, root, candidate, "plain")
     comparisons = []
     for metric, reference in measurements["baseline_plain"].items():
         if not isinstance(reference, dict):
             continue
-        if metric == "cold_file":
+        if metric == "cold_corpus":
+            before = paired_corpora["baseline_plain"]["median_ms"]
+            after = paired_corpora["candidate_plain"]["median_ms"]
+        elif metric == "cold_file":
             before = paired_files["baseline_plain"]["median_ms"]
             after = paired_files["candidate_plain"]["median_ms"]
         elif metric in paired_warm:
@@ -367,8 +414,7 @@ def main():
         limit = max(before * args.max_regression_percent / 100, args.noise_floor_ms)
         comparisons.append({"metric": metric, "baseline_ms": before, "candidate_ms": after,
                             "change_percent": (after / before - 1) * 100, "passed": after - before <= limit,
-                            "scope": "paired readers in one process" if metric == "cold_file" or metric in paired_warm
-                            else "alternating process blocks"})
+                            "scope": "paired readers in one process"})
     report = {
         "python": platform.python_version(), "platform": platform.platform(),
         "baseline": str(baseline), "candidate": str(candidate),
@@ -376,6 +422,7 @@ def main():
                                             if key not in {"repo", "fixture", "layout", "worker", "memory"}},
         "measurements": measurements, "paired_file_measurements": paired_files,
         "paired_warm_measurements": paired_warm,
+        "paired_corpus_measurements": paired_corpora,
         "plain_path_comparisons": comparisons,
         "passed": all(row["passed"] for row in comparisons),
         "timing_scope": "Parser caches cold, OS filesystem cache warm; workloads executed sequentially in alternating order. RSS measured without tracemalloc in timing workers; Python allocations measured in separate workers.",

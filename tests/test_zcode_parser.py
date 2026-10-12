@@ -598,6 +598,7 @@ def test_zcode_snapshot_retries_when_source_changes_mid_copy(monkeypatch, tmp_pa
     assert len(entries) == 2
     assert {e["entry_id"] for e in entries} == {"zcode:mu-1", "zcode:mu-2"}
 
+
 def test_zcode_copy_fingerprints_see_a_replaced_file_with_same_size_and_mtime(tmp_path):
     """A same-size rewrite inside one clock tick leaves (mtime, size)
     untouched, so the mid-copy coherence check also keys on the file

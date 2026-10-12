@@ -724,6 +724,7 @@ def test_speed_deep_link_clears_the_header_loading_placeholder(tmp_path):
     script = _standalone_loader_js() + '\n'.join([
         "const header = {textContent:'Loading...'}; document.getElementById = () => header;",
         _extract('function usageReportSpeedCacheMessage('),
+        _extract('function usageReportSpeedDeferredNote(cache)'),
         _extract('function usageReportSpeedUpdateHeader()'),
         '''usageReportSpeedState.loading = false;
         usageReportSpeedUpdateHeader();
@@ -736,6 +737,7 @@ def test_model_snapshot_status_distinguishes_stale_pending_active_and_error_with
     script = STUBS + '\n'.join([
         _extract('const usageReportSpeedState = {'),
         _extract('function usageReportSpeedCacheMessage('),
+        _extract('function usageReportSpeedDeferredNote(cache)'),
         _extract('function usageReportSpeedUpdateHeader()'),
         _extract('function usageReportRenderSpeed()'),
         """
@@ -1732,4 +1734,36 @@ console.log(JSON.stringify({lines, pill: host.textContent}));
     assert out["lines"][2]["titles"] == ["usageReportSpeedSourceFailure"], "no count is not n=0"
     assert out["pill"] == "kimi: usageReportSpeedSourceFailure"
     for key in ("usageReportSpeedPendingTools", "usageReportSpeedFailedTools"):
+        assert len(re.findall(rf"^\s+{key}: '", SRC, re.M)) == len(LANGUAGES), key
+
+
+def test_a_ready_page_says_when_live_sessions_are_not_in_its_numbers_yet(tmp_path):
+    """Live logs wait until they go quiet; the header must not read as complete."""
+    script = "\n".join([
+        "function t(key, vars) { return vars ? `${key}(${vars.n})` : key; }",
+        "function formatNumber(value) { return String(value); }",
+        "const usageReportSpeedState = {active: true, loading: false, error: '', payload: null};",
+        _extract("function usageReportSpeedCacheMessage(cache)"),
+        _extract("function usageReportSpeedDeferredNote(cache)"),
+        _extract("function usageReportSpeedUpdateHeader()"),
+        """
+const header = {textContent: ''};
+global.document = {getElementById: (id) => id === 'lastUpdate' ? header : null};
+const seen = [];
+for (const cache of [{state: 'ready', deferred_inputs: 0}, {state: 'ready', deferred_inputs: 1},
+                     {state: 'ready', deferred_inputs: 3}, {state: 'stale', job_id: 'j', deferred_inputs: 3}]) {
+  usageReportSpeedState.payload = {cache};
+  usageReportSpeedUpdateHeader();
+  seen.push(header.textContent);
+}
+console.log(JSON.stringify(seen));
+""",
+    ])
+    assert _run_node(tmp_path, "speed_deferred_note", script) == [
+        "usageReportSpeedCachedHistory",
+        "usageReportSpeedCachedHistory · usageReportSpeedLiveDeferredOne",
+        "usageReportSpeedCachedHistory · usageReportSpeedLiveDeferred(3)",
+        "loading",
+    ]
+    for key in ("usageReportSpeedLiveDeferredOne", "usageReportSpeedLiveDeferred"):
         assert len(re.findall(rf"^\s+{key}: '", SRC, re.M)) == len(LANGUAGES), key

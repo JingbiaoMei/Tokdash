@@ -122,7 +122,7 @@ def test_many_native_scopes_use_one_freshness_snapshot(corpus, monkeypatch, chan
     signature = json.dumps(speed_native.signature('opencode'))
     generation = cache.primary_generation()
     with closing(cache.connect()) as conn:
-        conn.executemany("INSERT INTO speed_inputs VALUES ('opencode',?,?,?,?,'ready',NULL)",
+        conn.executemany("INSERT INTO speed_inputs VALUES ('opencode',?,?,?,?,'ready',NULL,NULL)",
                          ((f'session:history-{i}', signature, cache.READER_VERSIONS['opencode'], generation) for i in range(1000)))
         conn.commit()
     new_file = Path(inventory['codex_file']).with_name('rollout-short-session.jsonl')

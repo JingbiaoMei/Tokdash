@@ -316,7 +316,7 @@ def test_sequential_requests_never_overlap_in_combined_throughput(claude_home):
     assert [p for p in trend['series'][0]['parallelism'] if p is not None] == [1.0]
     # A rebuild that reuses the published rows keeps their starts.
     with closing(speed_cache.connect()) as c:
-        c.execute("UPDATE speed_meta SET value='0' WHERE key='published_generation'"); c.commit()
+        c.execute("UPDATE speed_inputs SET usage_state=NULL"); c.commit()  # never checked: read again
     _run(speed_cache.ensure(DAY, DAY))
     with closing(speed_cache.connect(readonly=True)) as c:
         assert json.loads(speed_cache.meta(c)['last_build_counts'])['reused_files'] == 1

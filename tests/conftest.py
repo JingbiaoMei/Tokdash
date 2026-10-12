@@ -56,6 +56,16 @@ def isolated_usage_db(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def settled_speed_inputs(monkeypatch):
+    """Let model timing builds read fixture files the moment they are written.
+
+    A fixture corpus is always minutes old at most, which the speed cache would
+    otherwise treat as live sessions and defer. Tests of that rule set it back.
+    """
+    monkeypatch.setenv("TOKDASH_SPEED_SETTLE_SECONDS", "0")
+
+
+@pytest.fixture(autouse=True)
 def fresh_store_failure_reports():
     """Give every test a process that has not reported a store failure yet.
 

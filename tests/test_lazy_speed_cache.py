@@ -125,17 +125,24 @@ def test_cache_only_model_and_timeline_do_not_create_a_missing_cache(corpus,monk
     assert not cache.cache_path().exists()
 
 
-@pytest.mark.parametrize('changed',['native','generation'])
+@pytest.mark.parametrize('changed',['native','usage'])
 def test_terminal_snapshot_reads_stale_publication_without_rebuilding(corpus,monkeypatch,changed):
+    root,_,inventory=corpus
     compute._sync_usage_store(CodingToolsUsageTracker())
     request={'from':'2026-09-01','to':'2026-09-28','source':''}
     build_requested(request)
     before=cache.payload(request['from'],request['to'],cache_only=True)
+    tool,sid,calls=('opencode','s',19) if changed=='native' else ('codex','bench-codex',20)
     if changed=='native':
-        monkeypatch.setattr(cache,'identity',lambda:'changed native DB/WAL identity')
+        with sqlite3.connect(root/'opencode.db') as c:
+            c.execute("UPDATE message SET data=json_set(data,'$.tokens.output',77) WHERE id='m1'")
     else:
-        target=cache.primary_generation()
-        monkeypatch.setattr(cache,'primary_generation',lambda:target+1)
+        import output_speed_expansion_fixtures as fixtures
+        from tokdash.sources.coding_tools import _sig_cache
+        with Path(inventory['codex_file']).open('a') as stream:
+            stream.write(''.join(json.dumps(row)+'\n' for row in fixtures.codex_call(100)))
+        _sig_cache.clear()
+        compute._sync_usage_store(CodingToolsUsageTracker())
     monkeypatch.setattr(cache,'ensure',lambda *a,**kw:pytest.fail('terminal snapshot ensured work'))
     monkeypatch.setattr(cache,'launch_worker',lambda *a:pytest.fail('terminal snapshot launched worker'))
     # A concurrent publication writer does not block these read transactions.
@@ -149,9 +156,9 @@ def test_terminal_snapshot_reads_stale_publication_without_rebuilding(corpus,mon
             conn=original(*a,**kw);conn.set_trace_callback(statements.append);return conn
         monkeypatch.setattr(cache,'connect',traced)
         report=cache.payload(request['from'],request['to'],cache_only=True)
-        detail=session_speed.timeline('codex','bench-codex',cache_only=True)
+        detail=session_speed.timeline(tool,sid,cache_only=True)
         assert report['rows']==before['rows']
-        assert detail['summary']['speed_calls']==20
+        assert detail['summary']['speed_calls']==calls
         assert report['cache']['state']==detail['cache']['state']=='stale'
         assert report['cache']['job_id'] is None and detail['cache']['job_id'] is None
         assert report['measurement_generation']==before['measurement_generation']
@@ -471,6 +478,13 @@ def test_partial_refresh_cannot_certify_model_window_after_unindexed_usage_appea
         elif scope=='other-dates':partial={**request,'from':'2026-09-28','to':'2026-09-28'}
         speed_worker.build(c,'test',partial,sync=False)
     status=cache.ensure(request['from'],request['to'])
+    if scope=='other-dates':
+        # A model build reads every changed input whatever its dates, so a
+        # build for other dates answers this range too.
+        assert status['job_id'] is None and status['state']=='ready'
+        with closing(cache.connect()) as c:
+            assert c.execute("SELECT count(*) FROM speed_responses WHERE source='codex'").fetchone()[0]==21
+        return
     assert status['job_id'] is not None
     with closing(cache.connect()) as c:
         speed_worker.build(c,status['job_id'],request,sync=False)
@@ -478,26 +492,34 @@ def test_partial_refresh_cannot_certify_model_window_after_unindexed_usage_appea
     assert cache.ensure(request['from'],request['to'])['job_id'] is None
 
 
-@pytest.mark.parametrize('scoped', [False,True])
-def test_publication_upgrade_retires_old_window_markers_and_reuses_measurements(corpus,monkeypatch,scoped):
+@pytest.mark.parametrize('upgrade', ['unrecorded','older-contract','session-build'])
+def test_upgrade_rechecks_every_input_once_and_reuses_measurements(corpus,monkeypatch,upgrade):
     monkeypatch.setenv('TOKDASH_SPEED_CPU_FRACTION','1')
     compute._sync_usage_store(CodingToolsUsageTracker())
     request={'from':'2026-09-01','to':'2026-09-28','source':''}
     build_requested(request)
     with closing(cache.connect()) as c:
         before=[tuple(r) for r in c.execute('SELECT * FROM speed_responses ORDER BY source,entry_key')]
-        old_identity=json.loads(cache.identity());old_identity.pop('publication')
-        cache.put_meta(c,publication_version=1,identity=json.dumps(old_identity,separators=(',',':')))
+        if upgrade=='older-contract':
+            # A contract change re-checks even an input that is still being written.
+            monkeypatch.setenv('TOKDASH_SPEED_SETTLE_SECONDS','3600')
+            c.execute("UPDATE speed_inputs SET usage_state=json_set(usage_state,'$[1][2]',0)")
+        else:
+            c.execute('UPDATE speed_inputs SET usage_state=NULL')
+        c.execute("INSERT INTO speed_windows VALUES ('','2026-09-01','2026-09-28',1)")
         c.commit()
+    waiting=cache.payload(request['from'],'2026-09-02',cache_only=True)['cache']
+    assert waiting['state']=='stale' and waiting['pending_inputs']>0
+    with closing(cache.connect()) as c:
         monkeypatch.setattr(speed_worker,'native_rows',lambda *a:pytest.fail('unchanged native timings were reprocessed'))
         monkeypatch.setattr(speed_worker,'_collect_parser_file',lambda *a,**k:pytest.fail('unchanged SDK timings were reprocessed'))
-        refresh={**request,'source':'opencode','session_id':'s'} if scoped else {**request,'to':'2026-09-02'}
+        refresh={**request,'source':'opencode','session_id':'s'} if upgrade=='session-build' else {**request,'to':'2026-09-02'}
         speed_worker.build(c,'test',refresh,sync=False)
         assert before==[tuple(r) for r in c.execute('SELECT * FROM speed_responses ORDER BY source,entry_key')]
-        assert cache.meta(c)['publication_version']==str(cache.PUBLICATION_VERSION)
-        windows=[tuple(r) for r in c.execute('SELECT source,day_from,day_to FROM speed_windows')]
-        assert windows==([] if scoped else [('',request['from'],'2026-09-02')])
-    assert cache.ensure(request['from'],request['to'])['job_id'] is not None
+        assert not c.execute('SELECT 1 FROM speed_windows').fetchone(), 'date windows certify nothing now'
+    # A session build checks only its own inputs, so the model view still waits.
+    after=cache.payload(request['from'],request['to'],cache_only=True)['cache']
+    assert after['state']==('stale' if upgrade=='session-build' else 'ready')
 
 
 def test_timeline_equal_clocks_distinct_agents_filtered_models_and_summary_parity(corpus):

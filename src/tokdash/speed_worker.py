@@ -161,6 +161,7 @@ def build(conn, job, request, *, sync=True, failure_context=None):
             previous.extend(conn.execute('SELECT * FROM speed_inputs WHERE source=? AND (signature IS NOT ? OR reader_version IS NOT ?'+clause+')',
                                          (source,native_signatures[source],cache.READER_VERSIONS[source],*sorted(owners))))
         selected=set()
+        deferred_work=set()
         if request.get('sessions'):
             for item in request['sessions']:
                 selected.update((item['tool'],r[0]) for r in primary.execute('SELECT file_path FROM usage_session_inputs WHERE source=? AND session_id=?',(item['tool'],item['session_id'])))
@@ -174,21 +175,19 @@ def build(conn, job, request, *, sync=True, failure_context=None):
             selected.update((wanted,r[0]) for r in primary.execute('SELECT file_path FROM usage_session_inputs WHERE source=? AND session_id=?',(wanted,request['session_id'])))
             selected.update((wanted,r[0]) for r in primary.execute('SELECT file_path FROM session_records WHERE tool=? AND session_id=?',(wanted,request['session_id'])))
         else:
-            start,end=cache.speed_report._day_bounds_ms(request['from'],request['to'])
-            selected.update((r[0],r[1]) for r in primary.execute('SELECT DISTINCT source,file_path FROM usage_entries WHERE timestamp>=? AND timestamp<?',(start,end)) if r[0] in file_sources)
+            # A model build reads every input whose accounting moved since it was
+            # timed, whatever dates the view asked for, and leaves the rest as
+            # published. Inputs still being written wait until they settle; an
+            # explicit refresh reads them now.
+            work,deferred_work=cache.pending_work(conn,primary,source=wanted,include_active=bool(request.get('refresh')))
+            selected.update(key for key in work if key[0] in file_sources)
+            native_scopes={(source,owner) for source,owner in native_scopes if (source,owner) in work}
         requested_inputs=set(selected)
         bounded = bool(request.get('session_id') or request.get('sessions'))
-        if bounded:
-            for source,owner in selected:
-                if source not in speed_native.SOURCES:
-                    previous.extend(conn.execute('SELECT * FROM speed_inputs WHERE source=? AND input_owner=?',(source,owner)))
-        else:
-            for source in file_sources:
-                previous.extend(conn.execute('SELECT * FROM speed_inputs WHERE source=?',(source,)))
-        # Full model builds reconcile previously indexed owners, including removals.
-        # A session build never stages an unrelated population.
-        if not bounded:
-            selected.update((r['source'],r['input_owner']) for r in previous if r['source'] in file_sources)
+        for source,owner in selected:
+            if source not in speed_native.SOURCES:
+                previous.extend(conn.execute('SELECT * FROM speed_inputs WHERE source=? AND input_owner=?',(source,owner)))
+        usage_tokens={key:token for key,(token,_,_) in cache.usage_tokens(primary,sorted({source for source,_ in selected})).items() if key in selected}
         conn.execute('DROP TABLE IF EXISTS speed_stage')
         conn.execute('CREATE TABLE speed_stage AS SELECT * FROM speed_responses WHERE 0')
         conn.execute('CREATE UNIQUE INDEX idx_speed_stage_key ON speed_stage(source,entry_key)')
@@ -254,7 +253,7 @@ def build(conn, job, request, *, sync=True, failure_context=None):
     native_freshness_scopes=0
     # Freshness-only invalidation does not copy or rewrite the last-good rows.
     for (source,owner),old in previous.items():
-        if source not in speed_native.SOURCES or (source,owner) in native_scopes:
+        if source not in speed_native.SOURCES or (source,owner) in native_scopes or (source,owner) in deferred_work:
             continue
         native_freshness_scopes+=1
         observed=native_signatures[source]
@@ -459,7 +458,10 @@ def build(conn, job, request, *, sync=True, failure_context=None):
     conn.execute('DELETE FROM speed_session_members WHERE (source,call_key) IN (SELECT source,entry_key FROM speed_stage)')
     conn.execute('INSERT OR REPLACE INTO speed_responses SELECT * FROM speed_stage')
     conn.execute('INSERT OR REPLACE INTO speed_session_members SELECT * FROM speed_member_stage')
-    conn.executemany('INSERT OR REPLACE INTO speed_inputs VALUES (?,?,?,?,?,?,?)',staged_inputs)
+    # Each input records the accounting it was timed against, so a later model
+    # build can tell it apart from the inputs that moved since.
+    conn.executemany('INSERT OR REPLACE INTO speed_inputs(source,input_owner,signature,reader_version,usage_generation,state,last_error,usage_state) VALUES (?,?,?,?,?,?,?,?)',
+                     [(*r,cache.usage_token('native') if r[0] in speed_native.SOURCES else usage_tokens.get(r[:2],cache.usage_token())) for r in staged_inputs])
     conn.executemany("UPDATE speed_inputs SET state='pending',last_error='native input outside requested scope changed' WHERE source=? AND input_owner=?",deferred_native)
     conn.executemany('DELETE FROM speed_sessions WHERE source=? AND session_id=?',affected_sessions)
     ready_inputs={(r[0],r[1]) for r in staged_inputs if r[5]=='ready'}
@@ -475,21 +477,21 @@ def build(conn, job, request, *, sync=True, failure_context=None):
     for source,sid in conn.execute('SELECT DISTINCT source,session_id FROM speed_member_stage'):
         if (source,'native:all') in ready_inputs:
             conn.execute('INSERT OR REPLACE INTO speed_sessions VALUES (?,?,?,?)',(source,sid,generation,'ready'))
-    if days is not None:
+    if days is not None and sorted(map(tuple,days))!=sorted(map(tuple,conn.execute('SELECT * FROM speed_source_days'))):
         conn.execute('DELETE FROM speed_source_days')
         conn.executemany('INSERT INTO speed_source_days VALUES (?,?,?)',days)
-    # Older publications could promote every model window after a bounded or
-    # differently filtered build. Retire those markers once, retaining valid
-    # timing rows. Only the exact requested full window receives this generation.
-    if cache.meta(conn).get('publication_version')!=str(cache.PUBLICATION_VERSION):
-        conn.execute('DELETE FROM speed_windows')
-    if not request.get('session_id') and not request.get('sessions'):
-        conn.execute('INSERT OR REPLACE INTO speed_windows VALUES (?,?,?,?)',(wanted,request['from'],request['to'],generation))
-    revision=int(cache.meta(conn).get('publication_revision',0))+1
+    # Model freshness is judged per input now (cache.pending_work), so date
+    # windows certify nothing; drop any a previous version left behind.
+    conn.execute('DELETE FROM speed_windows')
+    report_changes=conn.total_changes-publication_start
+    revision=int(cache.meta(conn).get('publication_revision',0))+int(report_changes>0)
     cache.put_meta(conn,published_generation=generation,identity=build_identity,updated_at=datetime.now().astimezone().isoformat(),schema_version=cache.SCHEMA_VERSION,publication_version=cache.PUBLICATION_VERSION,publication_revision=revision)
     for failed in conn.execute('SELECT * FROM speed_failures').fetchall():
         old_request=json.loads(failed['request']); scope=json.loads(failed['scope'])
-        if (failed['source'],scope.get('input_owner')) in (selected|requested_native) or (failed['source'],'native:all') in requested_native or (not scope.get('input_owner') and old_request.get('source','')==wanted and old_request.get('session_id','')==request.get('session_id','') and old_request.get('sessions')==request.get('sessions') and old_request.get('from')==request.get('from') and old_request.get('to')==request.get('to')):
+        if (failed['source'],scope.get('input_owner')) in (selected|requested_native) or (failed['source'],'native:all') in requested_native or (not scope.get('input_owner') and old_request.get('session_id','')==request.get('session_id','') and old_request.get('sessions')==request.get('sessions') and (
+                (old_request.get('source','')==wanted and old_request.get('from')==request.get('from') and old_request.get('to')==request.get('to')) if bounded
+                # A model build answers every range, and an unfiltered one every source.
+                else not wanted or old_request.get('source','')==wanted)):
             conn.execute('DELETE FROM speed_failures WHERE job_id=?',(failed['job_id'],))
     conn.execute('DROP TABLE speed_stage')
     conn.execute('DROP TABLE speed_member_stage')
@@ -499,7 +501,7 @@ def build(conn, job, request, *, sync=True, failure_context=None):
                    last_build_counts=json.dumps(dict(parsed_files=parsed_files,reused_files=reused_files,
                        parsed_native_scopes=parsed_native,reused_native_scopes=reused_native,
                        native_freshness_scopes=native_freshness_scopes,
-                       requested_file_inputs=len(requested_inputs),staged_rows=staged_rows,
+                       requested_file_inputs=len(requested_inputs),deferred_inputs=len(deferred_work),staged_rows=staged_rows,
                        publication_changes=conn.total_changes-publication_start)))
     conn.execute('UPDATE speed_jobs SET state=\'ready\',updated_at=? WHERE id=?',(time.time(),job))
     conn.commit()

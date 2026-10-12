@@ -318,3 +318,31 @@ def test_a_bucket_one_response_short_of_the_minimum_has_no_spread(client):
     (codex,) = payload["series"]
     assert codex["calls"][1] == speed_trend.SPREAD_MIN_RESPONSES - 1
     assert codex["spread"]["p50"][1] is None
+
+
+def _bucket_spread(responses):
+    """The spread one bucket reports for (tokens, ms) responses."""
+    series = speed_trend._Series(1)
+    for tokens, ms in responses:
+        series.add(0, 0, 0.0, ms, tokens, ms, 1)
+    rendered = series.render(per_stream=True)
+    return {k: v[0] for k, v in rendered["spread"].items()}, rendered["per_stream"][0]
+
+
+def test_the_rounded_rate_histogram_matches_the_exact_quantiles_as_displayed():
+    import random
+    rng = random.Random(230)
+    responses = [(rng.randrange(20, 4000), rng.uniform(300.0, 90_000.0)) for _ in range(5_000)]
+    spread, _line = _bucket_spread(responses)
+    exact = speed_trend.weighted_quantiles([(1000.0 * t / ms, ms) for t, ms in responses])
+    # Rounding is monotonic, so the rounded rate of the exact pick is the pick
+    # among rounded rates: the histogram loses nothing the page can show.
+    assert [spread[f"p{q}"] for q in speed_trend.SPREAD_QUANTILES] == [int(v * 10 + 0.5) / 10 for v in exact]
+
+
+def test_a_heavy_tail_can_put_the_line_outside_its_band():
+    # 29 responses at 10 tok/s and one at 1000 tok/s, each 10 s long: 97% of the
+    # time ran at 10, so every quantile is 10, while the mean is pulled to 43.
+    spread, line = _bucket_spread([(100, 10_000.0)] * 29 + [(10_000, 10_000.0)])
+    assert spread["p10"] == spread["p90"] == 10.0
+    assert line == 43.0 and line > spread["p90"], "documented: a mean is not bound by its quantiles"

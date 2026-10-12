@@ -696,7 +696,9 @@ union of its own responses; empty buckets are `null`.
 Each `series` entry, and its `hours`, also has `spread`: `p10`, `p25`, `p50`, `p75`
 and `p90` arrays aligned like `per_stream`. They are duration-weighted quantiles of
 the bucket's per-response rates, the rate below which that share of the bucket's
-generation time ran; `per_stream` is the duration-weighted mean of the same rates.
+generation time ran; `per_stream` is the duration-weighted mean of the same rates,
+so a heavy tail can put it outside its own p10–p90. Rates are taken at the 0.1 tok/s
+the page shows, which leaves each quantile exact at that precision.
 A bucket with fewer than `spread.min_responses` (30) responses has `null` in every
 quantile. `model_series` has no `spread`, since it has no per-stream rate. The
 top-level `spread` names the quantiles, the minimum and the weight (`duration`).

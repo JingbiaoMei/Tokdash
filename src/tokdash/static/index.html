@@ -2179,6 +2179,9 @@
     .speed-band { stroke: none; }
     .speed-band-outer { fill-opacity: .13; }
     .speed-band-inner { fill-opacity: .24; }
+    /* A dark ground swallows the same tint: lift it so the band still reads. */
+    html.dark .speed-band-outer { fill-opacity: .2; }
+    html.dark .speed-band-inner { fill-opacity: .34; }
     .speed-point { stroke: var(--color-surface); stroke-width: 2; }
     .speed-xhair { stroke: var(--color-muted); stroke-width: 1; }
     .speed-end-label { fill: var(--color-muted); font-size: 11.5px; font-weight: 600; }

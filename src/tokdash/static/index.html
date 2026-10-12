@@ -2215,8 +2215,9 @@
     .speed-check[aria-checked="true"]::after { content: ""; width: 8px; height: 4px; border: solid #fff; border-width: 0 0 2px 2px; transform: translateY(-1px) rotate(-45deg); }
     .speed-check[aria-disabled="true"] { opacity: .35; cursor: not-allowed; }
     .speed-model { display: flex; align-items: center; gap: 9px; }
-    .speed-logos { display: inline-flex; flex: none; }
-    .speed-logos .tool-identity + .tool-identity { margin-left: -6px; }
+    /* Spaced, not stacked: several logos are square tiles, and overlapping
+       ones read as a single smudge. */
+    .speed-logos { display: inline-flex; flex: none; gap: 3px; }
     .speed-model-name { display: block; font-weight: 600; color: var(--color-text); white-space: nowrap; }
     .speed-model-meta { display: block; font-size: 11.5px; color: var(--color-muted); }
     .speed-rate { font-weight: 700; }

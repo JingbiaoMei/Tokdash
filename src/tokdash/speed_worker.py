@@ -93,6 +93,16 @@ def native_rows(source, session_id=''):
                 yield row,member
 
 
+def _reuse_file_timing(conn,source,owner):
+    conn.execute('''UPDATE speed_stage AS s SET (session_id,speed_tokens,speed_ms,speed_calls,speed_kind,speed_token_basis,speed_status)=
+       (SELECT session_id,speed_tokens,speed_ms,speed_calls,speed_kind,speed_token_basis,speed_status FROM speed_responses p
+        WHERE p.source=s.source AND p.entry_key=s.entry_key AND p.input_owner=s.input_owner AND p.timestamp=s.timestamp AND p.model=s.model AND p.output=s.output AND p.reasoning=s.reasoning)
+       WHERE source=? AND input_owner=? AND EXISTS (SELECT 1 FROM speed_responses p WHERE p.source=s.source AND p.entry_key=s.entry_key AND p.input_owner=s.input_owner AND p.timestamp=s.timestamp AND p.model=s.model AND p.output=s.output AND p.reasoning=s.reasoning)''',(source,owner))
+    # Force the narrow owning-input seek before membership lookup. With
+    # JOIN SQLite otherwise walks every source member once per file.
+    conn.execute('INSERT INTO speed_member_stage SELECT m.* FROM speed_stage s CROSS JOIN speed_session_members m ON s.source=m.source AND s.entry_key=m.call_key WHERE s.source=? AND s.input_owner=?',(source,owner))
+
+
 def _discard_file_timing(conn,source,owner):
     empty=unmeasured()
     conn.execute('UPDATE speed_stage SET speed_start=NULL,'+','.join(k+'=?' for k in cache.FIELDS)+' WHERE source=? AND input_owner=?',(*[empty[k] for k in cache.FIELDS],source,owner))
@@ -268,21 +278,21 @@ def build(conn, job, request, *, sync=True, failure_context=None):
         try:
             observed=file_signature(owner)
         except FileNotFoundError:
-            # Durable accounting whose original input was already absent retains
-            # an explicit unknown population. It is not missing telemetry.
-            staged_inputs.append((source,owner,'missing',cache.READER_VERSIONS[source],generation,'pending','original input unavailable'))
+            # Nothing can re-read a vanished input, so it settles instead of
+            # staying pending forever. The last read under this reader version
+            # stays true; without one, durable accounting keeps an explicit
+            # unknown population. Neither is missing telemetry.
+            if old and old['state']=='ready' and old['reader_version']==cache.READER_VERSIONS[source]:
+                _reuse_file_timing(conn,source,owner)
+                staged_inputs.append((source,owner,old['signature'],old['reader_version'],generation,'ready',old['last_error']))
+            else:
+                staged_inputs.append((source,owner,'missing',cache.READER_VERSIONS[source],generation,'ready','original input unavailable'))
             completed+=1; _progress(conn,job,completed,total); continue
         identities[(source,owner)]=observed
         failure_context['signature']=observed
         if old and old['signature']==observed and old['reader_version']==cache.READER_VERSIONS[source] and old['state']=='ready':
             reused_files+=1
-            conn.execute('''UPDATE speed_stage AS s SET (session_id,speed_tokens,speed_ms,speed_calls,speed_kind,speed_token_basis,speed_status)=
-               (SELECT session_id,speed_tokens,speed_ms,speed_calls,speed_kind,speed_token_basis,speed_status FROM speed_responses p
-                WHERE p.source=s.source AND p.entry_key=s.entry_key AND p.input_owner=s.input_owner AND p.timestamp=s.timestamp AND p.model=s.model AND p.output=s.output AND p.reasoning=s.reasoning)
-               WHERE source=? AND input_owner=? AND EXISTS (SELECT 1 FROM speed_responses p WHERE p.source=s.source AND p.entry_key=s.entry_key AND p.input_owner=s.input_owner AND p.timestamp=s.timestamp AND p.model=s.model AND p.output=s.output AND p.reasoning=s.reasoning)''',(source,owner))
-            # Force the narrow owning-input seek before membership lookup. With
-            # JOIN SQLite otherwise walks every source member once per file.
-            conn.execute('INSERT INTO speed_member_stage SELECT m.* FROM speed_stage s CROSS JOIN speed_session_members m ON s.source=m.source AND s.entry_key=m.call_key WHERE s.source=? AND s.input_owner=?',(source,owner))
+            _reuse_file_timing(conn,source,owner)
         elif (request.get('session_id') or request.get('sessions')) and (source,owner) not in requested_inputs:
             staged_inputs.append((source,owner,observed,cache.READER_VERSIONS[source],generation,'pending','input outside requested session changed'))
             completed+=1; _progress(conn,job,completed,total); continue

@@ -2192,6 +2192,7 @@
     .speed-legend-item button:hover { color: var(--color-text); background: color-mix(in srgb, var(--color-text) 12%, transparent); }
     .speed-link { border: 0; background: none; padding: 0 4px; font-size: 12.5px; color: var(--color-muted); text-decoration: underline; cursor: pointer; }
     .speed-why { border-bottom: 1px dotted currentColor; cursor: help; }
+    .speed-sources-line { display: block; }
     .speed-chart-data { margin-top: 6px; font-size: 12px; color: var(--color-muted); }
     .speed-chart-data summary { cursor: pointer; width: fit-content; }
     .speed-chart-data table { border-collapse: collapse; margin-top: 6px; font-size: 12px; }
@@ -2215,8 +2216,9 @@
     .speed-check[aria-checked="true"]::after { content: ""; width: 8px; height: 4px; border: solid #fff; border-width: 0 0 2px 2px; transform: translateY(-1px) rotate(-45deg); }
     .speed-check[aria-disabled="true"] { opacity: .35; cursor: not-allowed; }
     .speed-model { display: flex; align-items: center; gap: 9px; }
-    .speed-logos { display: inline-flex; flex: none; }
-    .speed-logos .tool-identity + .tool-identity { margin-left: -6px; }
+    /* Spaced, not stacked: several logos are square tiles, and overlapping
+       ones read as a single smudge. */
+    .speed-logos { display: inline-flex; flex: none; gap: 3px; }
     .speed-model-name { display: block; font-weight: 600; color: var(--color-text); white-space: nowrap; }
     .speed-model-meta { display: block; font-size: 11.5px; color: var(--color-muted); }
     .speed-rate { font-weight: 700; }
@@ -7678,6 +7680,8 @@
         usageReportSpeedShowTools: 'Show all measured tools',
         usageReportSpeedCachedHistory: 'Cached measurements',
         usageReportSpeedUnmeasuredTools: 'Tools without speed measurements',
+        usageReportSpeedPendingTools: 'Timing still being re-read',
+        usageReportSpeedFailedTools: 'Timing could not be read',
         usageReportSpeedSelectedRange: 'Selected',
         usageReportSpeedMeasuredRange: 'Measured',
         usageReportSpeedDaysWith: 'days with measurements',
@@ -8450,6 +8454,8 @@
         usageReportSpeedShowTools: '显示所有有测量的工具',
         usageReportSpeedCachedHistory: '缓存的测量记录',
         usageReportSpeedUnmeasuredTools: '没有速度测量的工具',
+        usageReportSpeedPendingTools: '计时仍在重新读取',
+        usageReportSpeedFailedTools: '无法读取计时',
         usageReportSpeedSelectedRange: '已选',
         usageReportSpeedMeasuredRange: '实测',
         usageReportSpeedDaysWith: '有测量的天数',
@@ -9223,6 +9229,8 @@
         usageReportSpeedShowTools: '測定のある全ツールを表示',
         usageReportSpeedCachedHistory: 'キャッシュされた測定',
         usageReportSpeedUnmeasuredTools: '速度測定のないツール',
+        usageReportSpeedPendingTools: '計測を再読み込み中',
+        usageReportSpeedFailedTools: '計測を読み取れません',
         usageReportSpeedSelectedRange: '選択期間',
         usageReportSpeedMeasuredRange: '実測',
         usageReportSpeedDaysWith: '測定のある日数',
@@ -9996,6 +10004,8 @@
         usageReportSpeedShowTools: '측정된 모든 도구 보기',
         usageReportSpeedCachedHistory: '캐시된 측정 기록',
         usageReportSpeedUnmeasuredTools: '속도 측정이 없는 도구',
+        usageReportSpeedPendingTools: '측정 시간을 다시 읽는 중',
+        usageReportSpeedFailedTools: '측정 시간을 읽을 수 없음',
         usageReportSpeedSelectedRange: '선택',
         usageReportSpeedMeasuredRange: '실측',
         usageReportSpeedDaysWith: '측정된 일수',
@@ -10769,6 +10779,8 @@
         usageReportSpeedShowTools: 'Mostrar todas las herramientas medidas',
         usageReportSpeedCachedHistory: 'Mediciones en caché',
         usageReportSpeedUnmeasuredTools: 'Herramientas sin mediciones de velocidad',
+        usageReportSpeedPendingTools: 'Tiempos aún en relectura',
+        usageReportSpeedFailedTools: 'No se pudieron leer los tiempos',
         usageReportSpeedSelectedRange: 'Seleccionado',
         usageReportSpeedMeasuredRange: 'Medido',
         usageReportSpeedDaysWith: 'días con mediciones',
@@ -11542,6 +11554,8 @@
         usageReportSpeedShowTools: 'Mostrar todas as ferramentas medidas',
         usageReportSpeedCachedHistory: 'Medições em cache',
         usageReportSpeedUnmeasuredTools: 'Ferramentas sem medições de velocidade',
+        usageReportSpeedPendingTools: 'Tempos ainda em releitura',
+        usageReportSpeedFailedTools: 'Não foi possível ler os tempos',
         usageReportSpeedSelectedRange: 'Selecionado',
         usageReportSpeedMeasuredRange: 'Medido',
         usageReportSpeedDaysWith: 'dias com medições',
@@ -22320,23 +22334,33 @@
       const statuses = ((usageReportSpeedState.payload && usageReportSpeedState.payload.source_status) || [])
         .filter((row) => !usageReportSpeedState.tool || row.source === usageReportSpeedState.tool);
       if (!statuses.length) { host.replaceChildren(); return; }
+      const why = (row) => `${t(usageReportSpeedStatusKey(row.status))}${row.usage_rows == null ? '' : ` (n=${formatNumber(row.usage_rows)})`}`;
       if (usageReportSpeedState.tool) {
-        host.textContent = statuses.map((row) => {
-          const label = t(usageReportSpeedStatusKey(row.status));
-          return `${formatToolName(row.source)}: ${label} (n=${formatNumber(row.usage_rows || 0)})`;
-        }).join(' · ');
+        host.textContent = statuses.map((row) => `${formatToolName(row.source)}: ${why(row)}`).join(' · ');
         return;
       }
-      // Without a pill, one line names them; each reason is on its own name.
-      const parts = [document.createTextNode(`${t('usageReportSpeedUnmeasuredTools')}: `)];
-      statuses.forEach((row, index) => {
-        if (index) parts.push(document.createTextNode(', '));
-        const name = usageReportSpeedText(formatToolName(row.source), 'speed-why');
-        name.tabIndex = 0;
-        name.title = `${t(usageReportSpeedStatusKey(row.status))} (n=${formatNumber(row.usage_rows || 0)})`;
-        parts.push(name);
+      // Without a pill, one line per kind of gap: a tool whose timing is being
+      // re-read, or failed to read, is not one without measurements. Each
+      // name still carries its own reason.
+      const lines = new Map([['usageReportSpeedUnmeasuredTools', []], ['usageReportSpeedPendingTools', []], ['usageReportSpeedFailedTools', []]]);
+      statuses.forEach((row) => {
+        const key = usageReportSpeedStatusKey(row.status);
+        lines.get(key === 'usageReportSpeedSourcePending' ? 'usageReportSpeedPendingTools'
+          : key === 'usageReportSpeedSourceFailure' ? 'usageReportSpeedFailedTools' : 'usageReportSpeedUnmeasuredTools').push(row);
       });
-      host.replaceChildren(...parts);
+      host.replaceChildren(...[...lines].filter(([, rows]) => rows.length).map(([heading, rows]) => {
+        const line = document.createElement('span');
+        line.className = 'speed-sources-line';
+        line.appendChild(document.createTextNode(`${t(heading)}: `));
+        rows.forEach((row, index) => {
+          if (index) line.appendChild(document.createTextNode(', '));
+          const name = usageReportSpeedText(formatToolName(row.source), 'speed-why');
+          name.tabIndex = 0;
+          name.title = why(row);
+          line.appendChild(name);
+        });
+        return line;
+      }));
     }
 
     function usageReportSpeedStatusKey(status) {

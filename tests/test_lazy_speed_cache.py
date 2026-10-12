@@ -232,9 +232,15 @@ def test_unrelated_pending_or_failure_does_not_relabel_published_measurements(co
         assert statuses['claude_code']=='unsupported_reader'
     with closing(cache.connect()) as c:
         c.execute("UPDATE speed_inputs SET state='pending' WHERE source='codex'");c.commit()
-    statuses={r['source']:r['status'] for r in cache.payload(request['from'],request['to'])['source_status']}
-    assert statuses['codex']=='pending_reprocessing'
+        waiting=c.execute("SELECT count(*) FROM speed_responses WHERE source='codex'").fetchone()[0]
+    statuses={r['source']:r for r in cache.payload(request['from'],request['to'])['source_status']}
+    assert statuses['codex']['status']=='pending_reprocessing'
+    assert statuses['codex']['usage_rows']==waiting, 'counts the responses still owed their timing'
     assert 'opencode' not in statuses
+    # A pending input owes nothing to dates it has no responses on.
+    later={r['source'] for r in cache.payload('2026-10-01','2026-10-28')['source_status']}
+    assert 'codex' not in later
+    assert 'codex' not in {r['source'] for r in cache.payload(request['from'],request['to'],source='dsh')['source_status']}
 
 
 def test_mixed_and_ratio_of_sums_and_ordered_gaps():
@@ -593,3 +599,63 @@ def test_reused_membership_seeks_one_input_before_looking_up_call_keys(corpus):
                 WHERE r.source=? AND r.input_owner=?''',('codex','one-input'))]
             assert index in plan[0] and 'input_owner=?' in plan[0]
             assert 'call_key=?' in plan[1]
+
+
+
+@pytest.mark.parametrize('gone',['archived','deleted','deleted_after_reader_change','stranded'])
+def test_a_vanished_rollout_settles_instead_of_staying_pending(corpus,monkeypatch,gone):
+    """A timing input whose file is gone stayed pending forever.
+
+    Nothing could re-read it, so the cache stayed stale and its tool read as
+    waiting on every date range. Archiving re-homes the rows to the moved file,
+    which is read there. A deleted one keeps its last read, or settles as
+    unknown once the reader has changed; so does one an earlier build stranded.
+    """
+    from tokdash import clientpaths
+    from tokdash.sources.coding_tools import _sig_cache
+    root,_,inventory=corpus
+    # The scan cache is keyed by path, and a passing case's tmp dir is reused.
+    _sig_cache.clear()
+    compute._sync_usage_store(CodingToolsUsageTracker())
+    request={'from':'2026-09-01','to':'2026-09-28','source':''}
+    build_requested(request)
+    owner=inventory['codex_file']
+    def timing(path):
+        with closing(cache.connect()) as c:
+            rows=c.execute("SELECT count(*),sum(speed_calls),sum(speed_ms) FROM speed_responses WHERE source='codex' AND input_owner=?",(path,)).fetchone()
+            state=c.execute("SELECT state,signature,reader_version,last_error FROM speed_inputs WHERE source='codex' AND input_owner=?",(path,)).fetchone()
+        return tuple(rows),dict(state) if state else None
+    before,first=timing(owner)
+    assert before[1]==20 and first['state']=='ready'
+    moved=clientpaths.codex_archived_sessions_dir()/Path(owner).name
+    if gone=='archived':
+        moved.parent.mkdir(parents=True,exist_ok=True)
+        Path(owner).rename(moved)
+    else:
+        Path(owner).unlink()
+    if gone=='deleted_after_reader_change':
+        monkeypatch.setitem(cache.READER_VERSIONS,'codex',cache.READER_VERSIONS['codex']+1)
+    if gone=='stranded':
+        # What an earlier build left: timing dropped and the input pending.
+        with closing(cache.connect()) as c:
+            c.execute("UPDATE speed_responses SET speed_calls=0,speed_tokens=0,speed_ms=0,speed_status='missing_timing' WHERE source='codex'")
+            c.execute("UPDATE speed_inputs SET state='pending',signature='missing',last_error='original input unavailable' WHERE source='codex'")
+            c.commit()
+    _sig_cache.clear()  # the next real sync rescans once the TTL lapses
+    compute._sync_usage_store(CodingToolsUsageTracker())
+    with closing(cache.connect()) as c:
+        speed_worker.build(c,'test',request,sync=False)
+    after,state=timing(owner)
+    if gone=='archived':
+        assert state is None and timing(str(moved))[0]==before, 'the moved file owns and times the rows'
+    elif gone=='deleted':
+        assert after==before and state['state']=='ready' and state['signature']==first['signature'], 'the last read stays true'
+    else:
+        assert after[0]==before[0] and not after[1], 'accounting stays; its timing is unknown'
+        assert (state['state'],state['signature'],state['last_error'])==('ready','missing','original input unavailable')
+        assert state['reader_version']==cache.READER_VERSIONS['codex']
+    payload=cache.payload(request['from'],request['to'])
+    assert payload['cache']['state']=='ready' and payload['cache']['pending_inputs']==0
+    statuses={r['source']:r['status'] for r in payload['source_status']}
+    # Without timed rows Codex has nothing measured here: that is true, not waiting.
+    assert statuses.get('codex')==(None if gone in ('archived','deleted') else 'timing_unavailable')

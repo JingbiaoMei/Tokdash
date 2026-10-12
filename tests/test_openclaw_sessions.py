@@ -25,6 +25,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from zstandard import BLOCKSIZE_MAX, FRAME_HEADER, ZstdCompressor
 
 import tokdash.sessions as sessions
 from tokdash.pricing import PricingDatabase
@@ -109,6 +110,14 @@ def _write_jsonl(path: Path, rows: list) -> Path:
         "\n".join(r if isinstance(r, str) else json.dumps(r) for r in rows) + "\n",
         encoding="utf-8",
     )
+    return path
+
+
+def _write_zstd_jsonl(path: Path, rows: list, *, content_size=True) -> Path:
+    payload = "\n".join(
+        r if isinstance(r, str) else json.dumps(r, ensure_ascii=False) for r in rows
+    ).encode("utf-8") + b"\n"
+    path.write_bytes(ZstdCompressor(write_content_size=content_size).compress(payload))
     return path
 
 
@@ -750,6 +759,180 @@ def test_reload_pricing_db_clears_openclaw_aggregate(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 # Transient reads: detection, delivery, recovery (Integration 2a)
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("suffix", [
+    ".jsonl.zst",
+    ".jsonl.deleted.2026-09-26T18-03-25.494Z.fixture.zst",
+    ".jsonl.reset.2026-09-26T18-03-25.494Z.zst",
+])
+@pytest.mark.parametrize("content_size", [True, False])
+def test_zstd_transcript_counts_in_store_and_sessions(monkeypatch, tmp_path, suffix, content_size):
+    _pricing(monkeypatch, tmp_path)
+    a = _sessions_dir(tmp_path, "alpha")
+    _write_jsonl(a / "live.jsonl", [_hdr("s1"), _asst("m1", T_TODAY, inp=100, out=10)])
+    _write_jsonl(a / "plain.jsonl.deleted.1", [_hdr("s2"), _asst("m2", T_TODAY, inp=200, out=20)])
+    archive = _write_zstd_jsonl(a / ("archive" + suffix), [
+        _hdr("s1"), _asst("m1", T_TODAY, inp=100, out=10),
+        _asst("m3", T_TODAY2, inp=300, out=30),
+    ], content_size=content_size)
+
+    corpus = openclaw.collect_session_corpus(_dirs(tmp_path))
+    assert not corpus.failed
+    assert str(archive) in corpus.files
+    assert len(corpus.rows) == 3  # The repeated id is still deduped source-wide.
+    store = openclaw._sync_openclaw_store(_dirs(tmp_path), PricingDatabase())
+    assert _stored(store)[0] == 3
+    usage = openclaw.get_session_usage(_dirs(tmp_path))
+    panel = get_sessions_data("openclaw", "all")
+    assert usage["total_messages"] == 3
+    assert usage["total_tokens"] == panel["summary"]["tokens"] == 660
+    assert panel["summary"]["cost"] == pytest.approx(usage["total_cost"])
+
+    # Warm reads must keep using the verified corpus/store, including archives.
+    def unexpected_parse(*args, **kwargs):
+        raise AssertionError("An unchanged archive was parsed again")
+    monkeypatch.setattr(openclaw, "parse_session_file", unexpected_parse)
+    assert openclaw.collect_session_corpus(_dirs(tmp_path)) is corpus
+    assert openclaw.get_session_usage(_dirs(tmp_path)) == usage
+    monkeypatch.setenv("TOKDASH_USAGE_DB", "0")
+    live = openclaw.get_session_usage(_dirs(tmp_path))
+    assert live["total_tokens"] == usage["total_tokens"]
+    assert live["total_messages"] == usage["total_messages"]
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n", "\r"])
+def test_zstd_frames_can_split_utf8_and_json_lines(tmp_path, newline):
+    a = _sessions_dir(tmp_path, "alpha")
+    rows = [_hdr("unicode"), _user("u1", T_TODAY, "你好 café"), _asst("a1", T_TODAY, inp=10, out=1)]
+    # Match text-mode universal newlines, including a final unterminated line.
+    payload = newline.join(json.dumps(row, ensure_ascii=False) for row in rows).encode("utf-8")
+    split = payload.index("你".encode("utf-8")) + 1
+    compressor = ZstdCompressor(write_content_size=False)
+    archive = a / "frames.jsonl.deleted.1.zst"
+    archive.write_bytes(compressor.compress(payload[:split]) + compressor.compress(payload[split:]))
+    assert openclaw.parse_session_file(str(archive), unavailable=openclaw._OpenClawReadUnavailable) == rows
+    corpus = openclaw.collect_session_corpus(_dirs(tmp_path))
+    assert not corpus.failed
+    assert corpus.meta[str(archive)]["preview"] == "你好 café"
+
+
+def test_zstd_large_unicode_line_spans_input_chunks(tmp_path):
+    a = _sessions_dir(tmp_path, "alpha")
+    text = "".join(random.Random(219).choices("abcdef界🙂 ", k=100_000))
+    rows = [_hdr("large"), _user("u1", T_TODAY, text), _asst("a1", T_TODAY, inp=10, out=1)]
+    archive = _write_zstd_jsonl(a / "large.jsonl.zst", rows)
+    assert archive.stat().st_size > 16 * 1024
+    assert openclaw.parse_session_file(str(archive), unavailable=openclaw._OpenClawReadUnavailable) == rows
+
+
+def test_zstd_valid_empty_frame_is_an_empty_transcript(tmp_path):
+    a = _sessions_dir(tmp_path, "alpha")
+    archive = a / "empty.jsonl.zst"
+    archive.write_bytes(ZstdCompressor().compress(b""))
+    corpus = openclaw.collect_session_corpus(_dirs(tmp_path))
+    assert corpus.rows == [] and not corpus.failed
+
+
+def test_zstd_high_compression_bounds_decoded_chunks(tmp_path):
+    a = _sessions_dir(tmp_path, "alpha")
+    line = json.dumps(_asst("repeat", T_TODAY, inp=10, out=1)) + "\n"
+    payload = (line * 20_000).encode("utf-8")
+    archive = a / "compressed.jsonl.zst"
+    archive.write_bytes(ZstdCompressor().compress(payload))
+    assert archive.stat().st_size < 16 * 1024
+    sizes = [len(chunk) for chunk in openclaw._iter_zstd_session_chunks(str(archive))]
+    assert sum(sizes) == len(payload)
+    assert max(sizes) <= BLOCKSIZE_MAX
+    assert len(openclaw.parse_session_file(str(archive))) == 20_000
+
+
+@pytest.mark.parametrize("block_type", [0, 1])
+def test_zstd_raw_and_rle_blocks(tmp_path, block_type):
+    a = _sessions_dir(tmp_path, "alpha")
+    payload = b' {"type":"session","id":"raw"}\n' if block_type == 0 else b" " * 200
+    header = FRAME_HEADER + b"\x20" + bytes([len(payload)])
+    block_header = ((len(payload) << 3) | (block_type << 1) | 1).to_bytes(3, "little")
+    archive = a / "blocks.jsonl.zst"
+    archive.write_bytes(header + block_header + (payload if block_type == 0 else b" "))
+    assert b"".join(openclaw._iter_zstd_session_chunks(str(archive))) == payload
+    assert openclaw.parse_session_file(str(archive)) == ([{"type": "session", "id": "raw"}] if block_type == 0 else [])
+
+
+@pytest.mark.parametrize("tag", [0x184D2A50, 0x184D2A5F])
+def test_zstd_skippable_metadata_and_truncation(tmp_path, tag):
+    a = _sessions_dir(tmp_path, "alpha")
+    rows = [_hdr("metadata"), _asst("a1", T_TODAY, inp=10, out=1)]
+    archive = _write_zstd_jsonl(a / "metadata.jsonl.zst", rows)
+    frame = archive.read_bytes()
+    metadata = b"ignored metadata" * 10_000
+    skip = tag.to_bytes(4, "little") + len(metadata).to_bytes(4, "little") + metadata
+    archive.write_bytes(skip + frame + skip)
+    assert openclaw.parse_session_file(str(archive), unavailable=openclaw._OpenClawReadUnavailable) == rows
+    archive.write_bytes(frame + skip[:-1])
+    with pytest.raises(openclaw._OpenClawReadUnavailable):
+        openclaw.parse_session_file(str(archive), unavailable=openclaw._OpenClawReadUnavailable)
+
+
+@pytest.mark.parametrize("block", [(1 << 3) | 7, ((BLOCKSIZE_MAX + 1) << 3) | 1])
+def test_zstd_invalid_block_header_is_unavailable(tmp_path, block):
+    a = _sessions_dir(tmp_path, "alpha")
+    archive = a / "invalid.jsonl.zst"
+    archive.write_bytes(FRAME_HEADER + b"\x20\x00" + block.to_bytes(3, "little"))
+    with pytest.raises(openclaw._OpenClawReadUnavailable):
+        openclaw.parse_session_file(str(archive), unavailable=openclaw._OpenClawReadUnavailable)
+
+
+@pytest.mark.parametrize("damage", ["empty-file", "invalid-frame", "truncated-frame", "trailing-garbage", "invalid-utf8"])
+def test_zstd_failure_preserves_store_and_recovers(monkeypatch, tmp_path, caplog, damage):
+    _pricing(monkeypatch, tmp_path)
+    a = _sessions_dir(tmp_path, "alpha")
+    _write_jsonl(a / "live.jsonl", [_hdr("live"), _asst("l1", T_TODAY, inp=100, out=10)])
+    archive = _write_zstd_jsonl(a / "archive.jsonl.deleted.1.zst", [
+        _hdr("archived"), _asst("a1", T_TODAY, inp=200, out=20),
+    ])
+    healthy = archive.read_bytes()
+    store = openclaw._sync_openclaw_store(_dirs(tmp_path), PricingDatabase())
+    before = _stored(store)
+    before_signature = store.source_signature("openclaw")
+    assert before[0] == 2
+
+    # A complete first frame must not be committed when the next frame is short.
+    invalid = {
+        "empty-file": b"",
+        "invalid-frame": b"not a zstd frame",
+        "truncated-frame": healthy + healthy[:-1],
+        "trailing-garbage": healthy + b"invalid next frame",
+        "invalid-utf8": healthy + ZstdCompressor().compress(b"\xff\n"),
+    }[damage]
+    archive.write_bytes(invalid)
+    _write_jsonl(a / "new.jsonl", [_hdr("new"), _asst("n1", T_TODAY2, inp=300, out=30)])
+    assert openclaw.parse_session_file(str(archive)) == []
+    with pytest.raises(openclaw._OpenClawReadUnavailable):
+        openclaw.parse_session_file(str(archive), unavailable=openclaw._OpenClawReadUnavailable)
+    corpus = openclaw.collect_session_corpus(_dirs(tmp_path))
+    assert corpus.failed == frozenset({str(archive)})
+    assert openclaw.corpus_for_signature(corpus.signature) is None
+    with caplog.at_level(logging.WARNING, logger="tokdash.sources.openclaw"):
+        declined = openclaw._sync_openclaw_store(_dirs(tmp_path), PricingDatabase())
+    assert _stored(declined) == before
+    assert declined.source_signature("openclaw") == before_signature
+    assert "sync declined" in caplog.text
+
+    archive.write_bytes(healthy)
+    repaired = openclaw._sync_openclaw_store(_dirs(tmp_path), PricingDatabase())
+    assert _stored(repaired)[0] == 3
+    assert repaired.source_signature("openclaw") != before_signature
+    panel = get_sessions_data("openclaw", "all")
+    assert panel["summary"]["tokens"] == openclaw.get_session_usage(_dirs(tmp_path))["total_tokens"]
+
+
+def test_compressed_sidecars_and_snapshots_are_not_transcripts(tmp_path):
+    a = _sessions_dir(tmp_path, "alpha")
+    for name in ["s.trajectory.jsonl.zst", "s.acp-stream.jsonl.zst", "s.checkpoint.1.jsonl.zst",
+                 "s.jsonl.bak-1.zst", "s.jsonl.lock.zst"]:
+        _write_zstd_jsonl(a / name, [_hdr("sidecar"), _asst(name, T_TODAY, inp=100, out=10)])
+    assert openclaw._session_files(_dirs(tmp_path)) == []
 
 
 def test_two_read_variants(monkeypatch, tmp_path):

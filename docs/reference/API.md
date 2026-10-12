@@ -482,7 +482,12 @@ token usage elsewhere in the range. A missing bucket at or before `timestamp`
 means zero recorded usage; a future bucket is unknown. Hourly responses also provide `keys` listing
 the clock hours that exist on that date. Repeated hours are combined; an hour
 skipped by a clock change is unavailable. Cache rate is `cache / (input + cache)`;
-no prompt input is unavailable. Monthly buckets contain only the selected portion
+no prompt input is unavailable. The Overview's hourly cache-rate sparkline draws
+smooth dashed bridges across one or two known zero-prompt hours between measured
+anchors. This only changes the drawing: those hours remain unavailable, measured
+counts and the token-weighted headline stay unchanged, and unknown coverage,
+skipped clock hours, longer gaps and future hours remain blank.
+Monthly buckets contain only the selected portion
 of each local calendar month; a 366-day window has at most 13 buckets. The
 current month is partial, and leap days and clock changes retain real elapsed
 time for agent durations.

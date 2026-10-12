@@ -6,9 +6,10 @@ import logging
 import os
 import re
 from collections import defaultdict
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -83,10 +84,100 @@ class _OpenClawReadUnavailable(Exception):
     """
 
 
+def _iter_zstd_session_chunks(filepath: str) -> Iterator[bytes]:
+    """Decode one bounded zstd block at a time and require complete frames.
+
+    stream_reader silently accepts truncated EOF, while feeding arbitrary input
+    chunks to decompressobj can expand a tiny archive into an entire transcript
+    at once. Zstd blocks bound decoded output to 128 KiB; libzstd still validates
+    and decodes their contents. Framing reference:
+    https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md#blocks
+    """
+    from zstandard import BLOCKSIZE_MAX, FRAME_HEADER, ZstdDecompressor, frame_header_size, get_frame_parameters
+
+    decompressor = ZstdDecompressor()
+    seen_frame = False
+    with open(filepath, "rb") as archive:
+        def read_exact(size: int) -> bytes:
+            data = archive.read(size)
+            if len(data) != size:
+                raise ValueError("Incomplete zstd session archive")
+            return data
+
+        while magic := archive.read(4):
+            if len(magic) != 4:
+                raise ValueError("Incomplete zstd session archive")
+            magic_number = int.from_bytes(magic, "little")
+            if 0x184D2A50 <= magic_number <= 0x184D2A5F:
+                # Skippable metadata can also be large; consume it in bounded
+                # reads instead of seeking past a possibly truncated payload.
+                remaining = int.from_bytes(read_exact(4), "little")
+                while remaining:
+                    size = min(remaining, BLOCKSIZE_MAX)
+                    read_exact(size)
+                    remaining -= size
+            else:
+                if magic != FRAME_HEADER:
+                    raise ValueError("Invalid zstd session frame")
+                header = magic + read_exact(2)
+                header += read_exact(frame_header_size(header) - len(header))
+                parameters = get_frame_parameters(header)
+                decoder = decompressor.decompressobj()
+                decoder.decompress(header)
+                while True:
+                    block_header = read_exact(3)
+                    block = int.from_bytes(block_header, "little")
+                    block_type = (block >> 1) & 3
+                    block_size = block >> 3
+                    if block_type == 3 or block_size > BLOCKSIZE_MAX:
+                        raise ValueError("Invalid zstd session block")
+                    payload_size = 1 if block_type == 1 else block_size
+                    decoded = decoder.decompress(block_header + read_exact(payload_size))
+                    if decoded:
+                        yield decoded
+                    if block & 1:
+                        break
+                if parameters.has_checksum:
+                    decoded = decoder.decompress(read_exact(4))
+                    if decoded:
+                        yield decoded
+                if not decoder.eof:
+                    raise ValueError("Incomplete zstd session archive")
+            seen_frame = True
+        if not seen_frame:
+            raise ValueError("Incomplete zstd session archive")
+
+
+def _iter_zstd_session_lines(filepath: str) -> Iterator[str]:
+    """Universal-newline UTF-8 lines, including splits across blocks/frames."""
+    from codecs import getincrementaldecoder
+    from io import IncrementalNewlineDecoder
+
+    text_decoder = IncrementalNewlineDecoder(getincrementaldecoder("utf-8")(), translate=True)
+    fragments: list[str] = []
+    with closing(_iter_zstd_session_chunks(filepath)) as chunks:
+        for chunk in chunks:
+            lines = text_decoder.decode(chunk).split("\n")
+            if len(lines) > 1:
+                if fragments:
+                    lines[0] = "".join(fragments) + lines[0]
+                    fragments.clear()
+                yield from lines[:-1]
+            if lines[-1]:
+                # Join a long JSON line once, rather than copying its growing
+                # prefix every time another compressed input block arrives.
+                fragments.append(lines[-1])
+    tail = text_decoder.decode(b"", final=True)
+    if tail:
+        fragments.append(tail)
+    if fragments:
+        yield "".join(fragments)
+
+
 def parse_session_file(
     filepath: str, unavailable: Optional[type] = None
 ) -> List[Dict[str, Any]]:
-    """Parse a single OpenClaw session JSONL file into a list of entries.
+    """Parse a plain or zstd-compressed OpenClaw JSONL transcript.
 
     Called with one argument this behaves exactly as always: any open or read
     failure yields ``[]`` (not the entries parsed before the failure — the
@@ -101,7 +192,11 @@ def parse_session_file(
     """
     entries: List[Dict[str, Any]] = []
     try:
-        with open(filepath, "r", encoding="utf-8") as f:
+        with (
+            closing(_iter_zstd_session_lines(filepath))
+            if os.fspath(filepath).endswith(".zst")
+            else open(filepath, "r", encoding="utf-8")
+        ) as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -257,8 +352,11 @@ def _is_session_transcript(path: str) -> bool:
       - ``*.lock``
     Keeps the live ``<session>.jsonl`` plus the disjoint ``*.jsonl.reset.*`` /
     ``*.jsonl.deleted.*`` archives (renamed, never coexisting with their live file).
+    The same exclusions apply to zstd-compressed transcripts and sidecars.
     """
     base = os.path.basename(path)
+    if base.endswith(".zst"):
+        base = base[:-4]
     if base.endswith(".lock"):
         return False
     if base.endswith(".trajectory.jsonl") or base.endswith(".acp-stream.jsonl"):
@@ -565,6 +663,8 @@ def _collect_normalized_entries(
 #       partial signature was then recorded as current.
 #   2 - completeness rule: an incomplete corpus is never written to the store
 #       (and never cached); anything stored under 1 is reparsed.
+# Archive decoding needs no bump: .zst files already enter the signature and
+# could not be published under 2. Previously verified plain corpora stay valid.
 OPENCLAW_PARSER_VERSION = 2
 
 

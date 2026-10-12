@@ -3582,7 +3582,7 @@
             <div id="avgCacheHitRate" class="text-3xl sm:text-4xl font-extrabold mt-1.5 font-mono text-cyan-400">-</div>
             <div id="avgCacheHitRateExact" class="overview-token-exact-tooltip" role="tooltip" hidden>-</div>
           </div>
-          <svg id="sparklineCacheRate" class="kpi-sparkline text-cyan-400/60" viewBox="0 0 100 35" preserveAspectRatio="none" fill="none"><defs><linearGradient id="kpiG5" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0.0"/></linearGradient></defs><path id="sparklineCacheRatePath" d="" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path id="sparklineCacheRateArea" d="" fill="url(#kpiG5)"/></svg>
+          <svg id="sparklineCacheRate" class="kpi-sparkline text-cyan-400/60" viewBox="0 0 100 35" preserveAspectRatio="none" fill="none"><defs><linearGradient id="kpiG5" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0.0"/></linearGradient></defs><path id="sparklineCacheRatePath" d="" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path id="sparklineCacheRateArea" d="" fill="url(#kpiG5)"/><path id="sparklineCacheRateBridgeArea" d="" fill="url(#kpiG5)" opacity="0.4"/><path id="sparklineCacheRateBridgePath" d="" stroke="currentColor" stroke-width="1.35" stroke-dasharray="1.5 1.5" stroke-linecap="round"/></svg>
         </div>
         <div class="surface p-5">
           <div class="flex items-center justify-between">
@@ -7892,6 +7892,7 @@
         cacheHitRateHint: 'Share of prompt input served from cache (cache reads ÷ all prompt input). Cache writes count as misses; output excluded. Sources without cache data show n/a.',
         sparklineResolutionHourly: 'Hourly recorded values in local time, joined by a smoothed line.',
         sparklineMeasuredHours: '{n} of {total} hours measured.',
+        sparklineIdleHourBridges: 'Dashed segments bridge {n} idle hours; these hours have no measured hit rate.',
         sparklineResolutionDaily: 'Daily recorded values, joined by a smoothed line.',
         sparklineMeasuredDays: '{n} of {total} days measured.',
         sparklineResolutionMonthly: 'Monthly recorded values, joined by a smoothed line.',
@@ -8668,6 +8669,7 @@
         cacheHitRateHint: '提示词输入中来自缓存的比例（缓存读取 ÷ 全部提示词输入）。缓存写入计为未命中；不含输出。无缓存数据的来源显示“无”。',
         sparklineResolutionHourly: '本地时间的每小时记录值，测量点之间以平滑线连接。',
         sparklineMeasuredHours: '已测量 {total} 小时中的 {n} 小时。',
+        sparklineIdleHourBridges: '虚线连接 {n} 个无提示输入的小时；这些小时没有实测缓存命中率。',
         sparklineResolutionDaily: '每日记录值，测量点之间以平滑线连接。',
         sparklineMeasuredDays: '已测量 {total} 天中的 {n} 天。',
         sparklineResolutionMonthly: '每月记录值，以平滑曲线连接。',
@@ -9445,6 +9447,7 @@
         cacheHitRateHint: 'プロンプト入力のうちキャッシュから供給された割合（キャッシュ読み取り ÷ プロンプト入力全体）。キャッシュ書き込みはミスにカウントされます。出力は除外します。キャッシュデータのないソースは N/A と表示されます。',
         sparklineResolutionHourly: '現地時間の時間ごとの記録値を補間線で結んでいます。',
         sparklineMeasuredHours: '{total}時間のうち{n}時間を測定。',
+        sparklineIdleHourBridges: '破線は入力のない{n}時間を結びます。これらの時間に実測ヒット率はありません。',
         sparklineResolutionDaily: '日単位の記録値を補間線で結んでいます。',
         sparklineMeasuredDays: '{total}日のうち{n}日を測定。',
         sparklineResolutionMonthly: '月別の記録値を滑らかな線でつなぎます。',
@@ -10222,6 +10225,7 @@
         cacheHitRateHint: '프롬프트 입력 중 캐시로 처리된 비율 (캐시 읽기 ÷ 프롬프트 입력 전체). 캐시 쓰기는 미스로 계산되고, 출력은 제외됩니다. 캐시 데이터가 없는 소스는 N/A로 표시됩니다.',
         sparklineResolutionHourly: '현지 시간의 시간별 기록 값을 보간선으로 연결했습니다.',
         sparklineMeasuredHours: '{total}시간 중 {n}시간 측정됨.',
+        sparklineIdleHourBridges: '점선은 입력이 없는 {n}시간을 연결합니다. 이 시간에는 측정된 적중률이 없습니다.',
         sparklineResolutionDaily: '일자별 기록 값이며 보간선으로 연결했습니다.',
         sparklineMeasuredDays: '{total}일 중 {n}일 측정됨.',
         sparklineResolutionMonthly: '월별 기록값을 부드러운 선으로 연결합니다.',
@@ -10999,6 +11003,7 @@
         cacheHitRateHint: 'Proporción de la entrada del prompt servida desde la caché (lecturas de caché ÷ toda la entrada del prompt). Las escrituras de caché cuentan como fallas; la salida queda excluida. Los orígenes sin datos de caché muestran n/d.',
         sparklineResolutionHourly: 'Valores registrados por hora local, unidos con una línea suavizada.',
         sparklineMeasuredHours: '{n} de {total} horas medidas.',
+        sparklineIdleHourBridges: 'Los segmentos discontinuos conectan {n} horas sin entrada; esas horas no tienen una tasa de aciertos medida.',
         sparklineResolutionDaily: 'Valores diarios registrados unidos con una línea suavizada.',
         sparklineMeasuredDays: '{n} de {total} días medidos.',
         sparklineResolutionMonthly: 'Valores mensuales registrados, unidos por una línea suavizada.',
@@ -11776,6 +11781,7 @@
         cacheHitRateHint: 'Proporção da entrada do prompt atendida pelo cache (leituras de cache ÷ toda a entrada do prompt). Escritas de cache contam como falhas; a saída fica excluída. Origens sem dados de cache mostram n/d.',
         sparklineResolutionHourly: 'Valores registrados por hora local, unidos por uma linha suavizada.',
         sparklineMeasuredHours: '{n} de {total} horas medidas.',
+        sparklineIdleHourBridges: 'Os segmentos tracejados ligam {n} horas sem entrada; essas horas não têm uma taxa de acertos medida.',
         sparklineResolutionDaily: 'Valores diarios registrados unidos por uma linha suavizada.',
         sparklineMeasuredDays: '{n} de {total} dias medidos.',
         sparklineResolutionMonthly: 'Valores mensais registrados, unidos por uma linha suavizada.',
@@ -14768,6 +14774,7 @@
     // Bucket series travel with the headline that produced them. Rendering adds
     // no requests or timers; older servers can still use their loaded Stats rows.
     const SPARKLINE_WEEK_LENGTH = 7;
+    const SPARKLINE_CACHE_MAX_IDLE_HOURS = 2;
     const SPARKLINE_VIEW = { width: 100, top: 4, baseline: 34 };
     const SPARKLINE_TOKEN_FIELDS = ['input', 'output', 'cacheRead', 'cacheWrite', 'reasoning'];
     // Money prints two decimals and the cache card's exact readout prints two decimals
@@ -15083,12 +15090,13 @@
     // segment's control points clamped to that segment's own value range. The result
     // keeps the smooth look the cards have today while never crossing a neighbour and
     // never leaving the zero baseline.
-    function sparklineSegmentPath(run) {
+    function sparklineSegmentPath(run, splitSegments = false) {
       const round = (value) => Number(value.toFixed(3));
       const count = run.length;
       const slopes = new Array(count).fill(0);
       const h = [];
       const delta = [];
+      const segments = splitSegments ? [] : null;
       for (let i = 0; i < count - 1; i += 1) {
         h[i] = run[i + 1].x - run[i].x;
         delta[i] = h[i] > 0 ? (run[i + 1].y - run[i].y) / h[i] : 0;
@@ -15120,15 +15128,25 @@
         const low = Math.min(a.y, b.y);
         const high = Math.max(a.y, b.y);
         const clamp = (value) => Math.max(low, Math.min(high, value));
-        line += ` C${round(a.x + dx)} ${round(clamp(a.y + slopes[i] * dx))}`
+        const curve = ` C${round(a.x + dx)} ${round(clamp(a.y + slopes[i] * dx))}`
           + ` ${round(b.x - dx)} ${round(clamp(b.y - slopes[i + 1] * dx))}`
           + ` ${round(b.x)} ${round(b.y)}`;
+        line += curve;
+        if (segments) {
+          const segmentLine = `M${round(a.x)} ${round(a.y)}${curve}`;
+          segments.push({
+            from: a.index, to: b.index, line: segmentLine,
+            area: a.value > 0 || b.value > 0
+              ? `${segmentLine} L${round(b.x)} ${SPARKLINE_VIEW.baseline}`
+                + ` L${round(a.x)} ${SPARKLINE_VIEW.baseline} Z` : '',
+          });
+        }
       }
       const area = count > 1 && run.some((point) => point.value > 0)
         ? `${line} L${round(run[count - 1].x)} ${round(SPARKLINE_VIEW.baseline)}`
           + ` L${round(run[0].x)} ${round(SPARKLINE_VIEW.baseline)} Z`
         : '';
-      return { line, area };
+      return segments ? { line, area, segments } : { line, area };
     }
 
     function sparklineShape(values, unit) {
@@ -15162,6 +15180,63 @@
         line: built.map((segment) => segment.line).filter(Boolean).join(' '),
         area: built.map((segment) => segment.area).filter(Boolean).join(' '),
       };
+    }
+
+    function sparklineCacheShape(series, granularity) {
+      const values = series.values || [];
+      const base = { ...sparklineShape(values, 'ratio'), bridgeLine: '', bridgeArea: '', bridgedPoints: 0 };
+      // Only known zero-prompt hours can be bridged. Unknown coverage, skipped
+      // clock hours and future hours stay blank; rates and measured counts stay intact.
+      if (granularity !== 'hour' || !Array.isArray(series.idle) || series.idle.length !== values.length) return base;
+      const span = values.length > 1 ? SPARKLINE_VIEW.width / (values.length - 1) : 0;
+      const groups = [];
+      let run = [];
+      const canConnect = (from, to) => {
+        if (to - from - 1 > SPARKLINE_CACHE_MAX_IDLE_HOURS) return false;
+        for (let i = from + 1; i < to; i += 1) {
+          if (values[i] !== null || series.idle[i] !== true) return false;
+        }
+        return true;
+      };
+      values.forEach((value, index) => {
+        if (!Number.isFinite(value) || value < 0 || value > 1) return;
+        if (run.length && !canConnect(run[run.length - 1].index, index)) {
+          groups.push(run);
+          run = [];
+        }
+        run.push({ index, x: index * span,
+          y: SPARKLINE_VIEW.baseline - value * (SPARKLINE_VIEW.baseline - SPARKLINE_VIEW.top), value });
+      });
+      if (run.length) groups.push(run);
+      const measured = [];
+      const measuredAreas = [];
+      const bridges = [];
+      const bridgeAreas = [];
+      let bridgedPoints = 0;
+      for (const group of groups) {
+        const shape = sparklineSegmentPath(group, true);
+        group.forEach((anchor, index) => {
+          const before = group[index - 1];
+          const after = group[index + 1];
+          if ((!before || anchor.index - before.index > 1) && (!after || after.index - anchor.index > 1)) {
+            measured.push(sparklineSegmentPath([anchor]).line);
+          }
+        });
+        for (const segment of shape.segments) {
+          const gap = segment.to - segment.from - 1;
+          if (gap > 0) {
+            bridges.push(segment.line);
+            bridgeAreas.push(segment.area);
+            bridgedPoints += gap;
+          } else {
+            measured.push(segment.line);
+            measuredAreas.push(segment.area);
+          }
+        }
+      }
+      if (!bridgedPoints) return base;
+      return { line: measured.join(' '), area: measuredAreas.filter(Boolean).join(' '),
+        bridgeLine: bridges.join(' '), bridgeArea: bridgeAreas.filter(Boolean).join(' '), bridgedPoints };
     }
 
     // False only when the payload states a window that is not exactly these dates;
@@ -15550,10 +15625,12 @@
           || Math.abs(num / den - expected) > SPARKLINE_RATE_TOLERANCE : expected !== null)) cacheReason = 'mismatch';
         return rows;
       });
+      const idle = window.dates.map(() => false);
       const cacheValues = window.dates.map((_, i) => {
         if (!covered[i]) return null;
         const num = sparklineSum(parts.map((rows) => rows[i].numerator));
         const input = sparklineSum(parts.map((rows) => rows[i].input));
+        idle[i] = num !== null && input !== null && num + input === 0;
         return num !== null && input !== null && num + input > 0 ? num / (num + input) : null;
       });
       const numerator = sparklineMeasuredSum(parts.flatMap((rows) => rows.map((row) => row ? row.numerator : null)));
@@ -15562,6 +15639,7 @@
       if (!cacheReason && (numerator + input <= 0 || headline === null
         || Math.abs(numerator / (numerator + input) - headline) > SPARKLINE_RATE_TOLERANCE)) cacheReason = 'components';
       collect('cache_hit_rate', cacheValues, cacheReason);
+      if (!cacheReason) metrics.cache_hit_rate.idle = idle;
 
       metrics.agent_time = absent('noBuckets');
       const active = typeof overviewActiveTimeState !== 'undefined' ? overviewActiveTimeState.data : null;
@@ -15611,11 +15689,17 @@
         const svg = document.getElementById(card.svg);
         if (!svg) return;
         const series = curves.metrics[card.id] || { values: [], reason: 'noDaily', points: 0 };
-        const shape = sparklineShape(series.values, card.unit);
+        const shape = card.id === 'cache_hit_rate'
+          ? sparklineCacheShape(series, curves.granularity) : sparklineShape(series.values, card.unit);
         const lineEl = document.getElementById(`${card.svg}Path`);
         const areaEl = document.getElementById(`${card.svg}Area`);
         sparklineSetAttribute(lineEl, 'd', shape.line);
         sparklineSetAttribute(areaEl, 'd', shape.area);
+        if (card.id === 'cache_hit_rate') {
+          sparklineSetAttribute(document.getElementById(`${card.svg}BridgePath`), 'd', shape.bridgeLine);
+          sparklineSetAttribute(document.getElementById(`${card.svg}BridgeArea`), 'd', shape.bridgeArea);
+          sparklineSetAttribute(svg, 'data-bridged-points', shape.bridgedPoints);
+        }
         const drawn = Boolean(shape.line) && series.points > 0;
         sparklineSetAttribute(svg, 'data-granularity', curves.granularity);
         sparklineSetAttribute(svg, 'data-metric', card.id);
@@ -15627,6 +15711,7 @@
           const measuredKey = { hour: 'sparklineMeasuredHours', day: 'sparklineMeasuredDays', month: 'sparklineMeasuredMonths' }[curves.granularity];
           lines.push(t(resolutionKey));
           lines.push(t(measuredKey, { n: series.points, total: series.total || SPARKLINE_WEEK_LENGTH }));
+          if (shape.bridgedPoints) lines.push(t('sparklineIdleHourBridges', { n: shape.bridgedPoints }));
           // Today's anchor is a real value over a day that has not finished yet.
           const todayKey = formatDateKey(options.today || new Date());
           if (curves.dates && (curves.granularity === 'month'

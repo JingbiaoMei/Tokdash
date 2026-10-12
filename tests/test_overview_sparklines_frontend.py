@@ -1765,3 +1765,134 @@ process.stdout.write(JSON.stringify({metrics:metricView(result.curves),fetches:f
     assert result["metrics"]["messages"]["points"] == points
     assert result["metrics"]["messages"]["values"] == ([0, 4, 7] + [0] * 21 if granularity == "hour" else [4, 0, 7] + [0] * 9)
     assert result["fetches"] == 0
+
+
+IDLE_BRIDGE_CASES = r"""
+const rates = [0.97, 0.965, 0.973, 0.943, null, null, 0.89, 0.496, 0.906, null, 0.978, 0.1];
+function idlePayload(skip = []) {
+  const buckets = rates.flatMap((rate, hour) => rate === null || skip.includes(hour) ? [] : [{
+    key: `2026-09-27T${String(hour).padStart(2, '0')}`, input: 1000 - Math.round(rate * 1000),
+    cache: Math.round(rate * 1000), tokens: 1000, cost: 0, messages: 1, models: {'model-a':1000},
+  }]);
+  const payload = usagePayload({range:{from:'2026-09-27',to:'2026-09-27'},
+    tokens:buckets.length * 1000, messages:buckets.length, cost:0,
+    cache:buckets.reduce((sum, row) => sum + row.cache, 0) / (buckets.length * 1000),
+    topModels:[{name:'model-a',tokens:buckets.length * 1000}], timestamp:'2026-09-27T11:26:00'});
+  payload.sparkline = {granularity:'hour',buckets};
+  return payload;
+}
+function bridgeView(payload) {
+  const original = JSON.stringify(payload);
+  const {curves} = scenario([{serverId:'local',usage:payload,stats:{}}],payload,
+    {start:'2026-09-27',end:'2026-09-27'});
+  renderOverviewSparklines(payload,{today:parseDateKey('2026-09-27')});
+  const series = curves.metrics.cache_hit_rate;
+  return {series,shape:sparklineCacheShape(series,curves.granularity),unchanged:JSON.stringify(payload)===original,
+    bridge:node('sparklineCacheRateBridgePath').attrs.d,
+    bridgeArea:node('sparklineCacheRateBridgeArea').attrs.d,
+    points:node('sparklineCacheRate').attrs['data-points'],
+    bridged:node('sparklineCacheRate').attrs['data-bridged-points'],
+    label:node('sparklineCacheRate').attrs['aria-label']};
+}
+const out = {};
+const payload = idlePayload();
+out.idle = bridgeView(payload);
+out.raw = sparklineShape(out.idle.series.values,'ratio');
+out.daily = sparklineCacheShape(out.idle.series,'day');
+out.legacy = sparklineCacheShape({values:out.idle.series.values},'hour');
+out.long = bridgeView(idlePayload([6,7]));
+out.leading = bridgeView(idlePayload([0]));
+out.pair = bridgeView(idlePayload([0,1,2,7,8,10,11]));
+const skipped = idlePayload();
+skipped.sparkline.keys = Array.from({length:24},(_,i)=>`2026-09-27T${String(i).padStart(2,'0')}`).filter(key=>key!=='2026-09-27T05');
+out.skipped = bridgeView(skipped);
+out.allIdle = sparklineCacheShape({values:[null,null,null],idle:[true,true,true]},'hour');
+out.unknown = sparklineCacheShape({values:[0.9,null,0.8],idle:[false,false,false]},'hour');
+out.zero = sparklineCacheShape({values:[0,null,1],idle:[false,true,false]},'hour');
+// An output-only bucket has zero prompt input, so it can be bridged without
+// pretending its rate was zero. Its other metrics still describe real usage.
+const outputOnly = idlePayload();
+outputOnly.sparkline.buckets.push({key:'2026-09-27T09',input:0,cache:0,tokens:50,cost:0,messages:1,models:{'model-a':50}});
+outputOnly.total_tokens += 50;
+outputOnly.total_messages += 1;
+outputOnly.top_models[0].tokens += 50;
+outputOnly.combined_models[0].tokens = outputOnly.top_models[0].tokens;
+out.outputOnly = bridgeView(outputOnly);
+// Unknown components must clear any bridge drawn for the preceding response.
+const malformed = idlePayload();
+malformed.sparkline.buckets[0].input = null;
+out.malformed = bridgeView(malformed);
+bridgeView(payload);
+let writes = 0;
+for (const el of nodes.values()) {
+  const original = el.setAttribute;
+  el.setAttribute = function(...args) { writes++; return original.apply(this,args); };
+}
+renderOverviewSparklines(payload,{today:parseDateKey('2026-09-27')});
+out.repeatWrites = writes;
+currentStartDate = parseDateKey('2026-09-26');
+renderOverviewSparklines(payload);
+out.cleared = {bridge:node('sparklineCacheRateBridgePath').attrs.d,
+  area:node('sparklineCacheRateBridgeArea').attrs.d,
+  count:node('sparklineCacheRate').attrs['data-bridged-points']};
+out.fetches = fetchCalls;
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@pytest.fixture(scope="module")
+def idle_bridge_results(tmp_path_factory):
+    return _run_script(tmp_path_factory.mktemp("idle-bridges"),
+                       _harness_script(_source(), IDLE_BRIDGE_CASES), "idle-bridges")
+
+
+def test_hourly_idle_bridges_preserve_measurements_and_headline(idle_bridge_results):
+    case = idle_bridge_results["idle"]
+    assert case["unchanged"]
+    assert case["series"]["values"] == [0.97, 0.965, 0.973, 0.943, None, None, 0.89, 0.496, 0.906, None, 0.978, 0.1] + [None] * 12
+    assert case["series"]["idle"] == [False] * 4 + [True, True, False, False, False, True] + [False] * 14
+    assert case["points"] == "9"
+    assert case["bridged"] == "3"
+    assert case["bridge"].count("M") == 2
+    assert case["bridgeArea"]
+    assert "9 of 24 hours measured" in case["label"]
+    assert "Dashed segments bridge 3 idle hours" in case["label"]
+    assert idle_bridge_results["outputOnly"]["bridged"] == "3"
+    assert idle_bridge_results["pair"]["points"] == "2"
+    assert idle_bridge_results["pair"]["bridged"] == "2"
+    assert "2 of 24 hours measured" in idle_bridge_results["pair"]["label"]
+    assert idle_bridge_results["pair"]["shape"]["line"].count("L") == 2
+    assert idle_bridge_results["fetches"] == 0
+
+
+def test_idle_bridges_reject_unknown_and_long_gaps(idle_bridge_results):
+    cases = idle_bridge_results
+    assert cases["long"]["bridged"] == "1"  # Four idle hours remain unconnected.
+    assert cases["leading"]["bridged"] == "3"  # Leading idle time is not extrapolated.
+    assert cases["skipped"]["bridged"] == "1"  # A skipped clock hour is unknown.
+    for name in ("allIdle", "unknown", "daily", "legacy"):
+        assert cases[name]["bridgeLine"] == ""
+        assert cases[name]["bridgedPoints"] == 0
+    assert cases["daily"]["line"] == cases["raw"]["line"]
+    assert cases["legacy"]["line"] == cases["raw"]["line"]
+    assert cases["malformed"]["bridge"] == ""
+    assert cases["malformed"]["bridgeArea"] == ""
+    assert cases["malformed"]["bridged"] == "0"
+
+
+def test_idle_bridge_cubics_stay_between_their_recorded_anchors(idle_bridge_results):
+    for shape in (idle_bridge_results["idle"]["shape"], idle_bridge_results["zero"]):
+        assert shape["bridgeLine"]
+        for segment in shape["bridgeLine"].split("M")[1:]:
+            numbers = list(map(float, re.findall(r"-?\d+(?:\.\d+)?", segment)))
+            start_x, start_y, x1, y1, x2, y2, end_x, end_y = numbers
+            assert 0 <= start_x < x1 < x2 < end_x <= 100
+            low, high = sorted((start_y, end_y))
+            assert 4 <= low <= high <= 34
+            assert low <= y1 <= high
+            assert low <= y2 <= high
+
+
+def test_idle_bridges_clear_with_the_range_and_avoid_redundant_paints(idle_bridge_results):
+    assert idle_bridge_results["repeatWrites"] == 0
+    assert idle_bridge_results["cleared"] == {"bridge": "", "area": "", "count": "0"}

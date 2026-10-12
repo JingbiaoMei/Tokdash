@@ -53,7 +53,9 @@ ordinary parser bills; OpenCode, KiloCode and mimo are read from their databases
 Claude Code's reader groups a request's per-block assistant entries by message id
 and times it from the first token when a leading thinking block records its
 duration, otherwise from the sending user entry up the `parentUuid` chain, keeping
-only a per-transcript uuid map.
+only a per-transcript uuid map. Codex's reader times a response from its marker's
+model-item clocks, and falls back to the rollout's line stamps when the marker has
+nothing to time: a response that ends in a tool call, or a log before 0.153.
 
 Model and session rates divide summed measured tokens by summed matched duration.
 Groups retain source, model, measurement kind and token basis so incompatible
@@ -61,7 +63,7 @@ timing windows are not combined. That per-stream rate sits beside a combined one
 which divides the same tokens by the union of busy time, so overlapping responses
 count once. `speed_trend.py` rebuilds each busy interval from the stored timestamp
 and duration, anchored at the start or end as the source records it (Claude Code
-records where each window opened), and buckets
+and Codex record where each window opened), and buckets
 both rates for the trend view. A model's row merged across harnesses carries only
 the combined rate, since its windows may differ in kind. Model/hour results use
 bounded process caching keyed by publication revision, filters and local-clock

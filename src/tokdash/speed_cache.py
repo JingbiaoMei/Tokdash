@@ -22,13 +22,13 @@ from . import speed_process
 
 SCHEMA_VERSION = 4
 PUBLICATION_VERSION = 3
-READER_VERSIONS = {'kimi': 1, 'omp': 1, 'codex': 4, 'dsh': 3, 'qwen_code': 2,
+READER_VERSIONS = {'kimi': 1, 'omp': 1, 'codex': 5, 'dsh': 3, 'qwen_code': 2,
                    'opencode': 3, 'kilocode': 3, 'mimo': 3, 'claude': 1}
 FIELDS = ('speed_tokens', 'speed_ms', 'speed_calls', 'speed_kind', 'speed_token_basis', 'speed_status')
 COLUMNS = 'source,entry_key,input_owner,session_id,timestamp,model,output,reasoning,eligible,' + ','.join(FIELDS)
 # speed_start is where a window opened, for readers whose stored timestamp is
 # neither end of it; NULL leaves the busy interval to the source's anchor.
-WINDOW_START_READERS = ('claude',)
+WINDOW_START_READERS = ('claude', 'codex')
 REPORT_INDEX = ('source,timestamp,model,eligible,speed_kind,speed_token_basis,speed_status,'
                 'speed_tokens,speed_ms,speed_calls,speed_start')
 

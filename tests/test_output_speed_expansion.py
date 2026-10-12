@@ -79,8 +79,8 @@ def codex(records):
 def test_codex_clipped_tool_union_and_reasoning_inclusive_numerator():
     assert clipped_union_ms([(0, 30), (20, 50), (70, 200)], 10, 100) == 70
     speed = codex([item('Reasoning', 10, 20), item('AgentMessage', 80, 100, 'text'),
-                   item('CommandExecution', 0, 30, 'a'), item('FileChange', 20, 50, 'b'),
-                   item('CommandExecution', 70, 200, 'c'), owner()])
+                   item('WebSearch', 0, 30, 'a'), item('WebSearch', 20, 50, 'b'),
+                   item('WebSearch', 70, 200, 'c'), owner()])
     assert speed['speed_ms'] == 20
     assert speed['speed_tokens'] == 60  # reasoning is a subset, never added again
     assert speed['speed_token_basis'] == 'output_including_reasoning'
@@ -109,11 +109,11 @@ def test_codex_dedup_and_invalid_snapshot_cannot_donate_items():
     assert a.resolve()['one']['speed_ms'] == 40
     assert a.resolve()['two']['speed_calls'] == 0
 
-def test_codex_late_parallel_tools_are_subtracted_from_their_actual_bracket():
+def test_codex_late_hosted_search_is_subtracted_from_its_actual_bracket():
     a = CodexResponseAssociation();a.observe(event('task_started', turn_id='turn'))
     a.observe(item('AgentMessage', 10, 100));a.observe(owner())
     a.register('call', {'last_token_usage':TOKENS,'total_token_usage':TOKENS})
-    a.observe(item('CommandExecution', 20, 50, 'late'))
+    a.observe(item('WebSearch', 20, 50, 'late'))
     assert a.resolve()['call']['speed_ms'] == 60
 
 def test_codex_reasoning_tokens_require_their_own_noncollapsed_item():
@@ -138,9 +138,9 @@ def test_codex_rejects_unverified_reasoning_counter_semantics(usage):
     assert a.resolve()['call']['speed_status']=='ambiguous_pair'
 
 def test_codex_collapsed_or_malformed_late_tool_clock_excludes_owned_response():
-    for tool in (item('CommandExecution', 50, 10, 'late'),
-                 event('item_completed',turn_id='turn',item={'type':'CommandExecution','id':'late','duration_ms':40},started_at_ms=50,completed_at_ms=50),
-                 event('item_completed',turn_id='turn',item={'type':'DynamicToolCall','id':'late','duration':{'secs':1,'nanos':1}},started_at_ms=50,completed_at_ms=50)):
+    for tool in (item('WebSearch', 50, 10, 'late'),
+                 event('item_completed',turn_id='turn',item={'type':'WebSearch','id':'late','duration_ms':40},started_at_ms=50,completed_at_ms=50),
+                 event('item_completed',turn_id='turn',item={'type':'WebSearch','id':'late','duration':{'secs':1,'nanos':1}},started_at_ms=50,completed_at_ms=50)):
         a=CodexResponseAssociation();a.observe(event('task_started',turn_id='turn'))
         a.observe(item('AgentMessage',10,100));a.observe(owner());a.register('call',{'last_token_usage':TOKENS,'total_token_usage':TOKENS})
         a.observe(tool)
@@ -157,10 +157,10 @@ def test_codex_collapsed_or_malformed_late_tool_clock_excludes_owned_response():
     ({'duration': {'secs': -1, 'nanos': 16_400}}, 'invalid_timing'),
 ])
 def test_codex_submillisecond_tool_may_share_one_clock_stamp(duration, status):
-    # Codex stamps items in whole ms and often reports ~16 us for a command, so the
-    # command starts and completes on one stamp. Reading that as a broken clock
-    # voided every response in its turn, not only the one it sat in.
-    tool = event('item_completed', turn_id='turn', item={'type': 'CommandExecution', 'id': 'quick', **duration},
+    # Codex stamps items in whole ms, so a tool that reports under 1 ms of work
+    # starts and completes on one stamp. Reading that as a broken clock voided
+    # every response in its turn, not only the one it sat in.
+    tool = event('item_completed', turn_id='turn', item={'type': 'WebSearch', 'id': 'quick', **duration},
                  started_at_ms=70, completed_at_ms=70)
     a = CodexResponseAssociation(); a.observe(event('task_started', turn_id='turn'))
     a.observe(item('AgentMessage', 10, 30)); a.observe(owner(rid='first'))

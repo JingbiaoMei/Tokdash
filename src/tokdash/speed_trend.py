@@ -22,10 +22,11 @@ dsh, qwen_code) store the record that settles the response, a few milliseconds
 after the window ends. Claude Code bills a request's first content-block write,
 which is neither end of a multi-block window, so its reader records where the
 window opened (``speed_start``) and that interval is exact; an end anchor stays
-its fallback. ``busy_interval`` encodes that, and
+its fallback. Codex does the same: its counted snapshot follows a response that
+ended in a tool call only once the tool has run. ``busy_interval`` encodes that, and
 tests/test_speed_trend.py pins it per reader so a parser that moves its
-timestamp fails loudly instead of skewing overlap. Codex's duration already has
-overlapping tool time removed, so its interval is a slightly compressed stand-in
+timestamp fails loudly instead of skewing overlap. Codex's duration has any hosted
+web-search time removed, so such an interval is a slightly compressed stand-in
 for the response; that is fine for counting overlap, and no reader stores more.
 
 Membership follows the stored timestamp, as everywhere else in the report: a

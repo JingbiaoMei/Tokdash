@@ -1315,6 +1315,8 @@ class CodexParser(BaseParser):
                 timings = association.resolve() if association is not None else {}
                 for timed_entry, identity in pending_speed:
                     timed_entry["_speed"] = timings[identity]
+                    if timed_entry["_speed"]["speed_calls"]:
+                        timed_entry["_speed_start"] = association.opened[identity]
 
                 if first_model_seen:
                     # Rows written before the file's first model signal (a fork's

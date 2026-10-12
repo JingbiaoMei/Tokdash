@@ -68,7 +68,7 @@ def _state(conn,state,tool,sid,target):
     complete=conn.execute('SELECT 1 FROM speed_sessions WHERE source=? AND session_id=? AND usage_generation=? AND state="ready"',(tool,sid,target)).fetchone()
     if cache.failure(conn,'0001-01-01','9999-12-31',tool,sid,target=target,current_only=False):
         return 'error',None
-    if cache._scope_ready(conn,state,'0001-01-01','9999-12-31',tool,sid,target,cache.identity()):
+    if cache._session_ready(conn,state,tool,sid,target,cache.identity()):
         return 'ready',None
     if not member and not complete:
         return 'not-indexed','pending_reprocessing'

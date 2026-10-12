@@ -51,7 +51,8 @@ def connect(path=None, *, readonly=False):
     if conn.execute("SELECT 1 FROM sqlite_master WHERE name='speed_sessions'").fetchone():
         controls = conn.execute("SELECT count(*) FROM sqlite_master WHERE name IN ('speed_failures','idx_speed_failure_source')").fetchone()[0]
         current = controls==2 and 'worker_token' in {r[1] for r in conn.execute('PRAGMA table_info(speed_jobs)')} and bool(conn.execute("SELECT 1 FROM speed_meta WHERE key='instance_id'").fetchone()) \
-            and 'speed_start' in {r[1] for r in conn.execute('PRAGMA table_info(speed_responses)')}
+            and 'speed_start' in {r[1] for r in conn.execute('PRAGMA table_info(speed_responses)')} \
+            and 'usage_state' in ({r[1] for r in conn.execute('PRAGMA table_info(speed_inputs)')} or {'usage_state'})
         if not readonly and not current:
             conn.execute('BEGIN IMMEDIATE')
             _control_schema(conn)
@@ -70,7 +71,7 @@ def connect(path=None, *, readonly=False):
       CREATE TABLE IF NOT EXISTS speed_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS speed_inputs(
         source TEXT,input_owner TEXT,signature TEXT,reader_version INTEGER,
-        usage_generation INTEGER,state TEXT,last_error TEXT,
+        usage_generation INTEGER,state TEXT,last_error TEXT,usage_state TEXT,
         PRIMARY KEY(source,input_owner));
       CREATE TABLE IF NOT EXISTS speed_responses(
         source TEXT NOT NULL,entry_key TEXT NOT NULL,input_owner TEXT NOT NULL,
@@ -115,6 +116,10 @@ def _control_schema(conn):
         conn.execute('ALTER TABLE speed_jobs ADD COLUMN worker_token TEXT')
     if 'speed_start' not in {r[1] for r in conn.execute('PRAGMA table_info(speed_responses)')}:
         conn.execute('ALTER TABLE speed_responses ADD COLUMN speed_start REAL')  # metadata only
+    inputs = {r[1] for r in conn.execute('PRAGMA table_info(speed_inputs)')}
+    if inputs and 'usage_state' not in inputs:
+        # NULL reads as never checked, so each input is read once more and records it.
+        conn.execute('ALTER TABLE speed_inputs ADD COLUMN usage_state TEXT')
     conn.execute('''CREATE TABLE IF NOT EXISTS speed_failures(
         job_id TEXT PRIMARY KEY,source TEXT,request TEXT,scope TEXT,identity TEXT,
         generation INTEGER,error TEXT,created_at REAL)''')
@@ -242,6 +247,130 @@ def primary_generation():
             return 0
 
 
+SETTLE_SECONDS = 300
+UNTRACKED = 'untracked'
+
+
+def settle_seconds():
+    """How long a changed input must stay unwritten before a model build reads it."""
+    try:
+        value = float(os.environ.get('TOKDASH_SPEED_SETTLE_SECONDS', SETTLE_SECONDS))
+    except ValueError:
+        return float(SETTLE_SECONDS)
+    return max(0.0, value) if value == value else float(SETTLE_SECONDS)
+
+
+def _contract():
+    # Reader versions are kept per input; these are the rest of what a row means.
+    return [SCHEMA_VERSION, speed_report.SPEED_MEASUREMENT_CONTRACT_VERSION, PUBLICATION_VERSION]
+
+
+def usage_token(kind=UNTRACKED):
+    """The token of an input with no file state: a native database, or UNTRACKED.
+
+    A file's token is the usage store's own state for that file plus the timing
+    contract, built by SQLite in usage_tokens so both sides compare it as one
+    string. The store stamps updated_at_ms whenever it rewrites a file's rows or
+    marks it missing, and recounts entry_count when a copy elsewhere takes over
+    one of the file's keys, so an unchanged token means unchanged rows. Only
+    those integers are read, because a request checks every file. The store
+    keeps a state for every file it bills from; UNTRACKED covers a row without
+    one, so it settles instead of being read on every build.
+    """
+    return json.dumps([kind, _contract()], separators=(',', ':'))
+
+
+def usage_tokens(primary, sources):
+    """{(source, path): (token, entry_count, mtime_ns)} from the usage store's file states."""
+    if primary is None or not sources:
+        return {}
+    marks = ','.join('?' for _ in sources)
+    return {(r[0], r[1]): (r[2], int(r[3] or 0), int(r[4] or 0)) for r in primary.execute(
+        f'SELECT source,path,json_array(json_array(updated_at_ms,entry_count,missing),json(?)),entry_count,mtime_ns '
+        f'FROM file_state WHERE source IN ({marks})', (json.dumps(_contract()), *sources))}
+
+
+def _contract_changed(recorded):
+    try:
+        return json.loads(recorded)[1] != _contract()
+    except (TypeError, ValueError, IndexError, KeyError):
+        return False  # never recorded: a first check, not a newer contract
+
+
+def _settling(newest_ns, now, settle):
+    return settle > 0 and now - (newest_ns or 0) / 1e9 < settle
+
+
+def _file_settling(path, recorded_ns, now, settle):
+    if settle <= 0:
+        return False
+    newest = int(recorded_ns or 0)
+    try:
+        newest = max(newest, Path(path).stat().st_mtime_ns)
+    except OSError:
+        pass
+    return _settling(newest, now, settle)
+
+
+def pending_work(conn, primary, *, source='', include_active=False, now=None):
+    """Inputs whose published timing no longer matches accounting.
+
+    Returns (dirty, deferred). A changed input is deferred while it is still
+    being written: reading a live log is the expensive part of a build and its
+    result rarely survives the build, so its last-good rows stand until it has
+    been quiet for settle_seconds(). A newer reader or contract never waits.
+    A native database is judged whole, as its timing index is.
+    """
+    now = time.time() if now is None else now
+    settle = settle_seconds()
+    names = [name for name in READER_VERSIONS if not source or name == source]
+    files = [name for name in names if name not in speed_native.SOURCES]
+    indexed = {}
+    if names:
+        marks = ','.join('?' for _ in names)
+        indexed = {(r['source'], r['input_owner']): r for r in conn.execute(
+            f'SELECT source,input_owner,signature,reader_version,state,usage_state FROM speed_inputs WHERE source IN ({marks})', names)}
+    usage = usage_tokens(primary, files)
+    dirty, deferred = set(), set()
+
+    def judge(key, token, signature=None, settling=lambda: False):
+        old = indexed.get(key)
+        if old is not None and old['state'] == 'ready' and old['reader_version'] == READER_VERSIONS[key[0]] \
+                and old['usage_state'] == token and (signature is None or old['signature'] == signature):
+            return
+        if old is not None and (old['reader_version'] != READER_VERSIONS[key[0]] or _contract_changed(old['usage_state'])):
+            dirty.add(key)
+        elif not include_active and settling():
+            deferred.add(key)
+        else:
+            dirty.add(key)
+
+    for key, (token, entries, mtime_ns) in usage.items():
+        if key not in indexed and not entries:
+            continue  # nothing is billed from it, so there is nothing to time
+        judge(key, token, settling=lambda key=key, mtime_ns=mtime_ns: _file_settling(key[1], mtime_ns, now, settle))
+    for key in indexed:
+        if key[0] not in speed_native.SOURCES and key not in usage:
+            judge(key, usage_token())
+    for name in names:
+        if name in speed_native.SOURCES:
+            parts = speed_native.signature(name)
+            judge((name, 'native:all'), usage_token('native'), json.dumps(parts),
+                  lambda parts=parts: _settling(max((p[4] for p in parts), default=0), now, settle))
+    return dirty, deferred
+
+
+def _model_freshness(conn, source):
+    """(dirty, deferred) for a model view, read without writing either database."""
+    path = Path(usage_db_path())
+    if not path.exists():
+        return pending_work(conn, None, source=source)
+    with closing(UsageEntryStore(path).read_connection()) as primary:
+        if not primary.execute("SELECT 1 FROM sqlite_master WHERE name='file_state'").fetchone():
+            return pending_work(conn, None, source=source)
+        return pending_work(conn, primary, source=source)
+
+
 def identity():
     return json.dumps({'schema': SCHEMA_VERSION, 'measurement': speed_report.SPEED_MEASUREMENT_CONTRACT_VERSION,
                        'publication': PUBLICATION_VERSION,
@@ -292,7 +421,7 @@ def launch_worker(conn):
         conn.commit()
 
 
-def _scope_ready(conn, state, day_from, day_to, source, session_id, target, expected):
+def _session_ready(conn, state, source, session_id, target, expected):
     same = state.get('identity') == expected
     if source and not same:
         try:
@@ -302,31 +431,29 @@ def _scope_ready(conn, state, day_from, day_to, source, session_id, target, expe
                 same &= [p for p in old.get('native',[]) if p[0]==source]==[p for p in new.get('native',[]) if p[0]==source]
         except (ValueError,KeyError,TypeError):
             same = False
+    if source in speed_native.SOURCES:
+        return same and bool(conn.execute("SELECT 1 FROM speed_inputs WHERE source=? AND input_owner IN (?, 'native:all') AND state='ready' AND reader_version=? AND signature=? LIMIT 1", (source, 'session:' + session_id, READER_VERSIONS[source],json.dumps(speed_native.signature(source)))).fetchone())
     ready = same and int(state.get('published_generation', -1)) == target
+    complete = ready and bool(conn.execute('SELECT 1 FROM speed_sessions WHERE source=? AND session_id=? AND usage_generation=? AND state="ready"', (source,session_id,target)).fetchone())
+    outdated = conn.execute('''SELECT 1 FROM speed_session_members m INDEXED BY idx_speed_session
+        CROSS JOIN speed_responses r ON r.source=m.source AND r.entry_key=m.call_key
+        JOIN speed_inputs i ON i.source=r.source AND i.input_owner=r.input_owner
+        WHERE m.source=? AND m.session_id=? AND (i.state!='ready' OR i.reader_version!=?) LIMIT 1''',(source,session_id,READER_VERSIONS[source])).fetchone()
+    return complete and not outdated
+
+
+def _freshness(conn, state, source, session_id, target, expected):
+    """(ready, pending_inputs, deferred_inputs) for one view.
+
+    A model view does not depend on its dates or on the usage generation: every
+    model build reads whatever input has changed, so one build serves every
+    range, and new usage only matters for the inputs it landed in. A session
+    view keeps its own generation-pinned membership.
+    """
     if session_id:
-        if source in speed_native.SOURCES:
-            return same and bool(conn.execute("SELECT 1 FROM speed_inputs WHERE source=? AND input_owner IN (?, 'native:all') AND state='ready' AND reader_version=? AND signature=? LIMIT 1", (source, 'session:' + session_id, READER_VERSIONS[source],json.dumps(speed_native.signature(source)))).fetchone())
-        complete = ready and bool(conn.execute('SELECT 1 FROM speed_sessions WHERE source=? AND session_id=? AND usage_generation=? AND state="ready"', (source,session_id,target)).fetchone())
-        outdated = conn.execute('''SELECT 1 FROM speed_session_members m INDEXED BY idx_speed_session
-            CROSS JOIN speed_responses r ON r.source=m.source AND r.entry_key=m.call_key
-            JOIN speed_inputs i ON i.source=r.source AND i.input_owner=r.input_owner
-            WHERE m.source=? AND m.session_id=? AND (i.state!='ready' OR i.reader_version!=?) LIMIT 1''',(source,session_id,READER_VERSIONS[source])).fetchone()
-        return complete and not outdated
-    ready &= bool(conn.execute("SELECT 1 FROM speed_windows WHERE source IN (?,'') AND day_from<=? AND day_to>=? AND usage_generation=?", (source,day_from,day_to,target)).fetchone())
-    start,end=speed_report._day_bounds_ms(day_from,day_to)
-    for name,version in READER_VERSIONS.items():
-        if source and source!=name:
-            continue
-        if conn.execute('''SELECT 1 FROM speed_inputs i WHERE i.source=? AND i.reader_version!=?
-            AND EXISTS(SELECT 1 FROM speed_responses r WHERE r.source=i.source AND r.input_owner=i.input_owner AND r.timestamp>=? AND r.timestamp<?) LIMIT 1''',(name,version,start,end)).fetchone():
-            return False
-    deferred=conn.execute('''SELECT 1 FROM speed_inputs i
-        WHERE i.state='pending' AND i.last_error LIKE '%outside requested %'
-        AND (?='' OR i.source=?) AND (i.source IN ('opencode','kilocode','mimo')
-          OR EXISTS (SELECT 1 FROM speed_responses r WHERE r.source=i.source
-            AND r.input_owner=i.input_owner AND r.timestamp>=? AND r.timestamp<?)) LIMIT 1''',
-        (source,source,start,end)).fetchone()
-    return ready and not deferred
+        return _session_ready(conn, state, source, session_id, target, expected), 0, 0
+    dirty, deferred = _model_freshness(conn, source)
+    return not dirty, len(dirty), len(deferred)
 
 
 def snapshot(conn, day_from, day_to, *, source='', session_id=''):
@@ -338,29 +465,33 @@ def snapshot(conn, day_from, day_to, *, source='', session_id=''):
     """
     target = primary_generation()
     state = meta(conn)
-    ready = _scope_ready(conn,state,day_from,day_to,source,session_id,target,identity())
-    pending = conn.execute("SELECT count(*) FROM speed_inputs WHERE state='pending'" + (' AND source=?' if source else ''), (source,) if source else ()).fetchone()[0]
+    ready, pending, deferred = _freshness(conn,state,source,session_id,target,identity())
     last = failure(conn,day_from,day_to,source,session_id,target=target,current_only=False)
-    if session_id and ready:
-        pending = 0
-    return {'state':'error' if last else 'ready' if ready and not pending else 'stale',
-            'job_id':None, 'pending_inputs':pending,
+    return {'state':'error' if last else 'ready' if ready else 'stale',
+            'job_id':None, 'pending_inputs':pending, 'deferred_inputs':deferred,
             'published_generation':int(state.get('published_generation',0)),
             'target_usage_generation':target, 'updated_at':state.get('updated_at'),
             'error':last['error'] if last else None}
+
+
+def job_request(day_from, day_to, *, source='', refresh=False, session_id='', keys=(), target=0):
+    """The job a view queues. A model build is the same job for every range."""
+    if not session_id:
+        return json.dumps({'source': source, 'refresh': refresh}, sort_keys=True)
+    return json.dumps({'from': day_from, 'to': day_to, 'source': source,
+                       'session_id': session_id, 'keys': sorted(set(keys)), 'refresh': refresh,
+                       'target_generation':target}, sort_keys=True)
 
 
 def ensure(day_from, day_to, *, source='', refresh=False, session_id='', keys=()):
     """Only called by speed or detail. No corpus discovery on this request path."""
     target = primary_generation()
     expected = identity()
-    request = json.dumps({'from': day_from, 'to': day_to, 'source': source,
-                          'session_id': session_id, 'keys': sorted(set(keys)), 'refresh': refresh,
-                          'target_generation':target}, sort_keys=True)
+    request = job_request(day_from, day_to, source=source, refresh=refresh, session_id=session_id, keys=keys, target=target)
     with closing(connect()) as conn:
         conn.execute('BEGIN IMMEDIATE')
         state = meta(conn)
-        ready = _scope_ready(conn,state,day_from,day_to,source,session_id,target,expected)
+        ready, pending, deferred = _freshness(conn,state,source,session_id,target,expected)
         queued = conn.execute("SELECT * FROM speed_jobs WHERE request=? AND state IN ('queued','building') ORDER BY created_at DESC LIMIT 1", (request,)).fetchone()
         last = conn.execute('SELECT * FROM speed_jobs WHERE request=? ORDER BY created_at DESC LIMIT 1', (request,)).fetchone()
         # A read failure stays visible until an explicit refresh or changed identity.
@@ -381,12 +512,9 @@ def ensure(day_from, day_to, *, source='', refresh=False, session_id='', keys=()
                 failed_same=failure(conn,day_from,day_to,source,session_id,target=target)
         result = dict(queued or last) if queued or last else {}
         published = int(state.get('published_generation', 0))
-        pending = conn.execute("SELECT count(*) FROM speed_inputs WHERE state='pending'" + (' AND source=?' if source else ''), (source,) if source else ()).fetchone()[0]
-        if session_id and ready:
-            pending = 0
-        result.update(state=('building' if not state.get('updated_at') else 'stale') if queued else ('error' if failed_same else 'stale' if ready and pending else 'ready' if ready else 'stale'),
-                      job_id=result.get('id') if queued else None, pending_inputs=pending, published_generation=published,
-                      target_usage_generation=target,updated_at=state.get('updated_at'),
+        result.update(state=('building' if not state.get('updated_at') else 'stale') if queued else ('error' if failed_same else 'ready' if ready else 'stale'),
+                      job_id=result.get('id') if queued else None, pending_inputs=pending, deferred_inputs=deferred,
+                      published_generation=published, target_usage_generation=target,updated_at=state.get('updated_at'),
                       error=failed_same['error'] if failed_same else None)
         result.pop('request', None)
         result.pop('worker_token', None)

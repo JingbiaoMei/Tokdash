@@ -114,11 +114,13 @@ TOKDASH_DATA_DIR=output/dev-data PYTHONPATH=src python3 main.py
 Output timing is built on demand in a separate `output_speed.sqlite3` beside the
 configured usage database. Ordinary usage, Overview and core session reads do
 not create it or start timing work. Model and session speed share one worker;
-visible views observe its progress through events. Reader versions and native
-DB/WAL identities invalidate timing independently of pricing.
+visible views observe its progress through events. Reader versions, native
+DB/WAL identities and each file's usage-store state invalidate timing
+independently of pricing, and a build reads only the inputs that changed.
 
 - `TOKDASH_SPEED_CPU_FRACTION` (default: `0.25`, clamped to `0.05`–`1`) — duty-cycle target applied between file inputs; a large file can use one CPU continuously before its balancing pause. Native projection and SQL publication use the one-CPU/niceness limits without this pause.
 - `TOKDASH_SPEED_MEMORY_MB` (default: `1024`) — worker address-space limit in MiB on platforms with resource limits. A failed build retains its last successful snapshot and reports the failure.
+- `TOKDASH_SPEED_SETTLE_SECONDS` (default: `300`) — how long a changed input must go unwritten before a model build reads it. Until then its last timing stands and the view stays ready, so a live session's newest responses are timed once it goes quiet. A manual refresh reads it at once; `0` reads every change immediately.
 
 On Linux the worker also uses nice 10 and one available CPU. These controls apply
 to the timing child, not the API process. The derived cache is disposable and

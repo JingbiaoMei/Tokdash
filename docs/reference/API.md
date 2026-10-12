@@ -698,16 +698,26 @@ Time-of-day responses include `selected_key`, 24 `hourly` buckets and four
 server's local clock. `days_with_measurements` counts distinct measured dates;
 the observed span does not imply complete logging between its endpoints.
 
-`measurement_generation` names the accounting generation of the latest scoped
-publication. Unrequested inputs can retain older snapshots; readiness remains
-scoped to the verified window or session. `cache.publication_revision` increments
-on every successful publication, including native updates at an unchanged
-accounting generation. Numerators, durations, eligibility and cached
+`measurement_generation` names the accounting generation of the latest
+publication. A model view is ready when no timed input has changed since it was
+read. Each input records the usage store's state for its file (or the identity of
+a native database) and the timing contract, so readiness does not depend on the
+requested dates or on usage that landed in other inputs. One model build serves
+every range, and its job is the same for every range. An input written within the
+last `TOKDASH_SPEED_SETTLE_SECONDS` keeps its last timing: the view stays ready,
+counts it in `deferred_inputs`, and reads it once it has gone quiet. `refresh=1`
+reads it at once. A newer reader or contract never waits. Session views keep
+their generation-pinned membership. `cache.publication_revision` increments on
+every publication that changed the published snapshot, including native updates
+at an unchanged accounting generation; a build with nothing to read keeps it.
+Numerators, durations, eligibility and cached
 measurement-date bounds are read in one transaction. `cache` contains `state`
 (`ready`, `building`, `stale`, `error`), `published_generation`,
 `target_usage_generation`, `updated_at`, `job_id`, `completed_inputs`,
-`total_inputs` and `pending_inputs`; input progress fields are present for jobs,
-while cache-only reads contain freshness and pending counts. Last-good rows may accompany stale/error
+`total_inputs`, `pending_inputs` and `deferred_inputs`; input progress fields are
+present for jobs and count only the inputs the build reads, while cache-only reads
+contain freshness counts. For a model view `pending_inputs` counts changed inputs
+waiting to be read. Last-good rows may accompany stale/error
 states. Pending inputs are distinct from indexed responses lacking telemetry.
 Read failures retain the last successful snapshot; explicit refresh or an input
 change permits retry. An empty measurement range is never used to hide failure.
@@ -725,10 +735,11 @@ window opened, for readers whose stored timestamp is neither end of it (Claude
 Code); an existing cache gains the column in place, and the worker rebuilds the
 covering report index once at its next publication.
 Publication identity **3** retires older model-window completion markers without
-discarding valid timing rows. A window is current only at the generation of its
-exact full source/date build. Session builds retain the last full-window source
-census and cannot certify model windows; source-filtered or differently dated
-builds also leave other window generations unchanged.
+discarding valid timing rows. Date windows no longer certify anything, and the
+worker drops any a previous version left. An input that never recorded its usage
+state is read once more and records it, reusing its timing when the file is
+unchanged. Session builds check only their own inputs, so they leave a model view
+waiting for the rest; a source-filtered model build likewise reads only its source.
 
 The separate single-flight worker synchronizes lightweight file ownership before
 extracting whole contributing files. It uses canonical `(source, entry_key)`
@@ -749,14 +760,14 @@ scanning native JSON on range changes. A session refresh overlays only that
 session on any stale full native population; unrelated last-good rows and their
 original signatures remain pending. Removed databases retire their rows. A
 verified current full index can satisfy a session request; a stale full index
-cannot suppress that session's bounded read. A model request rebuilds deferred
-native scopes, and a full publication supersedes partial scopes. Native timing
+cannot suppress that session's bounded read. A model build reads a changed native
+database once it has settled, and that full publication supersedes partial scopes. Native timing
 reader versions are 3; this invalidates only the disposable timing cache.
 Native freshness reconciliation shares one signature snapshot across a source's
 session scopes and filters unchanged unrelated scopes in SQL. Extraction and
 final publication validation still take fresh signatures; final validation
-shares each native source's check across its requested scopes. This does not
-remove SQL metadata work proportional to cached scopes or full-window staging.
+shares each native source's check across its requested scopes. Model builds stage
+only the inputs they read.
 A scalar covering index serves model/hour
 aggregation without scattered reads of wide response identities. The worker
 upgrades existing derived caches during atomic publication; requests use a linear

@@ -45,7 +45,10 @@ page and session speed APIs request a separate worker that builds the disposable
 `output_speed.sqlite3` database beside the primary usage database. It stores scalar
 measurements and canonical session membership, with atomic publication and
 input-scoped failures. Readers display the last successful snapshot while a build
-is pending and subscribe to job events only while their page is visible.
+is pending and subscribe to job events only while their page is visible. A model
+build reads only the inputs whose usage-store state changed since they were timed,
+whatever range the page shows, and leaves a log that is still being written until
+it goes quiet.
 
 File readers (Codex, Kimi, omp, dsh, Qwen Code, Claude Code) reparse a whole
 contributing log with timing enabled and attach each window to the usage row the

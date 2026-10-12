@@ -202,6 +202,8 @@ def isolated_env(corpus_root: Path, data_dir: Path, xdg_root: Path) -> dict:
         "XDG_CACHE_HOME": str(Path(xdg_root) / "cache"),
         "TOKDASH_WARM_ON_START": "0",
         "TOKDASH_DAILY_WARM": "0",
+        # A just-written corpus would otherwise wait out the live-input settle window.
+        "TOKDASH_SPEED_SETTLE_SECONDS": "0",
         "KIMI_CODE_HOME": str(corpus_root / "kimi-code"),
         "KIMI_SHARE_DIR": str(corpus_root / "kimi-legacy-absent"),
         "PI_CONFIG_DIR": str(corpus_root / "omp"),

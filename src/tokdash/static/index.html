@@ -7679,6 +7679,8 @@
         usageReportSpeedViewDates: 'View measured dates',
         usageReportSpeedShowTools: 'Show all measured tools',
         usageReportSpeedCachedHistory: 'Cached measurements',
+        usageReportSpeedLiveDeferredOne: '1 live session is timed once it goes quiet',
+        usageReportSpeedLiveDeferred: '{n} live sessions are timed once they go quiet',
         usageReportSpeedUnmeasuredTools: 'Tools without speed measurements',
         usageReportSpeedPendingTools: 'Timing still being re-read',
         usageReportSpeedFailedTools: 'Timing could not be read',
@@ -8454,6 +8456,8 @@
         usageReportSpeedViewDates: '查看有测量的日期',
         usageReportSpeedShowTools: '显示所有有测量的工具',
         usageReportSpeedCachedHistory: '缓存的测量记录',
+        usageReportSpeedLiveDeferredOne: '1 个进行中的会话将在空闲后计时',
+        usageReportSpeedLiveDeferred: '{n} 个进行中的会话将在空闲后计时',
         usageReportSpeedUnmeasuredTools: '没有速度测量的工具',
         usageReportSpeedPendingTools: '计时仍在重新读取',
         usageReportSpeedFailedTools: '无法读取计时',
@@ -9230,6 +9234,8 @@
         usageReportSpeedViewDates: '測定のある期間を表示',
         usageReportSpeedShowTools: '測定のある全ツールを表示',
         usageReportSpeedCachedHistory: 'キャッシュされた測定',
+        usageReportSpeedLiveDeferredOne: '進行中のセッション 1 件はアイドルになってから計測します',
+        usageReportSpeedLiveDeferred: '進行中のセッション {n} 件はアイドルになってから計測します',
         usageReportSpeedUnmeasuredTools: '速度測定のないツール',
         usageReportSpeedPendingTools: '計測を再読み込み中',
         usageReportSpeedFailedTools: '計測を読み取れません',
@@ -10006,6 +10012,8 @@
         usageReportSpeedViewDates: '측정된 날짜 보기',
         usageReportSpeedShowTools: '측정된 모든 도구 보기',
         usageReportSpeedCachedHistory: '캐시된 측정 기록',
+        usageReportSpeedLiveDeferredOne: '진행 중인 세션 1개는 유휴 상태가 된 뒤 측정됩니다',
+        usageReportSpeedLiveDeferred: '진행 중인 세션 {n}개는 유휴 상태가 된 뒤 측정됩니다',
         usageReportSpeedUnmeasuredTools: '속도 측정이 없는 도구',
         usageReportSpeedPendingTools: '측정 시간을 다시 읽는 중',
         usageReportSpeedFailedTools: '측정 시간을 읽을 수 없음',
@@ -10782,6 +10790,8 @@
         usageReportSpeedViewDates: 'Ver fechas con mediciones',
         usageReportSpeedShowTools: 'Mostrar todas las herramientas medidas',
         usageReportSpeedCachedHistory: 'Mediciones en caché',
+        usageReportSpeedLiveDeferredOne: '1 sesión activa se medirá cuando quede inactiva',
+        usageReportSpeedLiveDeferred: '{n} sesiones activas se medirán cuando queden inactivas',
         usageReportSpeedUnmeasuredTools: 'Herramientas sin mediciones de velocidad',
         usageReportSpeedPendingTools: 'Tiempos aún en relectura',
         usageReportSpeedFailedTools: 'No se pudieron leer los tiempos',
@@ -11558,6 +11568,8 @@
         usageReportSpeedViewDates: 'Ver datas com medições',
         usageReportSpeedShowTools: 'Mostrar todas as ferramentas medidas',
         usageReportSpeedCachedHistory: 'Medições em cache',
+        usageReportSpeedLiveDeferredOne: '1 sessão ativa será medida quando ficar inativa',
+        usageReportSpeedLiveDeferred: '{n} sessões ativas serão medidas quando ficarem inativas',
         usageReportSpeedUnmeasuredTools: 'Ferramentas sem medições de velocidade',
         usageReportSpeedPendingTools: 'Tempos ainda em releitura',
         usageReportSpeedFailedTools: 'Não foi possível ler os tempos',
@@ -22328,12 +22340,23 @@
       return `${label}${cache.error ? ': ' + cache.error : ''}`;
     }
 
+    // A log still being written keeps its last timing until it goes quiet, so
+    // the newest responses of a live session are not in these numbers yet.
+    function usageReportSpeedDeferredNote(cache) {
+      const count = Number(cache?.deferred_inputs || 0);
+      if (cache?.state !== 'ready' || count <= 0) return '';
+      return count === 1 ? t('usageReportSpeedLiveDeferredOne')
+        : t('usageReportSpeedLiveDeferred', { n: formatNumber(count) });
+    }
+
     function usageReportSpeedUpdateHeader() {
       if (!usageReportSpeedState.active) return;
       const header = document.getElementById('lastUpdate');
+      const cache = usageReportSpeedState.payload?.cache;
       if (header) header.textContent = usageReportSpeedState.loading ? t('loading')
         : usageReportSpeedState.error ? t('usageReportSpeedError')
-        : usageReportSpeedCacheMessage(usageReportSpeedState.payload?.cache) || t('usageReportSpeedCachedHistory');
+        : usageReportSpeedCacheMessage(cache)
+          || [t('usageReportSpeedCachedHistory'), usageReportSpeedDeferredNote(cache)].filter(Boolean).join(' · ');
     }
 
     function usageReportRenderSpeed() {

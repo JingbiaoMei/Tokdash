@@ -467,10 +467,14 @@ def payload(day_from, day_to, *, view='across-models', source='', model='', kind
                 # Measured sources are intentionally absent from source_statuses.
                 # An unrelated pending input must not relabel their published data.
                 statuses.append({'source':name,'status':'read_failure' if failure(conn,day_from,day_to,name) else 'pending_reprocessing','usage_rows':count})
-        pending_sources={r[0] for r in conn.execute("SELECT DISTINCT source FROM speed_inputs WHERE state='pending'")}
-        for name in pending_sources:
+        # Pending only where an input still owes these dates its timing, counted
+        # in its responses here. One waiting elsewhere says nothing about them.
+        for name,count in conn.execute('''SELECT i.source,count(*) FROM speed_inputs i
+            CROSS JOIN speed_responses r INDEXED BY idx_speed_owner ON r.source=i.source AND r.input_owner=i.input_owner
+            WHERE i.state='pending' AND (?='' OR i.source=?) AND r.timestamp>=? AND r.timestamp<? GROUP BY i.source''',
+            (source,source,start,end)).fetchall():
             statuses=[r for r in statuses if r['source']!=name]
-            statuses.append({'source':name,'status':'pending_reprocessing','usage_rows':None})
+            statuses.append({'source':name,'status':'pending_reprocessing','usage_rows':count})
         if conn.execute("SELECT 1 FROM sqlite_master WHERE name='speed_failures'").fetchone():
             for (name,) in conn.execute("SELECT DISTINCT source FROM speed_failures WHERE source!=''"):
                 if (not source or source==name) and failure(conn,day_from,day_to,name,current_only=False):

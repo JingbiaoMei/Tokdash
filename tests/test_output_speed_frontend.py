@@ -1685,3 +1685,51 @@ def test_reloading_with_a_tool_chosen_keeps_the_other_tools(tmp_path):
         assert "source" not in query, (
             f"{query} asks the server for one tool, which is what empties the picker"
         )
+
+
+def test_a_tool_waiting_on_a_reread_is_not_filed_as_one_without_measurements(tmp_path):
+    """Reported as "Tools without speed measurements: Codex" over Codex's own rows.
+
+    Codex was only waiting for some rollouts to be re-read. One heading for every
+    status turned "pending" into "has none", so each kind of gap gets its line.
+    """
+    script = _rows_js() + "\n".join([
+        _extract("function usageReportSpeedStatusKey(status)"),
+        _extract("function usageReportRenderSpeedSources()"),
+        """
+function el(tag) {
+  return {tag, className: '', parts: [], title: '',
+    appendChild(child) { this.parts.push(child); return child; },
+    replaceChildren(...xs) { this.parts = xs; },
+    set textContent(value) { this.parts = [String(value)]; },
+    get textContent() { return this.parts.map((p) => (typeof p === 'string' ? p : p.textContent)).join(''); }};
+}
+const host = el('p');
+global.document = {getElementById: (id) => id === 'usageReportSpeedSources' ? host : null,
+  createElement: el, createTextNode: (value) => ({textContent: String(value)})};
+usageReportSpeedState.payload = {source_status: [
+  {source: 'claude', status: 'unsupported_reader', usage_rows: 2000},
+  {source: 'codex', status: 'pending_reprocessing', usage_rows: 12},
+  {source: 'gemini_cli', status: 'no_per_call_timing', usage_rows: 5},
+  {source: 'kimi', status: 'read_failure', usage_rows: null},
+]};
+usageReportRenderSpeedSources();
+const lines = host.parts.map((line) => ({cls: line.className, text: line.textContent,
+  titles: line.parts.filter((p) => p.title).map((p) => p.title)}));
+usageReportSpeedState.tool = 'kimi';
+usageReportRenderSpeedSources();
+console.log(JSON.stringify({lines, pill: host.textContent}));
+""",
+    ])
+    out = _run_node(tmp_path, "speed_sources_lines", script)
+    assert [line["text"] for line in out["lines"]] == [
+        "usageReportSpeedUnmeasuredTools: claude, gemini_cli",
+        "usageReportSpeedPendingTools: codex",
+        "usageReportSpeedFailedTools: kimi",
+    ]
+    assert all(line["cls"] == "speed-sources-line" for line in out["lines"])
+    assert out["lines"][1]["titles"] == ["usageReportSpeedSourcePending (n=12)"]
+    assert out["lines"][2]["titles"] == ["usageReportSpeedSourceFailure"], "no count is not n=0"
+    assert out["pill"] == "kimi: usageReportSpeedSourceFailure"
+    for key in ("usageReportSpeedPendingTools", "usageReportSpeedFailedTools"):
+        assert len(re.findall(rf"^\s+{key}: '", SRC, re.M)) == len(LANGUAGES), key

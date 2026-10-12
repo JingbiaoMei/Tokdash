@@ -10,7 +10,7 @@ import time
 from contextlib import closing
 from datetime import datetime
 
-from . import speed_cache as cache, speed_native
+from . import clientpaths, speed_cache as cache, speed_native
 from .compute import _collect_parser_file, _sync_usage_store
 from .sources.coding_tools import BaseParser, CodingToolsUsageTracker, connect_sqlite_readonly, _opencode_message_table, _mimo_imported_message_ids
 from .usage_store import UsageEntryStore, usage_db_path, _entry_key, MEASUREMENT_GENERATION_META_KEY
@@ -22,6 +22,23 @@ from .output_speed_readers import request_window_timing
 def file_signature(path):
     st=Path(path).stat()
     return json.dumps((st.st_dev,st.st_ino,st.st_mtime_ns,st.st_size))
+
+
+def readable_input(source, owner):
+    """Where an input can be read now, or None once it is gone for good.
+
+    Archiving a Codex session moves its rollout into archived_sessions/ under
+    the same name with its content intact, while accounting keeps the original
+    path as the owner. Event keys do not depend on the path, so the moved file
+    times the same rows; rows under the legacy path:line keys cannot match it.
+    """
+    if os.path.exists(owner):
+        return owner
+    if source == 'codex':
+        moved = clientpaths.codex_archived_sessions_dir() / Path(owner).name
+        if moved.is_file():
+            return str(moved)
+    return None
 
 
 def session_mapping(source, file_sig):
@@ -83,6 +100,16 @@ def native_rows(source, session_id=''):
                 row=(source,str(key),'native:all' if not session_id else 'session:'+session_id,sid,int(ts),str(model),out+reason,reason,int(out+reason>0),*[timing[k] for k in cache.FIELDS])
                 member=(source,str(key),sid,str(key),str(agent or 'main'),n,int(ts),'message_time_created')
                 yield row,member
+
+
+def _reuse_file_timing(conn,source,owner):
+    conn.execute('''UPDATE speed_stage AS s SET (session_id,speed_tokens,speed_ms,speed_calls,speed_kind,speed_token_basis,speed_status)=
+       (SELECT session_id,speed_tokens,speed_ms,speed_calls,speed_kind,speed_token_basis,speed_status FROM speed_responses p
+        WHERE p.source=s.source AND p.entry_key=s.entry_key AND p.input_owner=s.input_owner AND p.timestamp=s.timestamp AND p.model=s.model AND p.output=s.output AND p.reasoning=s.reasoning)
+       WHERE source=? AND input_owner=? AND EXISTS (SELECT 1 FROM speed_responses p WHERE p.source=s.source AND p.entry_key=s.entry_key AND p.input_owner=s.input_owner AND p.timestamp=s.timestamp AND p.model=s.model AND p.output=s.output AND p.reasoning=s.reasoning)''',(source,owner))
+    # Force the narrow owning-input seek before membership lookup. With
+    # JOIN SQLite otherwise walks every source member once per file.
+    conn.execute('INSERT INTO speed_member_stage SELECT m.* FROM speed_stage s CROSS JOIN speed_session_members m ON s.source=m.source AND s.entry_key=m.call_key WHERE s.source=? AND s.input_owner=?',(source,owner))
 
 
 def _discard_file_timing(conn,source,owner):
@@ -216,6 +243,7 @@ def build(conn, job, request, *, sync=True, failure_context=None):
     conn.commit()
     previous={(r['source'],r['input_owner']):dict(r) for r in previous}
     identities={}
+    read_paths={}
     requested_native=set(native_scopes)
     # A requested full read supersedes partial scopes. An existing full index
     # can cover a requested session only while its signature/version is current.
@@ -257,35 +285,39 @@ def build(conn, job, request, *, sync=True, failure_context=None):
         parser=tracker.parsers.get(source)
         if parser is None:
             parser=CodingToolsUsageTracker().parsers[source]
+        path=readable_input(source,owner)
         try:
-            observed=file_signature(owner)
+            if path is None:
+                raise FileNotFoundError(owner)
+            observed=file_signature(path)
         except FileNotFoundError:
-            # Durable accounting whose original input was already absent retains
-            # an explicit unknown population. It is not missing telemetry.
-            staged_inputs.append((source,owner,'missing',cache.READER_VERSIONS[source],generation,'pending','original input unavailable'))
+            # Nothing can re-read a vanished input, so it settles instead of
+            # staying pending forever. The last read under this reader version
+            # stays true; without one, durable accounting keeps an explicit
+            # unknown population. Neither is missing telemetry.
+            if old and old['state']=='ready' and old['reader_version']==cache.READER_VERSIONS[source]:
+                _reuse_file_timing(conn,source,owner)
+                staged_inputs.append((source,owner,old['signature'],old['reader_version'],generation,'ready',old['last_error']))
+            else:
+                staged_inputs.append((source,owner,'missing',cache.READER_VERSIONS[source],generation,'ready','original input unavailable'))
             completed+=1; _progress(conn,job,completed,total); continue
+        read_paths[(source,owner)]=path
         identities[(source,owner)]=observed
         failure_context['signature']=observed
         if old and old['signature']==observed and old['reader_version']==cache.READER_VERSIONS[source] and old['state']=='ready':
             reused_files+=1
-            conn.execute('''UPDATE speed_stage AS s SET (session_id,speed_tokens,speed_ms,speed_calls,speed_kind,speed_token_basis,speed_status)=
-               (SELECT session_id,speed_tokens,speed_ms,speed_calls,speed_kind,speed_token_basis,speed_status FROM speed_responses p
-                WHERE p.source=s.source AND p.entry_key=s.entry_key AND p.input_owner=s.input_owner AND p.timestamp=s.timestamp AND p.model=s.model AND p.output=s.output AND p.reasoning=s.reasoning)
-               WHERE source=? AND input_owner=? AND EXISTS (SELECT 1 FROM speed_responses p WHERE p.source=s.source AND p.entry_key=s.entry_key AND p.input_owner=s.input_owner AND p.timestamp=s.timestamp AND p.model=s.model AND p.output=s.output AND p.reasoning=s.reasoning)''',(source,owner))
-            # Force the narrow owning-input seek before membership lookup. With
-            # JOIN SQLite otherwise walks every source member once per file.
-            conn.execute('INSERT INTO speed_member_stage SELECT m.* FROM speed_stage s CROSS JOIN speed_session_members m ON s.source=m.source AND s.entry_key=m.call_key WHERE s.source=? AND s.input_owner=?',(source,owner))
+            _reuse_file_timing(conn,source,owner)
         elif (request.get('session_id') or request.get('sessions')) and (source,owner) not in requested_inputs:
             staged_inputs.append((source,owner,observed,cache.READER_VERSIONS[source],generation,'pending','input outside requested session changed'))
             completed+=1; _progress(conn,job,completed,total); continue
         else:
             parsed_files+=1
-            st=Path(owner).stat(); sig=(owner,st.st_mtime_ns,st.st_size)
+            st=Path(path).stat(); sig=(path,st.st_mtime_ns,st.st_size)
             # Fail an unavailable read before permissive source readers can turn
             # it into a successful empty population.
-            with Path(owner).open('rb'):
+            with Path(path).open('rb'):
                 pass
-            context=store.file_contexts(source,paths=(owner,))
+            context={path:v for v in store.file_contexts(source,paths=(owner,)).values()}
             with collect_timings():
                 entries=_collect_parser_file(parser,sig,file_context=context)
             mapping=session_mapping(source,sig)
@@ -308,11 +340,18 @@ def build(conn, job, request, *, sync=True, failure_context=None):
                 if member:
                     conn.execute('INSERT INTO speed_member_stage VALUES (?,?,?,?,?,?,?,?)',(source,key,*member))
             expected={r[0] for r in conn.execute('SELECT entry_key FROM speed_stage WHERE source=? AND input_owner=?',(source,owner))}
-            if matched!=expected and file_signature(owner)==observed:
+            if matched!=expected and path!=owner:
+                # A moved copy that no longer holds every owned row is not that
+                # input; its rows stay unknown rather than failing the build.
+                _discard_file_timing(conn,source,owner)
+                staged_inputs.append((source,owner,observed,cache.READER_VERSIONS[source],generation,'ready','moved input differs from its accounting'))
+                identities.pop((source,owner),None)
+                completed+=1; _progress(conn,job,completed,total); continue
+            if matched!=expected and file_signature(path)==observed:
                 raise RuntimeError('timing/accounting snapshot mismatch: incomplete input read')
             del entries,mapping
             gc.collect()
-        if file_signature(owner)!=observed:
+        if file_signature(path)!=observed:
             # A hot log is discarded individually. Its pinned accounting rows
             # remain eligible but unknown; stable inputs can still publish.
             _discard_file_timing(conn,source,owner)
@@ -379,7 +418,7 @@ def build(conn, job, request, *, sync=True, failure_context=None):
                 final_native_signatures[source]=json.dumps(speed_native.signature(source))
             current=final_native_signatures[source]
         else:
-            current=file_signature(owner)
+            current=file_signature(read_paths.get((source,owner),owner))
         if current!=observed:
             if source in speed_native.SOURCES:
                 raise RuntimeError('native DB/WAL changed before publication')

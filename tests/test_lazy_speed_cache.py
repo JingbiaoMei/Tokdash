@@ -232,9 +232,15 @@ def test_unrelated_pending_or_failure_does_not_relabel_published_measurements(co
         assert statuses['claude_code']=='unsupported_reader'
     with closing(cache.connect()) as c:
         c.execute("UPDATE speed_inputs SET state='pending' WHERE source='codex'");c.commit()
-    statuses={r['source']:r['status'] for r in cache.payload(request['from'],request['to'])['source_status']}
-    assert statuses['codex']=='pending_reprocessing'
+        waiting=c.execute("SELECT count(*) FROM speed_responses WHERE source='codex'").fetchone()[0]
+    statuses={r['source']:r for r in cache.payload(request['from'],request['to'])['source_status']}
+    assert statuses['codex']['status']=='pending_reprocessing'
+    assert statuses['codex']['usage_rows']==waiting, 'counts the responses still owed their timing'
     assert 'opencode' not in statuses
+    # A pending input owes nothing to dates it has no responses on.
+    later={r['source'] for r in cache.payload('2026-10-01','2026-10-28')['source_status']}
+    assert 'codex' not in later
+    assert 'codex' not in {r['source'] for r in cache.payload(request['from'],request['to'],source='dsh')['source_status']}
 
 
 def test_mixed_and_ratio_of_sums_and_ordered_gaps():
@@ -593,3 +599,59 @@ def test_reused_membership_seeks_one_input_before_looking_up_call_keys(corpus):
                 WHERE r.source=? AND r.input_owner=?''',('codex','one-input'))]
             assert index in plan[0] and 'input_owner=?' in plan[0]
             assert 'call_key=?' in plan[1]
+
+
+@pytest.mark.parametrize('gone',['archived','archived_while_stuck','deleted','deleted_after_reader_change'])
+def test_a_vanished_rollout_settles_instead_of_staying_pending(corpus,monkeypatch,gone):
+    """Archiving a Codex session moved its rollout and left it pending forever.
+
+    Nothing could re-read the original path, so the cache stayed stale and Codex
+    read as waiting on every date range. An archived rollout is read where it
+    went; a deleted one keeps its last read, or settles as unknown when the
+    reader changed since.
+    """
+    from tokdash import clientpaths
+    root,_,inventory=corpus
+    compute._sync_usage_store(CodingToolsUsageTracker())
+    request={'from':'2026-09-01','to':'2026-09-28','source':''}
+    build_requested(request)
+    owner=inventory['codex_file']
+    def timing():
+        with closing(cache.connect()) as c:
+            rows=c.execute("SELECT count(*),sum(speed_calls),sum(speed_ms) FROM speed_responses WHERE source='codex' AND input_owner=?",(owner,)).fetchone()
+            state=c.execute("SELECT state,signature,reader_version,last_error FROM speed_inputs WHERE source='codex' AND input_owner=?",(owner,)).fetchone()
+        return tuple(rows),dict(state)
+    before,first=timing()
+    assert before[1]==20 and first['state']=='ready'
+    if gone.startswith('archived'):
+        moved=clientpaths.codex_archived_sessions_dir()/Path(owner).name
+        moved.parent.mkdir(parents=True,exist_ok=True)
+        Path(owner).rename(moved)
+    else:
+        Path(owner).unlink()
+    if gone=='deleted_after_reader_change':
+        monkeypatch.setitem(cache.READER_VERSIONS,'codex',cache.READER_VERSIONS['codex']+1)
+    if gone=='archived_while_stuck':
+        # What an earlier build left behind: timing dropped, the input pending.
+        with closing(cache.connect()) as c:
+            c.execute("UPDATE speed_responses SET speed_calls=0,speed_tokens=0,speed_ms=0,speed_status='missing_timing' WHERE source='codex'")
+            c.execute("UPDATE speed_inputs SET state='pending',signature='missing',last_error='original input unavailable' WHERE source='codex'")
+            c.commit()
+    compute._sync_usage_store(CodingToolsUsageTracker())
+    with closing(cache.connect()) as c:
+        speed_worker.build(c,'test',request,sync=False)
+    after,state=timing()
+    assert state['state']=='ready' and state['reader_version']==cache.READER_VERSIONS['codex']
+    if gone.startswith('archived'):
+        # A rename keeps the inode, so the moved file reads as the same input.
+        assert after==before and state['signature']==first['signature'] and state['last_error'] is None
+    elif gone=='deleted':
+        assert after==before and state['signature']==first['signature'], 'the last read stays true'
+    else:
+        assert after[0]==before[0] and not after[1], 'accounting stays; its timing is unknown'
+        assert (state['signature'],state['last_error'])==('missing','original input unavailable')
+    payload=cache.payload(request['from'],request['to'])
+    assert payload['cache']['state']=='ready' and payload['cache']['pending_inputs']==0
+    statuses={r['source']:r['status'] for r in payload['source_status']}
+    # Without its only rollout Codex has nothing timed here: that is true, not waiting.
+    assert statuses.get('codex')==('timing_unavailable' if gone=='deleted_after_reader_change' else None)

@@ -15,7 +15,7 @@ from .compute import _collect_parser_file, _sync_usage_store
 from .sources.coding_tools import BaseParser, CodingToolsUsageTracker, connect_sqlite_readonly, _opencode_message_table, _mimo_imported_message_ids
 from .usage_store import UsageEntryStore, usage_db_path, _entry_key, MEASUREMENT_GENERATION_META_KEY
 from .speed_mode import collect_timings, canonical_turn_key
-from .output_speed import unmeasured, sanitize_stored
+from .output_speed import unmeasured, sanitize_stored, finite_positive_ms
 from .output_speed_readers import request_window_timing
 
 
@@ -95,7 +95,7 @@ def native_rows(source, session_id=''):
 
 def _discard_file_timing(conn,source,owner):
     empty=unmeasured()
-    conn.execute('UPDATE speed_stage SET '+','.join(k+'=?' for k in cache.FIELDS)+' WHERE source=? AND input_owner=?',(*[empty[k] for k in cache.FIELDS],source,owner))
+    conn.execute('UPDATE speed_stage SET speed_start=NULL,'+','.join(k+'=?' for k in cache.FIELDS)+' WHERE source=? AND input_owner=?',(*[empty[k] for k in cache.FIELDS],source,owner))
 
 
 def _progress(conn, job, completed, total):
@@ -197,7 +197,7 @@ def build(conn, job, request, *, sync=True, failure_context=None):
             if not owner:
                 continue
             rows=primary.execute('SELECT source,entry_key,file_path,timestamp,model,input,output,cache_read,cache_write,reasoning FROM usage_entries WHERE source=? AND file_path=?',(source,owner))
-            conn.executemany('INSERT INTO speed_stage VALUES ('+','.join('?' for _ in range(15))+')',
+            conn.executemany('INSERT INTO speed_stage ('+cache.COLUMNS+') VALUES ('+','.join('?' for _ in range(15))+')',
                ((r['source'],r['entry_key'],owner,'',r['timestamp'],r['model'],r['output'],r['reasoning'],int(r['output']>0 or source=='qwen_code' and r['reasoning']>0),*[unmeasured()[k] for k in cache.FIELDS]) for r in rows))
         session_inputs=[]
         for source,owner in sorted(selected):
@@ -312,7 +312,8 @@ def build(conn, job, request, *, sync=True, failure_context=None):
                 speed=sanitize_stored(entry.get('_speed') or unmeasured('missing_timing'))
                 member=mapping.get(key)
                 sid=member[0] if member else ''
-                conn.execute('UPDATE speed_stage SET session_id=?,'+','.join(k+'=?' for k in cache.FIELDS)+' WHERE source=? AND entry_key=?',(sid,*[speed[k] for k in cache.FIELDS],source,key))
+                start=finite_positive_ms(entry.get('_speed_start')) if speed['speed_calls'] else None
+                conn.execute('UPDATE speed_stage SET session_id=?,speed_start=?,'+','.join(k+'=?' for k in cache.FIELDS)+' WHERE source=? AND entry_key=?',(sid,start,*[speed[k] for k in cache.FIELDS],source,key))
                 if member:
                     conn.execute('INSERT INTO speed_member_stage VALUES (?,?,?,?,?,?,?,?)',(source,key,*member))
             expected={r[0] for r in conn.execute('SELECT entry_key FROM speed_stage WHERE source=? AND input_owner=?',(source,owner))}
@@ -366,7 +367,7 @@ def build(conn, job, request, *, sync=True, failure_context=None):
                 conn.execute('DELETE FROM speed_member_stage WHERE source=? AND session_id=?',(source,sid))
             count=0
             for row,member in native_rows(source,sid):
-                conn.execute('INSERT OR REPLACE INTO speed_stage VALUES ('+','.join('?' for _ in row)+')',row)
+                conn.execute('INSERT OR REPLACE INTO speed_stage ('+cache.COLUMNS+') VALUES ('+','.join('?' for _ in row)+')',row)
                 conn.execute('DELETE FROM speed_member_stage WHERE source=? AND call_key=?',row[:2])
                 conn.execute('INSERT INTO speed_member_stage VALUES (?,?,?,?,?,?,?,?)',member)
                 count+=1
@@ -377,6 +378,12 @@ def build(conn, job, request, *, sync=True, failure_context=None):
             raise RuntimeError('native DB/WAL changed during timing extraction')
         staged_inputs.append((source,owner,observed,cache.READER_VERSIONS[source],generation,'ready',None))
         completed+=1; _progress(conn,job,completed,total)
+    # A reused measurement keeps where its window opened; a fresh read set its own.
+    conn.execute('''UPDATE speed_stage AS s SET speed_start=(SELECT p.speed_start FROM speed_responses p
+        WHERE p.source=s.source AND p.entry_key=s.entry_key AND p.input_owner=s.input_owner AND p.timestamp=s.timestamp
+          AND p.speed_tokens=s.speed_tokens AND p.speed_ms=s.speed_ms AND p.speed_kind=s.speed_kind)
+        WHERE s.source IN ('''+','.join('?' for _ in cache.WINDOW_START_READERS)+''') AND s.speed_calls>0 AND s.speed_start IS NULL''',
+        tuple(cache.WINDOW_START_READERS))
     # Final signature check before atomic publication. Generation is the pinned
     # snapshot, even if an unrelated primary writer advanced in the meantime.
     final_native_signatures={}

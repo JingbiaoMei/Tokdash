@@ -89,7 +89,7 @@ def test_cache_only_batch_does_not_create_database_or_start_build(corpus):
 def test_cached_session_summary_work_is_bounded_by_its_membership(corpus):
     with closing(cache.connect()) as conn:
         def add_response(key,sid,tokens,ms,measured):
-            conn.execute('''INSERT INTO speed_responses VALUES
+            conn.execute('INSERT INTO speed_responses ('+cache.COLUMNS+''') VALUES
                 ('codex',?,'fixture',?,1000,'gpt-6',?,0,1,?,?,?,'decode','output','measured')''',
                 (key,sid,tokens,tokens if measured else 0,ms if measured else 0,int(measured)))
             conn.execute('''INSERT INTO speed_session_members VALUES

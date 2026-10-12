@@ -16,6 +16,7 @@ What the reader relies on, in order:
 from __future__ import annotations
 
 import json
+import sqlite3
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 
@@ -210,8 +211,8 @@ def test_ordinary_accounting_reads_no_timing_and_bills_the_same_rows(tmp_path):
     plain, timed = parse(path, timing=False), parse(path)
     assert set(plain) == set(timed)
     row = plain['claude:m1']
-    assert '_speed' not in row and '_stream_id' not in row and row['_session_id'] == 's'
-    strip = lambda e: {k: v for k, v in e.items() if k not in ('_speed', '_stream_id')}
+    assert not {'_speed', '_speed_start', '_stream_id'} & set(row) and row['_session_id'] == 's'
+    strip = lambda e: {k: v for k, v in e.items() if k not in ('_speed', '_speed_start', '_stream_id')}
     assert strip(timed['claude:m1']) == row
 
 
@@ -281,6 +282,74 @@ def test_model_rows_and_the_session_timeline_come_from_one_build(claude_home):
 
 def test_claude_is_end_anchored_and_single_block_requests_are_exact():
     # Single-block (and pre-2.1.x cumulative) requests bill the write that closes
-    # the window; see speed_trend for multi-block requests.
+    # the window; a recorded start covers multi-block ones.
     assert 'claude' not in speed_trend.START_ANCHORED_SOURCES
     assert speed_trend.busy_interval('claude', T0_MS + 4200, 4200) == (T0_MS, T0_MS + 4200)
+    assert speed_trend.busy_interval('claude', T0_MS + 3000, 3500, T0_MS + 1500) == (T0_MS + 1500, T0_MS + 5000)
+
+
+def test_each_timed_request_records_where_its_window_opened(tmp_path):
+    rows = parse(write(tmp_path / 'p' / 's.jsonl', THINKING_FIRST + [
+        user('r1', 'a2', 6000, tool_result=True),
+        block('b0', 'r1', 7500, 'm2', 'tool_use', index=0, out=90),
+        user('r2', 'b0', 8000, tool_result=True),
+        block('c0', 'r2', 9000, 'm3', 'text', index=0, stop=None),
+    ]))
+    assert rows['claude:m1']['_speed_start'] == T0_MS + 1500  # first block minus its thinking
+    assert rows['claude:m2']['_speed_start'] == T0_MS + 6000  # the tool result that sent it
+    assert '_speed_start' not in rows['claude:m3']
+
+
+def test_sequential_requests_never_overlap_in_combined_throughput(claude_home):
+    # The billed write is each request's first block. m3's tail after it is long,
+    # so an end anchor would slide m3 back over m1 and claim parallel work.
+    write(claude_home / 'proj' / 'parent.jsonl', [dict(r, sessionId='parent') for r in THINKING_FIRST + [
+        user('r1', 'a2', 5100, tool_result=True),
+        block('b0', 'r1', 5200, 'm3', 'thinking', index=0, think=100),
+        block('b1', 'b0', 9000, 'm3', 'tool_use', index=1),
+    ]])
+    compute._sync_usage_store(CodingToolsUsageTracker())
+    _run(speed_cache.ensure(DAY, DAY))
+    row, = speed_cache.payload(DAY, DAY, source='claude', cache_only=True)['rows']
+    assert (row['speed_ms'], row['busy_ms'], row['parallelism'], row['peak_in_flight']) == (7400, 7400, 1.0, 1)
+    trend = speed_cache.payload(DAY, DAY, view='trend', source='claude', cache_only=True)
+    assert [p for p in trend['series'][0]['parallelism'] if p is not None] == [1.0]
+    # A rebuild that reuses the published rows keeps their starts.
+    with closing(speed_cache.connect()) as c:
+        c.execute("UPDATE speed_meta SET value='0' WHERE key='published_generation'"); c.commit()
+    _run(speed_cache.ensure(DAY, DAY))
+    with closing(speed_cache.connect(readonly=True)) as c:
+        assert json.loads(speed_cache.meta(c)['last_build_counts'])['reused_files'] == 1
+        assert sorted(r[0] for r in c.execute("SELECT speed_start FROM speed_responses")) == [T0_MS + 1500, T0_MS + 5100]
+    assert speed_cache.payload(DAY, DAY, source='claude', cache_only=True)['rows'][0]['busy_ms'] == 7400
+
+
+def test_a_schema3_cache_gains_speed_start_in_place(tmp_path):
+    path = tmp_path / 'output_speed.sqlite3'
+    columns = speed_cache.COLUMNS.split(',')
+    with closing(sqlite3.connect(path)) as c:
+        c.executescript('''
+          CREATE TABLE speed_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+          CREATE TABLE speed_sessions(source TEXT,session_id TEXT,usage_generation INTEGER,state TEXT,PRIMARY KEY(source,session_id));
+          CREATE TABLE speed_jobs(id TEXT PRIMARY KEY,request TEXT NOT NULL,state TEXT NOT NULL,
+            completed_inputs INTEGER NOT NULL DEFAULT 0,total_inputs INTEGER NOT NULL DEFAULT 0,
+            created_at REAL NOT NULL,updated_at REAL NOT NULL,error TEXT,pid INTEGER);
+        ''')
+        c.execute('CREATE TABLE speed_responses(' + ','.join(columns) + ',PRIMARY KEY(source,entry_key))')
+        c.execute('CREATE INDEX idx_speed_report ON speed_responses(source,timestamp,model,eligible,speed_kind,'
+                  'speed_token_basis,speed_status,speed_tokens,speed_ms,speed_calls)')
+        c.execute('INSERT INTO speed_responses VALUES (' + ','.join('?' * len(columns)) + ')',
+                  ('codex', 'k', 'f', 's', 5000, 'gpt-6', 60, 0, 1, 60, 2000.0, 1, 'response_window',
+                   'output_including_reasoning', 'measured'))
+        c.commit()
+    with closing(speed_cache.connect(path, readonly=True)) as c:
+        (_key, _ts, begin, end, *_), = speed_trend._responses(c, 0, 10_000, '')
+        assert (begin, end) == (3000, 5000)  # read before the upgrade: the anchor
+    with closing(speed_cache.connect(path)) as c:
+        assert 'speed_start' in {r[1] for r in c.execute('PRAGMA table_info(speed_responses)')}
+        speed_cache.ensure_report_index(c)
+        assert 'speed_start' in {r[2] for r in c.execute("PRAGMA index_info('idx_speed_report')")}
+        plan = ' '.join(r[3] for r in c.execute('EXPLAIN QUERY PLAN SELECT speed_start,speed_ms FROM speed_responses'
+                                                ' INDEXED BY idx_speed_report WHERE timestamp>0'))
+        assert 'COVERING INDEX idx_speed_report' in plan
+        assert [r[2:4] for r in speed_trend._responses(c, 0, 10_000, '')] == [(3000, 5000)]

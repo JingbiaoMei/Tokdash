@@ -225,7 +225,7 @@ def _publish_fixture(entries,store):
         c.execute('DELETE FROM speed_responses')
         for e in entries:
             t=_speed_for_storage(e)
-            c.execute('INSERT INTO speed_responses VALUES ('+','.join('?' for _ in range(15))+')',
+            c.execute('INSERT INTO speed_responses ('+speed_cache.COLUMNS+') VALUES ('+','.join('?' for _ in range(15))+')',
                 (e['source'],_entry_key(e),'/fixture','','%s'%e['timestamp'],e['model'],e['output'],e.get('reasoning',0),int(e['output']>0 or e['source']=='qwen_code' and e.get('reasoning',0)>0),*[t[k] for k in speed_cache.FIELDS]))
         speed_cache.put_meta(c,published_generation=store.measurement_generation(),identity=speed_cache.identity(),updated_at='fixture')
         c.execute("INSERT OR REPLACE INTO speed_windows VALUES('','0001-01-01','9999-12-30',?)",(store.measurement_generation(),))

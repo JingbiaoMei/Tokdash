@@ -43,7 +43,7 @@ def test_covering_eligibility_preserves_unknown_and_reasoning_only_populations(t
         for i,(source,output,reasoning,status,calls) in enumerate(rows):
             if not legacy_unknown and status=='unknown':status='missing_timing'
             eligible=int(output>0 or source=='qwen_code' and reasoning>0)
-            c.execute('INSERT INTO speed_responses VALUES ('+','.join('?' for _ in range(15))+')',
+            c.execute('INSERT INTO speed_responses ('+speed_cache.COLUMNS+') VALUES ('+','.join('?' for _ in range(15))+')',
                 (source,str(i),'fixture','s',ts,'gpt-6',output,reasoning,eligible,
                  output+reasoning if calls else 0,100 if calls else 0,calls,
                  'response_window' if calls else '', 'output_including_reasoning' if calls else '',status))

@@ -1543,6 +1543,8 @@ class ClaudeParser(BaseParser):
                 entry["_session_id"] = str(session_id)
                 if association is not None and msg_id:
                     entry["_speed"] = association.resolve(msg_id, entry["output"])
+                    if entry["_speed"]["speed_calls"]:
+                        entry["_speed_start"] = association.opened[msg_id]
 
         out.extend(entry for _, _, entry in best_by_message_id.values())
         out.sort(key=lambda entry: int(entry.get("timestamp", 0) or 0))

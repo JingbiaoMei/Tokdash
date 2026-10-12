@@ -668,8 +668,8 @@ combined = per stream × parallelism), and `peak_in_flight` is the most response
 running at one moment. A response's interval comes from its stored timestamp and
 duration: OpenCode, KiloCode and mimo store the start of their window, the other
 readers the end. Claude Code stores a request's first content-block write, which
-ends a single-block request but not a multi-block one, so a multi-block interval
-sits early by its later blocks' streaming time. `models` merges each normalized model across every harness that
+is neither end of a multi-block window, so it also records where each window
+opened and its interval is exact. `models` merges each normalized model across every harness that
 measured it, with `sources`, `measurement_kinds` and `token_bases`, summed
 `speed_tokens`/`speed_ms`/`speed_calls`, `eligible_calls` and `coverage`, and busy time
 taken over all of those harnesses at once. It has no pooled per-stream rate, because
@@ -714,8 +714,11 @@ schema-12 caches without reparsing missing source logs or changing accounting
 fields. Ordinary ingestion and Overview do not open the derived database
 or invoke timing helpers. Existing primary pages become reusable; migration does
 not automatically compact the SQLite file. Timing reader versions are independent
-of pricing and ordinary parser identities. Derived schema is **3**, speed API
-contract **7**, and measurement contract **3**.
+of pricing and ordinary parser identities. Derived schema is **4**, speed API
+contract **7**, and measurement contract **3**. Schema 4 adds `speed_start`, where a
+window opened, for readers whose stored timestamp is neither end of it (Claude
+Code); an existing cache gains the column in place, and the worker rebuilds the
+covering report index once at its next publication.
 Publication identity **3** retires older model-window completion markers without
 discarding valid timing rows. A window is current only at the generation of its
 exact full source/date build. Session builds retain the last full-window source
@@ -819,7 +822,7 @@ continuous coverage. Empty views offer an explicit action to apply those dates
 to the shared top range. The comparison defaults to all measured tools; choosing
 a tool without measurements offers a return to all tools. Response contract and
 cache version: `7`; measurement contract: `3`; usage schema: `13`. Derived schema
-and publication identity are `3`. The separate
+is `4` and publication identity `3`. The separate
 derived database uses a partial measured-timestamp index for these endpoint seeks,
 including the empty case. It does not scan native JSON for available bounds.
 

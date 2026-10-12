@@ -172,11 +172,14 @@ class ClaudeRequestAssociation:
     through another request's response it has no sender (ambiguous_pair). No
     stop_reason is an interrupted request or a subagent log written before its
     final usage: incomplete either way. Output tokens include thinking. Links
-    stay inside one transcript; no tok/s floor or ceiling.
+    stay inside one transcript; no tok/s floor or ceiling. ``opened`` keeps
+    where each window began: the billed row is the first block's write, which
+    is neither end of a multi-block window.
     """
     def __init__(self):
         self.links = {}  # uuid -> (parentUuid, tag, raw timestamp, message id)
         self.calls = {}  # message id -> [parent, first order, first, think ms, last, stopped, failed, clock]
+        self.opened = {}
 
     def observe(self, obj):
         if not isinstance(obj, dict):
@@ -224,6 +227,7 @@ class ClaudeRequestAssociation:
             return unmeasured(STATUS_INVALID_TIMING)
         think = number(think)
         if think:
+            self.opened[identity] = first - think
             return measured(tokens=tokens, duration_ms=last - (first - think),
                             measurement_kind=KIND_POST_FIRST_TOKEN, token_basis=BASIS_INCLUDING)
         link, hops = self.links.get(parent), 0
@@ -240,6 +244,7 @@ class ClaudeRequestAssociation:
         start = _claude_ms(link[2])
         if start is None:
             return unmeasured(STATUS_INVALID_TIMING)
+        self.opened[identity] = start
         return measured(tokens=tokens, duration_ms=last - start,
                         measurement_kind=KIND_REQUEST_WINDOW, token_basis=BASIS_INCLUDING)
 

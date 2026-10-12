@@ -20,12 +20,17 @@ from .usage_store import UsageEntryStore, usage_db_path, MEASUREMENT_GENERATION_
 from .output_speed import unmeasured
 from . import speed_process
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 PUBLICATION_VERSION = 3
 READER_VERSIONS = {'kimi': 1, 'omp': 1, 'codex': 4, 'dsh': 3, 'qwen_code': 2,
                    'opencode': 3, 'kilocode': 3, 'mimo': 3, 'claude': 1}
 FIELDS = ('speed_tokens', 'speed_ms', 'speed_calls', 'speed_kind', 'speed_token_basis', 'speed_status')
 COLUMNS = 'source,entry_key,input_owner,session_id,timestamp,model,output,reasoning,eligible,' + ','.join(FIELDS)
+# speed_start is where a window opened, for readers whose stored timestamp is
+# neither end of it; NULL leaves the busy interval to the source's anchor.
+WINDOW_START_READERS = ('claude',)
+REPORT_INDEX = ('source,timestamp,model,eligible,speed_kind,speed_token_basis,speed_status,'
+                'speed_tokens,speed_ms,speed_calls,speed_start')
 
 
 def cache_path():
@@ -45,7 +50,8 @@ def connect(path=None, *, readonly=False):
     conn.execute('PRAGMA cache_size=-16384')
     if conn.execute("SELECT 1 FROM sqlite_master WHERE name='speed_sessions'").fetchone():
         controls = conn.execute("SELECT count(*) FROM sqlite_master WHERE name IN ('speed_failures','idx_speed_failure_source')").fetchone()[0]
-        current = controls==2 and 'worker_token' in {r[1] for r in conn.execute('PRAGMA table_info(speed_jobs)')} and bool(conn.execute("SELECT 1 FROM speed_meta WHERE key='instance_id'").fetchone())
+        current = controls==2 and 'worker_token' in {r[1] for r in conn.execute('PRAGMA table_info(speed_jobs)')} and bool(conn.execute("SELECT 1 FROM speed_meta WHERE key='instance_id'").fetchone()) \
+            and 'speed_start' in {r[1] for r in conn.execute('PRAGMA table_info(speed_responses)')}
         if not readonly and not current:
             conn.execute('BEGIN IMMEDIATE')
             _control_schema(conn)
@@ -72,14 +78,11 @@ def connect(path=None, *, readonly=False):
         output INTEGER NOT NULL,reasoning INTEGER NOT NULL,eligible INTEGER NOT NULL,
         speed_tokens INTEGER NOT NULL,speed_ms REAL NOT NULL,speed_calls INTEGER NOT NULL,
         speed_kind TEXT NOT NULL,speed_token_basis TEXT NOT NULL,speed_status TEXT NOT NULL,
-        PRIMARY KEY(source,entry_key));
+        speed_start REAL,PRIMARY KEY(source,entry_key));
       CREATE INDEX IF NOT EXISTS idx_speed_source_time ON speed_responses(source,timestamp);
       CREATE INDEX IF NOT EXISTS idx_speed_owner ON speed_responses(source,input_owner);
       CREATE INDEX IF NOT EXISTS idx_speed_measured_time ON speed_responses(timestamp)
         WHERE speed_calls > 0;
-      CREATE INDEX IF NOT EXISTS idx_speed_report ON speed_responses(
-        source,timestamp,model,eligible,speed_kind,speed_token_basis,speed_status,
-        speed_tokens,speed_ms,speed_calls);
       CREATE TABLE IF NOT EXISTS speed_session_members(
         source TEXT,call_key TEXT,session_id TEXT,turn_key TEXT,stream_id TEXT,
         sequence INTEGER,recorded_at INTEGER,timestamp_basis TEXT,
@@ -98,6 +101,7 @@ def connect(path=None, *, readonly=False):
       CREATE TABLE IF NOT EXISTS speed_source_days(
         source TEXT,day TEXT,usage_rows INTEGER,PRIMARY KEY(source,day));
     ''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_speed_report ON speed_responses(' + REPORT_INDEX + ')')
     _control_schema(conn)
     # Existing SQL aggregation is shared with the old ephemeral test adapter.
     conn.execute('CREATE TEMP VIEW usage_entries AS SELECT rowid AS rowid,* FROM speed_responses')
@@ -109,6 +113,8 @@ def _control_schema(conn):
     # Small control tables only; upgrading an existing history never rebuilds its indexes here.
     if 'worker_token' not in {r[1] for r in conn.execute('PRAGMA table_info(speed_jobs)')}:
         conn.execute('ALTER TABLE speed_jobs ADD COLUMN worker_token TEXT')
+    if 'speed_start' not in {r[1] for r in conn.execute('PRAGMA table_info(speed_responses)')}:
+        conn.execute('ALTER TABLE speed_responses ADD COLUMN speed_start REAL')  # metadata only
     conn.execute('''CREATE TABLE IF NOT EXISTS speed_failures(
         job_id TEXT PRIMARY KEY,source TEXT,request TEXT,scope TEXT,identity TEXT,
         generation INTEGER,error TEXT,created_at REAL)''')
@@ -208,9 +214,9 @@ def ensure_report_index(conn):
     projection avoids random table reads of ownership/session strings on mounted
     filesystems; the raw canonical rows remain the authority for session joins.
     """
-    conn.execute('''CREATE INDEX IF NOT EXISTS idx_speed_report ON speed_responses(
-        source,timestamp,model,eligible,speed_kind,speed_token_basis,speed_status,
-        speed_tokens,speed_ms,speed_calls)''')
+    if 'speed_start' not in {r[2] for r in conn.execute("PRAGMA index_info('idx_speed_report')")}:
+        conn.execute('DROP INDEX IF EXISTS idx_speed_report')  # a schema-3 projection
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_speed_report ON speed_responses(' + REPORT_INDEX + ')')
 
 
 def meta(conn):

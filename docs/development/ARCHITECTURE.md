@@ -60,8 +60,8 @@ Groups retain source, model, measurement kind and token basis so incompatible
 timing windows are not combined. That per-stream rate sits beside a combined one,
 which divides the same tokens by the union of busy time, so overlapping responses
 count once. `speed_trend.py` rebuilds each busy interval from the stored timestamp
-and duration, anchored at the start or end as the source records it (only
-approximately for Claude Code's multi-block requests), and buckets
+and duration, anchored at the start or end as the source records it (Claude Code
+records where each window opened), and buckets
 both rates for the trend view. A model's row merged across harnesses carries only
 the combined rate, since its windows may differ in kind. Model/hour results use
 bounded process caching keyed by publication revision, filters and local-clock

@@ -64,7 +64,7 @@ def test_two_fully_overlapping_responses_double_the_rate():
 
 #: Traced through the parsers: the file readers store the record that settles a
 #: response, a few milliseconds after its window ends.
-END_ANCHORED = frozenset({"kimi", "omp", "codex", "dsh", "qwen_code"})
+END_ANCHORED = frozenset({"kimi", "omp", "codex", "dsh", "qwen_code", "claude"})
 
 
 def test_every_supported_reader_has_a_decided_anchor():

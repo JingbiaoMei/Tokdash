@@ -47,12 +47,21 @@ measurements and canonical session membership, with atomic publication and
 input-scoped failures. Readers display the last successful snapshot while a build
 is pending and subscribe to job events only while their page is visible.
 
+File readers (Codex, Kimi, omp, dsh, Qwen Code, Claude Code) reparse a whole
+contributing log with timing enabled and attach each window to the usage row the
+ordinary parser bills; OpenCode, KiloCode and mimo are read from their databases.
+Claude Code's reader groups a request's per-block assistant entries by message id
+and times it from the first token when a leading thinking block records its
+duration, otherwise from the sending user entry up the `parentUuid` chain, keeping
+only a per-transcript uuid map.
+
 Model and session rates divide summed measured tokens by summed matched duration.
 Groups retain source, model, measurement kind and token basis so incompatible
 timing windows are not combined. That per-stream rate sits beside a combined one,
 which divides the same tokens by the union of busy time, so overlapping responses
 count once. `speed_trend.py` rebuilds each busy interval from the stored timestamp
-and duration, anchored at the start or end as the source records it, and buckets
+and duration, anchored at the start or end as the source records it (only
+approximately for Claude Code's multi-block requests), and buckets
 both rates for the trend view. A model's row merged across harnesses carries only
 the combined rate, since its windows may differ in kind. Model/hour results use
 bounded process caching keyed by publication revision, filters and local-clock

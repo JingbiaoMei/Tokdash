@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from bisect import bisect_left
 from collections import defaultdict
+from datetime import datetime
 from typing import Any
 import math
 
@@ -14,13 +15,15 @@ try:
     from .output_speed import (
         BASIS_INCLUDING, KIND_POST_FIRST_TOKEN, KIND_REQUEST_WINDOW,
         KIND_RESPONSE_WINDOW, STATUS_AMBIGUOUS_PAIR, STATUS_INCOMPLETE,
-        STATUS_INVALID_TIMING, STATUS_MISSING_TIMING, measured, unmeasured,
+        STATUS_INVALID_TIMING, STATUS_MISSING_TIMING, STATUS_RETRY_CONTAMINATED,
+        measured, unmeasured,
     )
 except ImportError:  # coding_tools.py also supports direct script execution
     from output_speed import (
         BASIS_INCLUDING, KIND_POST_FIRST_TOKEN, KIND_REQUEST_WINDOW,
         KIND_RESPONSE_WINDOW, STATUS_AMBIGUOUS_PAIR, STATUS_INCOMPLETE,
-        STATUS_INVALID_TIMING, STATUS_MISSING_TIMING, measured, unmeasured,
+        STATUS_INVALID_TIMING, STATUS_MISSING_TIMING, STATUS_RETRY_CONTAMINATED,
+        measured, unmeasured,
     )
 
 
@@ -142,6 +145,103 @@ class QwenTimingAssociation:
                                       measurement_kind=KIND_POST_FIRST_TOKEN, token_basis=BASIS_INCLUDING))
             row['_speed'] = speed
         return any(rec.get('parentUuid') not in self.telemetry for rec, _ in self.rows)
+
+
+#: System entries Claude Code writes when a request failed and was sent again.
+CLAUDE_RETRY_SUBTYPES = frozenset({'api_error', 'model_refusal_fallback'})
+
+
+def _claude_ms(value):
+    try:
+        return round(datetime.fromisoformat(str(value).replace('Z', '+00:00')).timestamp() * 1000)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+class ClaudeRequestAssociation:
+    """One Claude Code request -> its own content-block stamps, never a time join.
+
+    A request is every assistant entry of one message id, one per content block,
+    each stamped when its block finished. Since 2.1.287 a leading thinking block
+    carries thinkingDurationMs, its own streaming time, so its stamp minus that
+    is the first output token and the window runs to the last block. Otherwise
+    the window opens at the request's sender, the nearest user entry (prompt or
+    tool_result) up the parentUuid chain: attachments are written with the
+    response, so they never open it. That window holds prefill and transport,
+    and through an API error or fallback also the retry (retry_contaminated);
+    through another request's response it has no sender (ambiguous_pair). No
+    stop_reason is an interrupted request or a subagent log written before its
+    final usage: incomplete either way. Output tokens include thinking. Links
+    stay inside one transcript; no tok/s floor or ceiling.
+    """
+    def __init__(self):
+        self.links = {}  # uuid -> (parentUuid, tag, raw timestamp, message id)
+        self.calls = {}  # message id -> [parent, first order, first, think ms, last, stopped, failed, clock]
+
+    def observe(self, obj):
+        if not isinstance(obj, dict):
+            return
+        kind = obj.get('type')
+        message = obj.get('message') if isinstance(obj.get('message'), dict) else {}
+        role = message.get('role')
+        uuid = obj.get('uuid')
+        # The usage parser's own row selection and id, so a timing lands on its row.
+        identity = str(message.get('id') or uuid or '') if role == 'assistant' or (role is None and kind == 'assistant') else ''
+        parent = obj.get('parentUuid') if isinstance(obj.get('parentUuid'), str) else None
+        if isinstance(uuid, str) and uuid:
+            retry = obj.get('isApiErrorMessage') or (kind == 'system' and str(obj.get('subtype')) in CLAUDE_RETRY_SUBTYPES)
+            tag = 'retry' if retry else 'user' if kind == 'user' else 'call' if identity else ''
+            self.links[uuid] = (parent, tag, obj.get('timestamp'), identity)
+        if not identity:
+            return
+        stamp = _claude_ms(obj.get('timestamp'))
+        index = obj.get('apiBlockIndex')
+        order = (index if isinstance(index, int) and not isinstance(index, bool) else math.inf,
+                 math.inf if stamp is None else stamp)
+        call = self.calls.get(identity)
+        if call is None:
+            call = self.calls[identity] = [parent, None, None, None, None, False, False, True]
+        if stamp is None:
+            call[7] = False
+        else:
+            call[4] = stamp if call[4] is None else max(call[4], stamp)
+        if call[1] is None or order < call[1]:
+            content = message.get('content')
+            thinking = (isinstance(content, list) and len(content) == 1 and isinstance(content[0], dict)
+                        and content[0].get('type') == 'thinking')
+            call[1:4] = [order, stamp, obj.get('thinkingDurationMs') if thinking else None]
+        call[5] = call[5] or bool(message.get('stop_reason'))
+        call[6] = call[6] or bool(obj.get('isApiErrorMessage')) or message.get('model') == '<synthetic>'
+
+    def resolve(self, identity, tokens):
+        call = self.calls.get(identity)
+        if call is None:
+            return unmeasured(STATUS_MISSING_TIMING)
+        parent, _order, first, think, last, stopped, failed, clock = call
+        if failed or not stopped:
+            return unmeasured(STATUS_INCOMPLETE)
+        if not clock:
+            return unmeasured(STATUS_INVALID_TIMING)
+        think = number(think)
+        if think:
+            return measured(tokens=tokens, duration_ms=last - (first - think),
+                            measurement_kind=KIND_POST_FIRST_TOKEN, token_basis=BASIS_INCLUDING)
+        link, hops = self.links.get(parent), 0
+        while link is not None and link[1] != 'user':
+            if link[1] == 'retry':
+                return unmeasured(STATUS_RETRY_CONTAMINATED)
+            if link[1] == 'call' and link[3] != identity:
+                return unmeasured(STATUS_AMBIGUOUS_PAIR)
+            link, hops = self.links.get(link[0]), hops + 1
+            if hops > len(self.links):
+                return unmeasured(STATUS_INVALID_TIMING)  # a parentUuid cycle
+        if link is None:
+            return unmeasured(STATUS_MISSING_TIMING)
+        start = _claude_ms(link[2])
+        if start is None:
+            return unmeasured(STATUS_INVALID_TIMING)
+        return measured(tokens=tokens, duration_ms=last - start,
+                        measurement_kind=KIND_REQUEST_WINDOW, token_basis=BASIS_INCLUDING)
 
 
 def dsh_stream_timing(stream, usage):

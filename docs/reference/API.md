@@ -667,7 +667,9 @@ flight: `busy_ms` is the union of the responses' intervals, `combined_tok_per_s`
 combined = per stream × parallelism), and `peak_in_flight` is the most responses
 running at one moment. A response's interval comes from its stored timestamp and
 duration: OpenCode, KiloCode and mimo store the start of their window, the other
-readers the end. `models` merges each normalized model across every harness that
+readers the end. Claude Code stores a request's first content-block write, which
+ends a single-block request but not a multi-block one, so a multi-block interval
+sits early by its later blocks' streaming time. `models` merges each normalized model across every harness that
 measured it, with `sources`, `measurement_kinds` and `token_bases`, summed
 `speed_tokens`/`speed_ms`/`speed_calls`, `eligible_calls` and `coverage`, and busy time
 taken over all of those harnesses at once. It has no pooled per-stream rate, because
@@ -795,8 +797,9 @@ range. Worker failures retain their `error` cache metadata and last-good rows.
 | dsh | `response_window` | First explicit assistant chunk to the matching usage chunk in the same stream, after the existing `(turn, step, attempt)` fold and seed boundary. Retry-contaminated steps and unfinished attempts are excluded |
 | Qwen Code | `post_first_token` | Direct assistant `parentUuid` to unique API-telemetry UUID in the same session/agent; duration minus TTFT. Token/model agreement validates the link. Missing telemetry is normal |
 | OpenCode, KiloCode, mimo | `request_window` | Message creation to completion; includes request overhead and awaited tools/retries. Explicit errors, abnormal finishes, absent completion and invalid clocks are excluded; imported mimo messages retain existing exclusion. MiMo `max` ensemble/replay messages are excluded because one clock covers several calls |
+| Claude Code | `post_first_token`, `request_window` | One API request is every assistant entry of one message id (one per content block, stamped when the block finished), timed once on the billed message-id row. When the first block is a thinking block carrying `thinkingDurationMs` (Claude Code 2.1.287+), the window runs from that block's stamp minus its duration (the first token) to the last block. Otherwise it runs from the sending user entry, the nearest prompt or tool result up the `parentUuid` chain past attachments, to the last block: prefill and transport are included, awaited tools are not. Requests without a `stop_reason` (interrupted, or subagent logs written before their final usage), API-error placeholders and `<synthetic>` rows are `incomplete`; a window through an API error or model fallback is `retry_contaminated`; one through another request's response, or a sender outside the transcript, is `ambiguous_pair` or `missing_timing` |
 
-Codex and dsh output counters already include reasoning. Qwen's recorded total-token
+Codex and dsh output counters already include reasoning, as do Claude Code's. Qwen's recorded total-token
 identity establishes whether its candidate counter includes reasoning or stores it
 separately; a positive reasoning counter without that proof stays unmeasured.
 The OpenCode family stores disjoint visible-output and reasoning counters, added once.

@@ -19,7 +19,10 @@ sits differs by reader, traced through the parsers and checked against real logs
 the OpenCode family (opencode, kilocode, mimo) stores ``time_created``, the start
 of its created-to-completed window, exactly; the file readers (kimi, omp, codex,
 dsh, qwen_code) store the record that settles the response, a few milliseconds
-after the window ends. ``busy_interval`` encodes that, and
+after the window ends. Claude Code bills a request's first content-block write:
+that closes a single-block request (and an older log's, whose fullest write is
+its last), but a multi-block interval sits early by its later blocks' streaming
+time. ``busy_interval`` encodes that, and
 tests/test_speed_trend.py pins it per reader so a parser that moves its
 timestamp fails loudly instead of skewing overlap. Codex's duration already has
 overlapping tool time removed, so its interval is a slightly compressed stand-in

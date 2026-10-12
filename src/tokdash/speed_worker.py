@@ -24,8 +24,16 @@ def file_signature(path):
     return json.dumps((st.st_dev,st.st_ino,st.st_mtime_ns,st.st_size))
 
 
-def session_mapping(source, file_sig):
-    """Use the existing physical-file session reader, never a harness-wide loader."""
+def session_mapping(source, file_sig, entries=()):
+    """Use the existing physical-file session reader, never a harness-wide loader.
+
+    Claude's reader keys turns by their fields rather than the message id, so its
+    members come from the same file's timed usage rows, which carry that
+    reader's session id and stream.
+    """
+    if source == 'claude':
+        return {e['entry_id']:(e['_session_id'],e['entry_id'],e['_stream_id'],i,int(e['timestamp']),'usage_record')
+                for i,e in enumerate(entries) if e.get('entry_id')}
     from . import sessions
     parser = {'codex':sessions._parse_codex_session_file,'kimi':sessions._parse_kimi_session_file,
               'omp':sessions._parse_omp_session_file,'dsh':sessions._parse_dsh_session_file,
@@ -288,7 +296,7 @@ def build(conn, job, request, *, sync=True, failure_context=None):
             context=store.file_contexts(source,paths=(owner,))
             with collect_timings():
                 entries=_collect_parser_file(parser,sig,file_context=context)
-            mapping=session_mapping(source,sig)
+            mapping=session_mapping(source,sig,entries)
             matched=set()
             for entry in entries:
                 key=_entry_key(entry)

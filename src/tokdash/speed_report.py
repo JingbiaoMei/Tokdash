@@ -35,7 +35,7 @@ from .model_normalization import normalize_model_name
 from functools import lru_cache
 
 _speed_model = lru_cache(maxsize=2048)(normalize_model_name)
-SUPPORTED_READERS = frozenset({"kimi", "omp", "codex", "dsh", "qwen_code", "opencode", "kilocode", "mimo"})
+SUPPORTED_READERS = frozenset({"kimi", "omp", "codex", "dsh", "qwen_code", "opencode", "kilocode", "mimo", "claude"})
 from .output_speed import (
     MEASUREMENT_KINDS,
     STATUSES,

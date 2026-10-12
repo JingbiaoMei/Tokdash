@@ -36,7 +36,7 @@ try:
         omp_message_timing,
     )
     from ..pricing import PricingDatabase
-    from ..output_speed_readers import CodexResponseAssociation, QwenTimingAssociation, native_message_timing
+    from ..output_speed_readers import ClaudeRequestAssociation, CodexResponseAssociation, QwenTimingAssociation, native_message_timing
     from ..speed_mode import timing_enabled
     from ..usage_store import (
         USAGE_ENTRY_FORMAT_VERSION,
@@ -59,7 +59,7 @@ except ImportError:  # pragma: no cover
         omp_message_timing,
     )
     from pricing import PricingDatabase
-    from output_speed_readers import CodexResponseAssociation, QwenTimingAssociation, native_message_timing
+    from output_speed_readers import ClaudeRequestAssociation, CodexResponseAssociation, QwenTimingAssociation, native_message_timing
     from speed_mode import timing_enabled
     from usage_store import (
         USAGE_ENTRY_FORMAT_VERSION,
@@ -1413,7 +1413,9 @@ class ClaudeParser(BaseParser):
     #    role-bearing id, which on endpoints that stamp both `type` and
     #    `message.role` was the partial that carries the whole prompt and no
     #    output yet -- dropping ~20% of all output tokens.
-    persistent_parser_version = 2
+    # 3: rows carry the session reader's session id, so the timing cache can
+    #    tell when every input of a session has been read.
+    persistent_parser_version = 3
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
@@ -1453,15 +1455,23 @@ class ClaudeParser(BaseParser):
         #
         # See claude_usage_supersedes for the tie rules.
         best_by_message_id: Dict[str, Tuple[int, ClaudeUsageBuckets, Dict[str, Any]]] = {}
+        measure_speed = timing_enabled()
 
         for path_str, _, _ in self._file_signatures():
             session_file = Path(path_str)
+            # sessions._parse_claude_session_file's rule: the last sessionId, else the stem.
+            session_id = session_file.stem
+            created: List[Tuple[Dict[str, Any], str]] = []
+            association = ClaudeRequestAssociation() if measure_speed else None
             try:
                 for line in _iter_jsonl_lines(session_file):
                     try:
                         obj = json.loads(line)
                     except Exception:
                         continue
+                    session_id = obj.get("sessionId") or session_id
+                    if association is not None:
+                        association.observe(obj)
                     msg = obj.get("message") if isinstance(obj.get("message"), dict) else {}
                     role = msg.get("role")
                     is_top_level_assistant = role is None and obj.get("type") == "assistant"
@@ -1519,13 +1529,20 @@ class ClaudeParser(BaseParser):
                             cache_write=cache_w,
                         ),
                     }
+                    created.append((entry, msg_id))
+                    if association is not None:
+                        entry["_stream_id"] = str(obj.get("agentId") or "").strip() or "main"
                     if not msg_id:
                         out.append(entry)
                         continue
 
                     best_by_message_id[msg_id] = (total_t, buckets, entry)
             except Exception:
-                continue
+                pass
+            for entry, msg_id in created:
+                entry["_session_id"] = str(session_id)
+                if association is not None and msg_id:
+                    entry["_speed"] = association.resolve(msg_id, entry["output"])
 
         out.extend(entry for _, _, entry in best_by_message_id.values())
         out.sort(key=lambda entry: int(entry.get("timestamp", 0) or 0))

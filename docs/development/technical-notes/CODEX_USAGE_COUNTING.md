@@ -183,6 +183,27 @@ Regression coverage must keep these cases distinct:
 `CodexParser.replay_events_skipped` counts both source-gated replay events and
 stable-key duplicates so format changes remain observable.
 
+## Compaction requests
+
+A remote compaction is a model request of its own: a `token_usage_record` (also
+inlined as the `compacted` event's `latest_token_usage_record`) answered by a
+`compacted` event naming its `response_id`. On OpenAI models no `token_count`
+ever carries its usage -- the next one has zero `last_token_usage` and every
+later total excludes it -- so billing from `token_count` alone drops it. Custom
+providers (for example a local vLLM) do emit a `token_count` with exactly that
+usage, between the record and the `compacted` event or just after it.
+
+`CodexCompactionTracker` decides from the log itself: a compaction is *carried*
+when a `token_count` after its record has `last_token_usage` equal to the
+record's `usage`. Every compaction left uncarried at EOF is billed as its own row,
+priced under the model of the record's turn and dated at the `compacted` line.
+Its stable key (`codex_compaction_event_key`) hashes the session id, the record's
+`usage` and its `thread_token_usage`, scoped like `codex_token_event_key`, so
+resumed-history copies and fork replays collapse against the original. Rollouts
+that predate `token_usage_record` have nothing to bill and are unchanged. Both
+parsers share the tracker, so Overview and Sessions agree. Compaction rows are
+never timed: the speed reader already treats compaction as `incomplete`.
+
 ## Operational note
 
 The usage database is a parse cache, not a source of truth. Parser module content

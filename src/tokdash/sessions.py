@@ -28,11 +28,13 @@ from .activity_insights import (
 )
 from .compute import cache_hit_rate, pct_change, period_to_days, previous_period_range
 from .output_speed import (
+    STATUS_INCOMPLETE,
     KimiStepAssociation,
     kimi_usage_record_key,
     omp_message_timing,
     public_turn_speed,
     turn_measurement_summary,
+    unmeasured,
 )
 from .output_speed_readers import CodexResponseAssociation, request_window_timing, native_message_timing
 from .speed_mode import timing_enabled, collect_timings
@@ -42,6 +44,7 @@ from .pricing import PricingDatabase
 from .sources.coding_tools import (
     CODEX_DEFAULT_MODEL,
     AntigravityCLIParser,
+    CodexCompactionTracker,
     HermesParser,
     KimiParser,
     QoderIdeParser,
@@ -52,6 +55,7 @@ from .sources.coding_tools import (
     antigravity_db_signatures,
     claude_usage_supersedes,
     cline_message_file_signatures,
+    codex_compaction_event_key,
     codex_fork_ancestry,
     codex_replay_key_session_id,
     codex_token_event_key,
@@ -127,7 +131,8 @@ _SESSION_FILE_PARSER_VERSIONS = {
     #    single-meta fork shape) and raws carry _subagent_parent_id for cross-session
     #    replay dedup; stored v1 keys/rows predate both.
     # 3: response-owned speed measurements from the shared usage reader.
-    "_parse_codex_session_file": 3,
+    # 4: a compaction request no token_count carries is its own turn (issue #222).
+    "_parse_codex_session_file": 4,
     # 2: turns carry _stream_id so subagents are timed separately from the main agent.
     # 3: streaming snapshots collapse per claude_usage_supersedes rather than
     #    keeping the first write, for role-bearing rows too; stored v2 turns
@@ -1713,6 +1718,7 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
     seen_event_keys: set[str] = set()
     saw_session_meta = False
     saw_turn_context = False
+    compactions = CodexCompactionTracker()
     activity = new_activity_record(is_primary=True, has_explicit_session_id=False)
 
     try:
@@ -1737,6 +1743,21 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
             payload = obj.get("payload") if isinstance(obj.get("payload"), dict) else {}
             obj_type = obj.get("type")
             payload_type = payload.get("type")
+
+            compaction = compactions.observe(obj)
+            if compaction is not None:
+                # Whether it bills is only known at EOF, but the key scope and
+                # model are those of the line it was logged on.
+                compaction["key_scope"] = codex_replay_key_session_id(
+                    is_subagent_file or subagent_parent_id is not None,
+                    own_session_id,
+                    session_id,
+                    subagent_parent_id,
+                    saw_turn_context,
+                )
+                compaction["model"] = compaction["model"] or current_model
+                compaction["provider"] = current_provider
+                compaction["line_no"] = line_no
 
             if obj_type == "session_meta":
                 meta_id = payload.get("id")
@@ -1912,6 +1933,58 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
     timings = association.resolve() if association is not None else {}
     for turn, identity in pending_speed:
         turn["_speed"] = timings[identity]
+
+    added_compaction = False
+    for compaction in compactions.uncarried():
+        # No token_count billed this request (issue #222), so it is a turn of
+        # its own, keyed like CodexParser's row so Overview and Sessions agree.
+        record = compaction["record"]
+        key_session_id, replay_fallback = compaction["key_scope"]
+        event_key = codex_compaction_event_key(key_session_id, record)
+        if replay_fallback and event_key is None:
+            continue
+        if event_key and event_key in seen_event_keys:
+            continue
+        if event_key:
+            seen_event_keys.add(event_key)
+        usage = record["usage"]
+        cache_read = int(usage.get("cached_input_tokens", 0) or 0)
+        input_tokens = max(0, int(usage.get("input_tokens", 0) or 0) - cache_read)
+        output_tokens = int(usage.get("output_tokens", 0) or 0)
+        reasoning_tokens = int(usage.get("reasoning_output_tokens", 0) or 0)
+        if input_tokens + cache_read + output_tokens + reasoning_tokens == 0:
+            continue
+        turn_model = compaction["model"] or CODEX_DEFAULT_MODEL
+        turn_index += 1
+        turn = _build_turn(
+            turn_index=turn_index,
+            timestamp_ms=compaction["timestamp"],
+            model=turn_model,
+            tokens_in=input_tokens,
+            tokens_cache=cache_read,
+            tokens_out=output_tokens,
+            tokens_reasoning=reasoning_tokens,
+            bill=_billing_record(
+                f"{compaction['provider']}/{turn_model}" if compaction["provider"] else turn_model,
+                "fresh-input",
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_read=cache_read,
+            ),
+        )
+        if compaction["model"] is None:
+            turn["_model_placeholder"] = True
+        turn["_event_key"] = event_key or f"{session_path}:{compaction['line_no']}"
+        if association is not None:
+            # Compaction is incomplete to the speed reader, never measured.
+            turn["_speed"] = unmeasured(STATUS_INCOMPLETE)
+        turns.append(turn)
+        added_compaction = True
+    if added_compaction:
+        # Back to log order: the request sits where Codex wrote it.
+        turns.sort(key=lambda t: t["timestamp_ms"])
+        for index, turn in enumerate(turns, start=1):
+            turn["turn_index"] = index
 
     if not turns and not activity["is_primary"]:
         return None

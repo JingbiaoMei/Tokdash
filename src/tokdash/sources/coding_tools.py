@@ -31,9 +31,11 @@ import zstandard
 try:
     from .. import clientpaths
     from ..output_speed import (
+        STATUS_INCOMPLETE,
         KimiStepAssociation,
         kimi_usage_record_key,
         omp_message_timing,
+        unmeasured,
     )
     from ..pricing import PricingDatabase
     from ..output_speed_readers import ClaudeRequestAssociation, CodexResponseAssociation, QwenTimingAssociation, native_message_timing
@@ -54,9 +56,11 @@ except ImportError:  # pragma: no cover
     # Allow running as a script by file path.
     import clientpaths
     from output_speed import (
+        STATUS_INCOMPLETE,
         KimiStepAssociation,
         kimi_usage_record_key,
         omp_message_timing,
+        unmeasured,
     )
     from pricing import PricingDatabase
     from output_speed_readers import ClaudeRequestAssociation, CodexResponseAssociation, QwenTimingAssociation, native_message_timing
@@ -216,6 +220,25 @@ def _glob_sigs(pattern: str) -> tuple:
     return tuple(sorted(items))
 
 
+_CODEX_COUNTER_FIELDS = (
+    "input_tokens",
+    "cached_input_tokens",
+    "cache_write_input_tokens",
+    "output_tokens",
+    "reasoning_output_tokens",
+)
+
+
+def _codex_counters(snapshot: dict[str, Any]) -> dict[str, int]:
+    values: dict[str, int] = {}
+    for field in _CODEX_COUNTER_FIELDS:
+        value = snapshot.get(field, 0)
+        if isinstance(value, bool):
+            raise ValueError("boolean token count")
+        values[field] = int(value or 0)
+    return values
+
+
 def codex_token_event_key(session_id: Any, info: Any) -> Optional[str]:
     """Return a stable identity for a Codex token-count event.
 
@@ -238,22 +261,7 @@ def codex_token_event_key(session_id: Any, info: Any) -> Optional[str]:
     if not isinstance(total, dict) or not total or not isinstance(last, dict) or not last:
         return None
 
-    fields = (
-        "input_tokens",
-        "cached_input_tokens",
-        "cache_write_input_tokens",
-        "output_tokens",
-        "reasoning_output_tokens",
-    )
-
-    def normalized(snapshot: dict[str, Any]) -> dict[str, int]:
-        values: dict[str, int] = {}
-        for field in fields:
-            value = snapshot.get(field, 0)
-            if isinstance(value, bool):
-                raise ValueError("boolean token count")
-            values[field] = int(value or 0)
-        return values
+    normalized = _codex_counters
 
     try:
         canonical = json.dumps(
@@ -272,6 +280,124 @@ def codex_token_event_key(session_id: Any, info: Any) -> Optional[str]:
     except (TypeError, ValueError, OverflowError):
         return None
     return f"codex-token-v1:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
+
+
+def codex_compaction_event_key(session_id: Any, record: Any) -> Optional[str]:
+    """Return a stable identity for a Codex compaction request's usage.
+
+    A remote compaction is a ``token_usage_record`` that no ``token_count``
+    carries on OpenAI models (issue #222), so it is billed as its own row. Like
+    ``codex_token_event_key`` it hashes the stable usage state, so a resumed
+    history's copy collapses against the original; the record's own usage and
+    the thread total it leaves behind play the role of ``last``/``total``.
+    Missing state returns None for the same reason as there.
+    """
+    sid = str(session_id or "").strip()
+    if not sid or not isinstance(record, dict):
+        return None
+    usage = record.get("usage")
+    thread = record.get("thread_token_usage")
+    if not isinstance(usage, dict) or not usage or not isinstance(thread, dict) or not thread:
+        return None
+    try:
+        canonical = json.dumps(
+            {
+                "version": 1,
+                "kind": "compaction",
+                "session_id": sid,
+                "thread_token_usage": _codex_counters(thread),
+                "usage": _codex_counters(usage),
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return f"codex-compaction-v1:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
+
+
+class CodexCompactionTracker:
+    """Find the compaction requests that no ``token_count`` bills.
+
+    Codex logs a remote compaction as a ``token_usage_record`` (also inlined as
+    the ``compacted`` event's ``latest_token_usage_record``) answered by a
+    ``compacted`` event naming its ``response_id``. On OpenAI models the
+    ``token_count`` that follows has zero ``last_token_usage`` and every later
+    total excludes the request; other providers' ``token_count`` carries it as
+    ``last_token_usage``, before or after the ``compacted`` event. The log
+    decides: a compaction is carried when a ``token_count`` after its record has
+    exactly its usage, and bills as its own row only when none does. Shared by both Codex parsers so Overview and Sessions agree.
+
+    Feed every parsed line to :meth:`observe`; read :meth:`uncarried` at EOF.
+    """
+
+    def __init__(self) -> None:
+        self._record: Optional[dict[str, Any]] = None
+        self._record_carried = False
+        self._turn_models: dict[str, str] = {}
+        self._compactions: List[dict[str, Any]] = []
+
+    @staticmethod
+    def _signature(usage: Any) -> Optional[Tuple[int, ...]]:
+        if not isinstance(usage, dict):
+            return None
+        try:
+            signature = tuple(_codex_counters(usage).values())
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return signature if any(signature) else None
+
+    def observe(self, msg: dict[str, Any]) -> Optional[dict[str, Any]]:
+        """Return the compaction request this line opens, for the caller to annotate."""
+        kind = msg.get("type")
+        p = msg.get("payload") if isinstance(msg.get("payload"), dict) else {}
+        if kind == "token_usage_record":
+            self._record = p
+            self._record_carried = False
+        elif kind == "turn_context":
+            if p.get("turn_id") and p.get("model"):
+                self._turn_models[str(p["turn_id"])] = str(p["model"])
+        elif kind == "compacted":
+            rid = p.get("compaction_response_id")
+            record = None
+            for candidate in (p.get("latest_token_usage_record"), self._record):
+                if rid and isinstance(candidate, dict) and candidate.get("response_id") == rid:
+                    record = candidate
+                    break
+            signature = self._signature(record.get("usage")) if record else None
+            if signature is None:
+                return None
+            try:
+                at = datetime.fromisoformat(str(msg.get("timestamp")).replace("Z", "+00:00"))
+                timestamp_ms = int(at.astimezone(timezone.utc).timestamp() * 1000)
+            except (TypeError, ValueError, OverflowError, OSError):
+                return None
+            compaction = {
+                "record": record,
+                "signature": signature,
+                "model": self._turn_models.get(str(record.get("turn_id") or "")),
+                "timestamp": timestamp_ms,
+                # A custom provider's token_count can land between the record
+                # and its `compacted` event.
+                "carried": self._record_carried and record.get("response_id") == (self._record or {}).get("response_id"),
+            }
+            self._compactions.append(compaction)
+            return compaction
+        elif kind == "event_msg" and p.get("type") == "token_count":
+            info = p.get("info") if isinstance(p.get("info"), dict) else {}
+            signature = self._signature(info.get("last_token_usage"))
+            if signature is None:
+                return None
+            if self._record is not None and self._signature(self._record.get("usage")) == signature:
+                self._record_carried = True
+            for compaction in self._compactions:
+                if not compaction["carried"] and compaction["signature"] == signature:
+                    compaction["carried"] = True
+                    break
+        return None
+
+    def uncarried(self) -> List[dict[str, Any]]:
+        return [c for c in self._compactions if not c["carried"]]
 
 
 # Placeholder resolved for rows written before a file's first model signal (a
@@ -1107,7 +1233,9 @@ class CodexParser(BaseParser):
     #    input split out of Codex's cache-inclusive input_tokens, placeholder
     #    models resolved to the file's own first model signal.
     # 2: explicit response-owned item clocks and verified tool interval union.
-    persistent_parser_version = 3
+    # 4: a compaction request no token_count carries is billed as its own row
+    #    (issue #222).
+    persistent_parser_version = 4
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
@@ -1161,6 +1289,61 @@ class CodexParser(BaseParser):
                 file_entry_indices: set[int] = set()
                 association = CodexResponseAssociation() if timing_enabled() else None
                 pending_speed = []
+                compactions = CodexCompactionTracker()
+
+                def build_entry(usage, entry_model, entry_provider, ts_ms, entry_id):
+                    # In Codex: input_tokens INCLUDES cached tokens
+                    # So fresh_input = input_tokens - cached_input_tokens
+                    total_input = self._i(usage.get("input_tokens"))
+                    cache_read = self._i(usage.get("cached_input_tokens"))
+                    input_t = total_input - cache_read  # Fresh input only
+                    output_t = self._i(usage.get("output_tokens"))
+                    reasoning = self._i(usage.get("reasoning_output_tokens"))
+
+                    if input_t == 0 and output_t == 0 and cache_read == 0 and reasoning == 0:
+                        return None
+
+                    billed_model = entry_model or CODEX_DEFAULT_MODEL
+                    entry = {
+                        "source": self.source_name,
+                        "model": billed_model,
+                        "provider": entry_provider,
+                        "input": input_t,
+                        "output": output_t,
+                        "cacheRead": cache_read,
+                        "cacheWrite": 0,
+                        "reasoning": reasoning,
+                        "cost": self.pricing_db.get_cost(billed_model, input_t, output_t, cache_read, 0),
+                        "timestamp": ts_ms,
+                        "entry_id": entry_id,
+                        "_session_id": own_session_id or current_session_id or Path(session_file).stem,
+                        # Codex logs no cache writes, so the billed cache-write
+                        # bucket is 0 rather than the entry's cacheWrite field.
+                        "_billing": usage_billing_pricing(
+                            [billed_model],
+                            input_tokens=input_t,
+                            output_tokens=output_t,
+                            cache_read=cache_read,
+                        ),
+                    }
+                    if entry_model is None:
+                        entry["_model_placeholder"] = True
+                    return entry
+
+                def add_entry(entry, event_key):
+                    if event_key and event_key in event_index_by_key:
+                        self.replay_events_skipped += 1
+                        existing_index = event_index_by_key[event_key]
+                        if entry["timestamp"] < out[existing_index]["timestamp"]:
+                            out[existing_index] = entry
+                            # The replacement may sit before this file's first
+                            # append; the file now owns that slot's marker too.
+                            file_entry_indices.add(existing_index)
+                        return
+                    if event_key:
+                        event_index_by_key[event_key] = len(out)
+                    file_entry_indices.add(len(out))
+                    out.append(entry)
 
                 for line_no, line in enumerate(_iter_jsonl_lines(session_file), start=1):
                     try:
@@ -1229,6 +1412,21 @@ class CodexParser(BaseParser):
                                     first_model_seen = model
                                     first_provider_seen = provider
 
+                    compaction = compactions.observe(msg)
+                    if compaction is not None:
+                        # Whether it bills is only known at EOF, but the key
+                        # scope and model are those of the line it was logged on.
+                        compaction["key_scope"] = codex_replay_key_session_id(
+                            is_fork_file,
+                            own_session_id,
+                            current_session_id,
+                            subagent_parent_id,
+                            saw_turn_context,
+                        )
+                        compaction["model"] = compaction["model"] or model
+                        compaction["provider"] = provider
+                        compaction["line_no"] = line_no
+
                     if msg.get("type") != "event_msg" or p.get("type") != "token_count":
                         continue
 
@@ -1260,57 +1458,41 @@ class CodexParser(BaseParser):
                         self.replay_events_skipped += 1
                         continue
 
-                    # In Codex: input_tokens INCLUDES cached tokens
-                    # So fresh_input = input_tokens - cached_input_tokens
-                    total_input = self._i(usage.get("input_tokens"))
-                    cache_read = self._i(usage.get("cached_input_tokens"))
-                    input_t = total_input - cache_read  # Fresh input only
-                    output_t = self._i(usage.get("output_tokens"))
-                    reasoning = self._i(usage.get("reasoning_output_tokens"))
-
-                    if input_t == 0 and output_t == 0 and cache_read == 0 and reasoning == 0:
+                    entry = build_entry(
+                        usage,
+                        model,
+                        provider,
+                        int(ts.timestamp() * 1000),
+                        event_key or f"{session_file}:{line_no}",
+                    )
+                    if entry is None:
                         continue
-
-                    entry_model = model or CODEX_DEFAULT_MODEL
-                    entry = {
-                        "source": self.source_name,
-                        "model": entry_model,
-                        "provider": provider,
-                        "input": input_t,
-                        "output": output_t,
-                        "cacheRead": cache_read,
-                        "cacheWrite": 0,
-                        "reasoning": reasoning,
-                        "cost": self.pricing_db.get_cost(entry_model, input_t, output_t, cache_read, 0),
-                        "timestamp": int(ts.timestamp() * 1000),
-                        "entry_id": event_key or f"{session_file}:{line_no}",
-                        "_session_id": own_session_id or current_session_id or Path(session_file).stem,
-                        # Codex logs no cache writes, so the billed cache-write
-                        # bucket is 0 rather than the entry's cacheWrite field.
-                        "_billing": usage_billing_pricing(
-                            [entry_model],
-                            input_tokens=input_t,
-                            output_tokens=output_t,
-                            cache_read=cache_read,
-                        ),
-                    }
                     if association is not None:
                         pending_speed.append((entry, str(line_no)))
-                    if model is None:
-                        entry["_model_placeholder"] = True
-                    if event_key and event_key in event_index_by_key:
+                    add_entry(entry, event_key)
+
+                for compaction in compactions.uncarried():
+                    # No token_count billed this request (issue #222), so it is
+                    # its own row. It is no response the speed reader timed:
+                    # compaction is incomplete there, and never measured.
+                    record = compaction["record"]
+                    key_session_id, replay_fallback = compaction["key_scope"]
+                    event_key = codex_compaction_event_key(key_session_id, record)
+                    if replay_fallback and event_key is None:
                         self.replay_events_skipped += 1
-                        existing_index = event_index_by_key[event_key]
-                        if entry["timestamp"] < out[existing_index]["timestamp"]:
-                            out[existing_index] = entry
-                            # The replacement may sit before this file's first
-                            # append; the file now owns that slot's marker too.
-                            file_entry_indices.add(existing_index)
                         continue
-                    if event_key:
-                        event_index_by_key[event_key] = len(out)
-                    file_entry_indices.add(len(out))
-                    out.append(entry)
+                    entry = build_entry(
+                        record["usage"],
+                        compaction["model"],
+                        compaction["provider"],
+                        compaction["timestamp"],
+                        event_key or f"{session_file}:{compaction['line_no']}",
+                    )
+                    if entry is None:
+                        continue
+                    if association is not None:
+                        entry["_speed"] = unmeasured(STATUS_INCOMPLETE)
+                    add_entry(entry, event_key)
 
                 timings = association.resolve() if association is not None else {}
                 for timed_entry, identity in pending_speed:

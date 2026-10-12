@@ -10,7 +10,7 @@ import time
 from contextlib import closing
 from datetime import datetime
 
-from . import clientpaths, speed_cache as cache, speed_native
+from . import speed_cache as cache, speed_native
 from .compute import _collect_parser_file, _sync_usage_store
 from .sources.coding_tools import BaseParser, CodingToolsUsageTracker, connect_sqlite_readonly, _opencode_message_table, _mimo_imported_message_ids
 from .usage_store import UsageEntryStore, usage_db_path, _entry_key, MEASUREMENT_GENERATION_META_KEY
@@ -22,23 +22,6 @@ from .output_speed_readers import request_window_timing
 def file_signature(path):
     st=Path(path).stat()
     return json.dumps((st.st_dev,st.st_ino,st.st_mtime_ns,st.st_size))
-
-
-def readable_input(source, owner):
-    """Where an input can be read now, or None once it is gone for good.
-
-    Archiving a Codex session moves its rollout into archived_sessions/ under
-    the same name with its content intact, while accounting keeps the original
-    path as the owner. Event keys do not depend on the path, so the moved file
-    times the same rows; rows under the legacy path:line keys cannot match it.
-    """
-    if os.path.exists(owner):
-        return owner
-    if source == 'codex':
-        moved = clientpaths.codex_archived_sessions_dir() / Path(owner).name
-        if moved.is_file():
-            return str(moved)
-    return None
 
 
 def session_mapping(source, file_sig):
@@ -243,7 +226,6 @@ def build(conn, job, request, *, sync=True, failure_context=None):
     conn.commit()
     previous={(r['source'],r['input_owner']):dict(r) for r in previous}
     identities={}
-    read_paths={}
     requested_native=set(native_scopes)
     # A requested full read supersedes partial scopes. An existing full index
     # can cover a requested session only while its signature/version is current.
@@ -285,11 +267,8 @@ def build(conn, job, request, *, sync=True, failure_context=None):
         parser=tracker.parsers.get(source)
         if parser is None:
             parser=CodingToolsUsageTracker().parsers[source]
-        path=readable_input(source,owner)
         try:
-            if path is None:
-                raise FileNotFoundError(owner)
-            observed=file_signature(path)
+            observed=file_signature(owner)
         except FileNotFoundError:
             # Nothing can re-read a vanished input, so it settles instead of
             # staying pending forever. The last read under this reader version
@@ -301,7 +280,6 @@ def build(conn, job, request, *, sync=True, failure_context=None):
             else:
                 staged_inputs.append((source,owner,'missing',cache.READER_VERSIONS[source],generation,'ready','original input unavailable'))
             completed+=1; _progress(conn,job,completed,total); continue
-        read_paths[(source,owner)]=path
         identities[(source,owner)]=observed
         failure_context['signature']=observed
         if old and old['signature']==observed and old['reader_version']==cache.READER_VERSIONS[source] and old['state']=='ready':
@@ -312,12 +290,12 @@ def build(conn, job, request, *, sync=True, failure_context=None):
             completed+=1; _progress(conn,job,completed,total); continue
         else:
             parsed_files+=1
-            st=Path(path).stat(); sig=(path,st.st_mtime_ns,st.st_size)
+            st=Path(owner).stat(); sig=(owner,st.st_mtime_ns,st.st_size)
             # Fail an unavailable read before permissive source readers can turn
             # it into a successful empty population.
-            with Path(path).open('rb'):
+            with Path(owner).open('rb'):
                 pass
-            context={path:v for v in store.file_contexts(source,paths=(owner,)).values()}
+            context=store.file_contexts(source,paths=(owner,))
             with collect_timings():
                 entries=_collect_parser_file(parser,sig,file_context=context)
             mapping=session_mapping(source,sig)
@@ -340,18 +318,11 @@ def build(conn, job, request, *, sync=True, failure_context=None):
                 if member:
                     conn.execute('INSERT INTO speed_member_stage VALUES (?,?,?,?,?,?,?,?)',(source,key,*member))
             expected={r[0] for r in conn.execute('SELECT entry_key FROM speed_stage WHERE source=? AND input_owner=?',(source,owner))}
-            if matched!=expected and path!=owner:
-                # A moved copy that no longer holds every owned row is not that
-                # input; its rows stay unknown rather than failing the build.
-                _discard_file_timing(conn,source,owner)
-                staged_inputs.append((source,owner,observed,cache.READER_VERSIONS[source],generation,'ready','moved input differs from its accounting'))
-                identities.pop((source,owner),None)
-                completed+=1; _progress(conn,job,completed,total); continue
-            if matched!=expected and file_signature(path)==observed:
+            if matched!=expected and file_signature(owner)==observed:
                 raise RuntimeError('timing/accounting snapshot mismatch: incomplete input read')
             del entries,mapping
             gc.collect()
-        if file_signature(path)!=observed:
+        if file_signature(owner)!=observed:
             # A hot log is discarded individually. Its pinned accounting rows
             # remain eligible but unknown; stable inputs can still publish.
             _discard_file_timing(conn,source,owner)
@@ -418,7 +389,7 @@ def build(conn, job, request, *, sync=True, failure_context=None):
                 final_native_signatures[source]=json.dumps(speed_native.signature(source))
             current=final_native_signatures[source]
         else:
-            current=file_signature(read_paths.get((source,owner),owner))
+            current=file_signature(owner)
         if current!=observed:
             if source in speed_native.SOURCES:
                 raise RuntimeError('native DB/WAL changed before publication')

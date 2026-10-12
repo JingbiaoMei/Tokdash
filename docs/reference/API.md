@@ -809,9 +809,9 @@ rows alongside measured rows while a partial reprocess finishes; it is pending
 only for inputs with responses in the requested range, and `usage_rows` then
 counts those responses. An input whose file is gone settles instead of staying
 pending: it keeps its last read under the current reader version, or else its
-responses stay unmeasured. A Codex rollout moved into `archived_sessions/` is
-read there. Unsupported readers do not imply that the harness itself records no
-timing. Other tools stay in the picker when their usage intersects the range.
+responses stay unmeasured. Unsupported readers do not imply that the harness
+itself records no timing. Other tools stay in the picker when their usage
+intersects the range.
 
 Across-model responses also carry `available_measurement_range`, the earliest
 and latest local dates with measured calls anywhere in the cache, or `null` when

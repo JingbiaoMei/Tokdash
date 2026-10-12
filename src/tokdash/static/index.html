@@ -15203,7 +15203,13 @@
       let bridgedPoints = 0;
       for (const group of groups) {
         const shape = sparklineSegmentPath(group, true);
-        if (group.length === 1) measured.push(shape.line);
+        group.forEach((anchor, index) => {
+          const before = group[index - 1];
+          const after = group[index + 1];
+          if ((!before || anchor.index - before.index > 1) && (!after || after.index - anchor.index > 1)) {
+            measured.push(sparklineSegmentPath([anchor]).line);
+          }
+        });
         for (const segment of shape.segments) {
           const gap = segment.to - segment.from - 1;
           if (gap > 0) {

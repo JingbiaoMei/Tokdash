@@ -1802,6 +1802,7 @@ out.daily = sparklineCacheShape(out.idle.series,'day');
 out.legacy = sparklineCacheShape({values:out.idle.series.values},'hour');
 out.long = bridgeView(idlePayload([6,7]));
 out.leading = bridgeView(idlePayload([0]));
+out.pair = bridgeView(idlePayload([0,1,2,7,8,10,11]));
 const skipped = idlePayload();
 skipped.sparkline.keys = Array.from({length:24},(_,i)=>`2026-09-27T${String(i).padStart(2,'0')}`).filter(key=>key!=='2026-09-27T05');
 out.skipped = bridgeView(skipped);
@@ -1857,6 +1858,10 @@ def test_hourly_idle_bridges_preserve_measurements_and_headline(idle_bridge_resu
     assert "9 of 24 hours measured" in case["label"]
     assert "Dashed segments bridge 3 idle hours" in case["label"]
     assert idle_bridge_results["outputOnly"]["bridged"] == "3"
+    assert idle_bridge_results["pair"]["points"] == "2"
+    assert idle_bridge_results["pair"]["bridged"] == "2"
+    assert "2 of 24 hours measured" in idle_bridge_results["pair"]["label"]
+    assert idle_bridge_results["pair"]["shape"]["line"].count("L") == 2
     assert idle_bridge_results["fetches"] == 0
 
 

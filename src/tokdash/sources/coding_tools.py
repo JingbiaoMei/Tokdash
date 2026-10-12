@@ -3753,6 +3753,29 @@ def zcode_snapshot_signatures(db_path: Path) -> tuple:
     return tuple(out)
 
 
+def _zcode_copy_fingerprints(db_path: Path) -> tuple:
+    # The coherence check for the copy below. zcode_snapshot_signatures
+    # stays (path, mtime_ns, size) because the usage store and the
+    # sessions caches take that shape; this one adds what tells a
+    # replaced or rewritten file apart when the clock is too coarse to
+    # move mtime: st_ino (the NTFS file index on Windows) and, where it
+    # means "last change", st_ctime_ns. On Windows st_ctime is the
+    # creation time, which does not move on a rewrite, so it is left
+    # out there.
+    use_ctime = os.name != "nt"
+    out = []
+    for p in (db_path, Path(str(db_path) + "-wal")):
+        try:
+            st = p.stat()
+            out.append((
+                str(p), st.st_mtime_ns, st.st_size, st.st_ino,
+                st.st_ctime_ns if use_ctime else None,
+            ))
+        except OSError:
+            out.append((str(p), None, None, None, None))
+    return tuple(out)
+
+
 def _zcode_open_snapshot(db_path: Path) -> Optional[Tuple[sqlite3.Connection, Path]]:
     # Open a private temp-dir copy, never the source file. A ?mode=ro
     # open of a WAL database is still not side-effect free: when the
@@ -3779,7 +3802,7 @@ def _zcode_open_snapshot(db_path: Path) -> Optional[Tuple[sqlite3.Connection, Pa
     # Returns (conn, tmpdir); None on a copy/open error or when every
     # attempt raced a source change - no fallback open in another mode.
     for _attempt in range(_ZCODE_SNAPSHOT_MAX_ATTEMPTS):
-        before = zcode_snapshot_signatures(db_path)
+        before = _zcode_copy_fingerprints(db_path)
         tmpdir: Optional[Path] = None
         try:
             tmpdir = Path(tempfile.mkdtemp(prefix="tokdash-zcode."))
@@ -3787,7 +3810,7 @@ def _zcode_open_snapshot(db_path: Path) -> Optional[Tuple[sqlite3.Connection, Pa
             wal = Path(str(db_path) + "-wal")
             if wal.exists():
                 shutil.copy2(wal, tmpdir / (db_path.name + "-wal"))
-            if zcode_snapshot_signatures(db_path) != before:
+            if _zcode_copy_fingerprints(db_path) != before:
                 raise OSError("source changed mid-copy")
             conn = sqlite3.connect(str(tmpdir / db_path.name))
         except (OSError, sqlite3.Error):
@@ -3796,7 +3819,7 @@ def _zcode_open_snapshot(db_path: Path) -> Optional[Tuple[sqlite3.Connection, Pa
             # A failure accompanied by a signature change is a
             # generation change that landed mid-copy - retry it.
             if (
-                zcode_snapshot_signatures(db_path) != before
+                _zcode_copy_fingerprints(db_path) != before
                 and _attempt + 1 < _ZCODE_SNAPSHOT_MAX_ATTEMPTS
             ):
                 continue

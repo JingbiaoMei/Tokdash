@@ -139,6 +139,12 @@ def test_streaming_parse_matches_splitlines_semantics(_isolated_home):
     assert entries[0]["entry_id"] != entries[1]["entry_id"]
 
 
+# Upper bound for every wait on a test-controlled event or thread. Healthy runs
+# return the moment the event is set; the bound only has to outlast a slow
+# runner (a Windows CI thread has taken more than 5 s to start parsing).
+_WAIT = 60
+
+
 # --- concurrent syncs of one source collapse into one -------------------------
 
 
@@ -154,7 +160,7 @@ def _race(first_call, second_call, parse_started: threading.Event, release: thre
 
     t1 = threading.Thread(target=first)
     t1.start()
-    assert parse_started.wait(5)
+    assert parse_started.wait(_WAIT)
     t2 = threading.Thread(target=second)
     t2.start()
     # Give the second caller time to reach the gate while the first still holds
@@ -162,8 +168,8 @@ def _race(first_call, second_call, parse_started: threading.Event, release: thre
     # this is a grace period rather than a wait on a condition.
     time.sleep(0.2)
     release.set()
-    t1.join(5)
-    t2.join(5)
+    t1.join(_WAIT)
+    t2.join(_WAIT)
     assert not t1.is_alive() and not t2.is_alive()
     return results
 
@@ -186,7 +192,7 @@ def test_concurrent_sync_files_parse_once(_isolated_home):
     def parse(file_sig):
         parses.append(file_sig[0])
         parse_started.set()
-        assert release.wait(5)
+        assert release.wait(_WAIT)
         return [
             {
                 "source": "codex",
@@ -238,7 +244,7 @@ def test_concurrent_sync_session_files_parse_once(_isolated_home):
     def parse(file_sig):
         parses.append(file_sig[0])
         parse_started.set()
-        assert release.wait(5)
+        assert release.wait(_WAIT)
         return {"id": "s1", "turns": [], "started_at_ms": 1, "last_seen_at_ms": 2}
 
     def call_sync(sig):
@@ -271,7 +277,7 @@ def test_single_flight_does_not_skip_after_the_holder_failed(_isolated_home):
     def parse(file_sig):
         calls.append("parse")
         parse_started.set()
-        assert release.wait(5)
+        assert release.wait(_WAIT)
         if len(calls) == 1:
             raise RuntimeError("torn read")
         return []

@@ -1455,6 +1455,12 @@ class ClaudeParser(BaseParser):
         # distinguishable by shape: whether the row also carries `message.role`
         # says nothing about whether more writes follow.
         #
+        # Subagent transcripts (subagents/agent-*.jsonl) are the exception: most
+        # of their requests never get the finished write, so the largest one
+        # still holds the streaming-start output count (anthropics/claude-code#84223,
+        # issue #227). Input and cache are right; output is a lower bound, and
+        # nothing on disk carries the real count, so none is estimated here.
+        #
         # See claude_usage_supersedes for the tie rules.
         best_by_message_id: Dict[str, Tuple[int, ClaudeUsageBuckets, Dict[str, Any]]] = {}
         measure_speed = timing_enabled()

@@ -1,6 +1,6 @@
 {
-  "version": "2.0.34",
-  "lastUpdated": "2026-10-08T11:05:09Z",
+  "version": "2.0.35",
+  "lastUpdated": "2026-10-13T14:06:35Z",
   "note": "Comprehensive pricing database with all Moonshot, MiniMax, GLM, and OpenAI models from OpenRouter. Cache pricing estimated at 10% of input for cache_read, 100% of input for cache_write.",
   "aliases": {
     "Qwen/Qwen3.8-Flash-Next": "qwen3.8-flash",
@@ -3330,6 +3330,15 @@
       "cache_write": 0.1,
       "unit": "per_million_tokens",
       "source": "openrouter.ai/meta/muse-spark-1.3-contributor"
+    },
+    "muse-wonder": {
+      "provider": "meta",
+      "input": 4.0,
+      "output": 20.0,
+      "cache_read": 0.2,
+      "cache_write": 4.0,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/meta/muse-wonder"
     },
     "_comment_nvidia": "=== NVIDIA Models ===",
     "nemotron-3-nano-30b-a3b": {

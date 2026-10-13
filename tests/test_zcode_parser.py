@@ -1,4 +1,5 @@
 """Tests for ZCodeParser (temp-dir snapshot reads of a WAL-mode source DB)."""
+import os
 import shutil
 import sqlite3
 from contextlib import contextmanager
@@ -583,6 +584,11 @@ def test_zcode_snapshot_retries_when_source_changes_mid_copy(monkeypatch, tmp_pa
             # generation than the signature taken after the copy.
             db_path.unlink()
             _create_db(db_path, [_row(), _row(row_id="mu-2", logical="lr-2", attempt=1)])
+            # Two small SQLite files can be the same size, and a coarse
+            # clock can give both the same mtime: push the replacement's
+            # mtime forward so this exercises the retry, not the clock.
+            st = db_path.stat()
+            os.utime(db_path, ns=(st.st_atime_ns, st.st_mtime_ns + 10_000_000_000))
         return result
 
     monkeypatch.setattr(ct.shutil, "copy2", sneaky_copy2)
@@ -591,6 +597,31 @@ def test_zcode_snapshot_retries_when_source_changes_mid_copy(monkeypatch, tmp_pa
     # complete second generation.
     assert len(entries) == 2
     assert {e["entry_id"] for e in entries} == {"zcode:mu-1", "zcode:mu-2"}
+
+
+def test_zcode_copy_fingerprints_see_a_replaced_file_with_same_size_and_mtime(tmp_path):
+    """A same-size rewrite inside one clock tick leaves (mtime, size)
+    untouched, so the mid-copy coherence check also keys on the file
+    identity: a replacement file is a different generation."""
+    import tokdash.sources.coding_tools as ct
+
+    db_path = tmp_path / "db.sqlite"
+    db_path.write_bytes(b"a" * 4096)
+    old_st = db_path.stat()
+    before = ct._zcode_copy_fingerprints(db_path)
+
+    # Built beside the original, so the two never share an inode.
+    new_path = tmp_path / "db.sqlite.new"
+    new_path.write_bytes(b"b" * 4096)
+    os.utime(new_path, ns=(old_st.st_atime_ns, old_st.st_mtime_ns))
+    os.replace(new_path, db_path)
+
+    new_st = db_path.stat()
+    assert (new_st.st_mtime_ns, new_st.st_size) == (old_st.st_mtime_ns, old_st.st_size)
+    # The shape the usage store and sessions caches rely on is unchanged.
+    assert all(len(row) == 3 for row in ct.zcode_snapshot_signatures(db_path))
+    assert ct._zcode_copy_fingerprints(db_path) != before
+
 
 def test_zcode_snapshot_retries_checkpoint_race_on_wal_copy(monkeypatch, tmp_path):
     """A checkpoint that lands between the -wal exists() check and its

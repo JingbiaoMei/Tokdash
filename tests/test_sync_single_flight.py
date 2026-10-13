@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import threading
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -20,6 +19,7 @@ import pytest
 
 import tokdash.compute as compute
 import tokdash.sessions as sessions
+import tokdash.usage_store as usage_store
 from tokdash.sources import coding_tools
 from tokdash.sources.coding_tools import CodingToolsUsageTracker
 from tokdash.usage_store import UsageEntryStore
@@ -139,7 +139,47 @@ def test_streaming_parse_matches_splitlines_semantics(_isolated_home):
     assert entries[0]["entry_id"] != entries[1]["entry_id"]
 
 
+# Upper bound for every wait on a test-controlled event or thread. Healthy runs
+# return the moment the event is set; the bound only has to outlast a slow
+# runner (a Windows CI thread has taken more than 5 s to start parsing).
+_WAIT = 60
+
+
 # --- concurrent syncs of one source collapse into one -------------------------
+
+
+class _GuardReleases:
+    """Wraps ``_sync_flights_guard`` and counts its releases.
+
+    ``_single_flight_sync`` reads the flight's completion count under that guard
+    before it waits on the flight lock, so one more release while the holder is
+    parked in its parse means the second caller has read the count it will
+    compare: it is parked at the gate, not still starting.
+    """
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+        self._released = 0
+        self._changed = threading.Condition()
+
+    def __enter__(self):
+        return self._inner.__enter__()
+
+    def __exit__(self, *exc):
+        result = self._inner.__exit__(*exc)
+        with self._changed:
+            self._released += 1
+            self._changed.notify_all()
+        return result
+
+    @property
+    def released(self) -> int:
+        with self._changed:
+            return self._released
+
+    def wait_for(self, count: int, timeout: float) -> bool:
+        with self._changed:
+            return self._changed.wait_for(lambda: self._released >= count, timeout)
 
 
 def _race(first_call, second_call, parse_started: threading.Event, release: threading.Event):
@@ -152,18 +192,24 @@ def _race(first_call, second_call, parse_started: threading.Event, release: thre
     def second():
         results["second"] = second_call()
 
-    t1 = threading.Thread(target=first)
-    t1.start()
-    assert parse_started.wait(5)
-    t2 = threading.Thread(target=second)
-    t2.start()
-    # Give the second caller time to reach the gate while the first still holds
-    # it; nothing observable distinguishes "parked" from "not started yet", so
-    # this is a grace period rather than a wait on a condition.
-    time.sleep(0.2)
-    release.set()
-    t1.join(5)
-    t2.join(5)
+    guard = _GuardReleases(usage_store._sync_flights_guard)
+    original_guard = usage_store._sync_flights_guard
+    usage_store._sync_flights_guard = guard
+    try:
+        t1 = threading.Thread(target=first)
+        t1.start()
+        assert parse_started.wait(_WAIT)
+        parked_before = guard.released
+        t2 = threading.Thread(target=second)
+        t2.start()
+        # Release the holder only once the second caller is parked at the gate;
+        # a fixed grace period lost that race on slow Windows runners.
+        assert guard.wait_for(parked_before + 1, _WAIT)
+        release.set()
+        t1.join(_WAIT)
+        t2.join(_WAIT)
+    finally:
+        usage_store._sync_flights_guard = original_guard
     assert not t1.is_alive() and not t2.is_alive()
     return results
 
@@ -186,7 +232,7 @@ def test_concurrent_sync_files_parse_once(_isolated_home):
     def parse(file_sig):
         parses.append(file_sig[0])
         parse_started.set()
-        assert release.wait(5)
+        assert release.wait(_WAIT)
         return [
             {
                 "source": "codex",
@@ -238,7 +284,7 @@ def test_concurrent_sync_session_files_parse_once(_isolated_home):
     def parse(file_sig):
         parses.append(file_sig[0])
         parse_started.set()
-        assert release.wait(5)
+        assert release.wait(_WAIT)
         return {"id": "s1", "turns": [], "started_at_ms": 1, "last_seen_at_ms": 2}
 
     def call_sync(sig):
@@ -271,7 +317,7 @@ def test_single_flight_does_not_skip_after_the_holder_failed(_isolated_home):
     def parse(file_sig):
         calls.append("parse")
         parse_started.set()
-        assert release.wait(5)
+        assert release.wait(_WAIT)
         if len(calls) == 1:
             raise RuntimeError("torn read")
         return []

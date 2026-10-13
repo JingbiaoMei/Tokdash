@@ -330,7 +330,7 @@ const sessionSpeedModalState={group:'',view:'chart'};let sessionOutputSpeedChart
 function formatTimeOnly(value){return String(value).slice(11,16);}function formatDuration(ms){return String(ms);}
 function formatTokenCount(value){return String(value);}function usageReportSpeedFormatStamp(ms){return String(ms);}
 function createTableCell(tag,classes,text){const cell=element(tag);cell.className=classes;cell.textContent=text;return cell;}
-function getChartPalette(){return ['blue'];}function wireSessionSpeedChartFocus(){}function setSessionSpeedView(){}
+function getChartPalette(){return ['blue'];}function sessionChartInk(){return {tick:'#555',legend:'#111',grid:'#ddd'};}function wireSessionSpeedChartFocus(){}function setSessionSpeedView(){}
 function createChart(ctx,config){return {data:config.data,config,destroy(){}};}
 const group={model:'a',measurement_kind:'response_window',token_basis:'output_including_reasoning',speed_calls:2,eligible_calls:3,coverage:2/3,output_tok_per_s:32.5};
 const payload={cache:{state:'ready'},groups:[group],summary:{eligible_calls:3},series:[

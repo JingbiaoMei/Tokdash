@@ -168,6 +168,28 @@
       letter-spacing: normal;
     }
 
+    /* Labels the script writes through t() take the same treatment. They carry
+       data-i18n-dynamic, not data-i18n, because applyI18n would overwrite them
+       with the bare key's text and drop their counts and placeholders. A chip's
+       regular weight stays regular; only the 800 headings come down to 700. */
+    html:lang(zh-CN) [data-i18n-dynamic]:is(.mono, .font-mono),
+    html:lang(ja) [data-i18n-dynamic]:is(.mono, .font-mono),
+    html:lang(ko) [data-i18n-dynamic]:is(.mono, .font-mono) {
+      font-family: var(--font-sans);
+    }
+
+    html:lang(zh-CN) [data-i18n-dynamic].font-extrabold,
+    html:lang(ja) [data-i18n-dynamic].font-extrabold,
+    html:lang(ko) [data-i18n-dynamic].font-extrabold {
+      font-weight: 700;
+    }
+
+    html:lang(zh-CN) [data-i18n-dynamic],
+    html:lang(ja) [data-i18n-dynamic],
+    html:lang(ko) [data-i18n-dynamic] {
+      letter-spacing: normal;
+    }
+
     .session-table {
       table-layout: fixed !important;
       width: 100% !important;
@@ -2816,6 +2838,16 @@
       color: color-mix(in srgb, var(--color-messages) 52%, var(--color-text));
     }
     .session-share-track { background: color-mix(in srgb, var(--color-text) 12%, transparent); }
+    /* The turn charts' series colours (turnSeriesColors), so a bar matches its
+       line, and dark mode gets the same brighter set the charts switch to. */
+    .session-share-fill--input { background: #1E40AF; }
+    .session-share-fill--cache { background: #0F766E; }
+    .session-share-fill--output { background: #F59E0B; }
+    .session-share-fill--reasoning { background: #7C3AED; }
+    html.dark .session-share-fill--input { background: #60A5FA; }
+    html.dark .session-share-fill--cache { background: #34D399; }
+    html.dark .session-share-fill--output { background: #FBBF24; }
+    html.dark .session-share-fill--reasoning { background: #C4B5FD; }
     .session-graph-card { border: 1px solid var(--color-border); }
     .session-graph-title { color: var(--color-text); }
     .session-graph-info { color: var(--color-muted); }
@@ -2851,6 +2883,9 @@
       background: color-mix(in srgb, var(--color-text) 3%, transparent);
       border: 1px solid var(--color-border);
       color: var(--color-muted);
+      /* Size and leading live here together: a text-xs utility on the element
+         carries its own 1rem line-height and loaded after this rule. */
+      font-size: 0.75rem;
       line-height: 1.7;
     }
     .session-chat-card {
@@ -6045,28 +6080,28 @@
                   <span data-i18n="input">Input</span>
                   <span id="sessionShareInputLabel">-</span>
                 </div>
-                <div class="session-share-track h-2 rounded-full overflow-hidden"><div id="sessionShareInputBar" class="h-full rounded-full" style="width:0%; background:#1E40AF;"></div></div>
+                <div class="session-share-track h-2 rounded-full overflow-hidden"><div id="sessionShareInputBar" class="session-share-fill--input h-full rounded-full" style="width:0%;"></div></div>
               </div>
               <div>
                 <div class="flex items-center justify-between text-sm mb-1">
                   <span data-i18n="cacheRead">Cache Read</span>
                   <span id="sessionShareCacheLabel">-</span>
                 </div>
-                <div class="session-share-track h-2 rounded-full overflow-hidden"><div id="sessionShareCacheBar" class="h-full rounded-full" style="width:0%; background:#0F766E;"></div></div>
+                <div class="session-share-track h-2 rounded-full overflow-hidden"><div id="sessionShareCacheBar" class="session-share-fill--cache h-full rounded-full" style="width:0%;"></div></div>
               </div>
               <div>
                 <div class="flex items-center justify-between text-sm mb-1">
                   <span data-i18n="output">Output</span>
                   <span id="sessionShareOutputLabel">-</span>
                 </div>
-                <div class="session-share-track h-2 rounded-full overflow-hidden"><div id="sessionShareOutputBar" class="h-full rounded-full" style="width:0%; background:#F59E0B;"></div></div>
+                <div class="session-share-track h-2 rounded-full overflow-hidden"><div id="sessionShareOutputBar" class="session-share-fill--output h-full rounded-full" style="width:0%;"></div></div>
               </div>
               <div>
                 <div class="flex items-center justify-between text-sm mb-1">
                   <span data-i18n="reasoning">Reasoning</span>
                   <span id="sessionShareReasoningLabel">-</span>
                 </div>
-                <div class="session-share-track h-2 rounded-full overflow-hidden"><div id="sessionShareReasoningBar" class="h-full rounded-full" style="width:0%; background:#7C3AED;"></div></div>
+                <div class="session-share-track h-2 rounded-full overflow-hidden"><div id="sessionShareReasoningBar" class="session-share-fill--reasoning h-full rounded-full" style="width:0%;"></div></div>
               </div>
             </div>
           </div>
@@ -6075,7 +6110,7 @@
           <div class="surface p-4 mb-5" id="sessionSpeedPanel" hidden>
             <div class="flex items-center justify-between mb-1 flex-wrap gap-2">
               <h4 class="text-base font-extrabold mono" data-i18n="sessionSpeedTitle">Output speed</h4>
-              <span class="text-xs mono" id="sessionSpeedCoverage" style="color: var(--color-muted);"></span>
+              <span class="text-xs mono" id="sessionSpeedCoverage" style="color: var(--color-muted);" data-i18n-dynamic></span>
               <button id="sessionSpeedRetry" type="button" class="btn btn-ghost" data-i18n="retry" style="display:none;" hidden>Retry</button>
             </div>
             <p class="text-xs mb-3" id="sessionSpeedNote" style="color: var(--color-muted); line-height:1.5"></p>
@@ -6177,8 +6212,8 @@
         <div id="sessionModalChatView" style="display:none;" class="space-y-4">
           <div class="session-chat-summary flex items-center justify-between gap-2 p-3.5 rounded-xl">
             <div class="flex items-center gap-2">
-              <span id="sessionChatMsgCount" class="session-chat-chip text-xs font-mono font-bold px-2 py-0.5 rounded">0 messages</span>
-              <span id="sessionChatToolCount" class="session-chat-chip session-chat-chip--tools text-xs font-mono font-bold px-2 py-0.5 rounded">0 tool calls</span>
+              <span id="sessionChatMsgCount" class="session-chat-chip text-xs font-mono font-bold px-2 py-0.5 rounded" data-i18n-dynamic>0 messages</span>
+              <span id="sessionChatToolCount" class="session-chat-chip session-chat-chip--tools text-xs font-mono font-bold px-2 py-0.5 rounded" data-i18n-dynamic>0 tool calls</span>
             </div>
             <div class="session-chat-note text-xs font-mono" data-i18n="sessionChatViewNote">Interactive conversation view</div>
           </div>
@@ -6196,7 +6231,7 @@
     <div class="w-[95vw] max-w-6xl h-[85vh] surface p-6 rounded-2xl flex flex-col shadow-2xl relative">
       <div class="session-modal-head flex items-center justify-between pb-4 mb-4">
         <div>
-          <h3 id="graphExpandTitle" class="session-modal-title text-lg font-extrabold mono">Expanded chart</h3>
+          <h3 id="graphExpandTitle" class="session-modal-title text-lg font-extrabold mono" data-i18n-dynamic>Expanded chart</h3>
           <p id="graphExpandSubtitle" class="session-modal-sub text-xs mt-0.5">High-resolution interactive view</p>
         </div>
         <button type="button" class="btn btn-ghost !p-2 rounded-xl" onclick="closeGraphExpandModal()" data-i18n-title="closeFullScreen" title="Close full screen view">
@@ -7789,6 +7824,7 @@
         sessionViewGroup: 'Session detail view',
         sessionViewAnalytics: 'Overview & Graphs',
         sessionViewChat: 'View Chat',
+        sessionDetailLoadFailed: 'Failed to load session detail.',
         turnTrendSub: 'Tokens per turn',
         cumulativeTurnTrendSub: 'Total tokens accumulated by turn',
         cumulativeTrendByTimeSub: 'Tokens accumulated over time',
@@ -8573,6 +8609,7 @@
         sessionViewGroup: '会话详情视图',
         sessionViewAnalytics: '概览与图表',
         sessionViewChat: '查看对话',
+        sessionDetailLoadFailed: '会话详情加载失败。',
         turnTrendSub: '每轮令牌数',
         cumulativeTurnTrendSub: '按轮次累计的令牌总数',
         cumulativeTrendByTimeSub: '随时间累计的令牌',
@@ -9358,6 +9395,7 @@
         sessionViewGroup: 'セッション詳細ビュー',
         sessionViewAnalytics: '概要とグラフ',
         sessionViewChat: 'チャットを表示',
+        sessionDetailLoadFailed: 'セッションの詳細を読み込めませんでした。',
         turnTrendSub: 'ターンあたりのトークン数',
         cumulativeTurnTrendSub: 'ターンごとに累計されたトークン合計',
         cumulativeTrendByTimeSub: '時間にわたって累計されたトークン',
@@ -10143,6 +10181,7 @@
         sessionViewGroup: '세션 세부 정보 보기',
         sessionViewAnalytics: '개요 및 그래프',
         sessionViewChat: '채팅 보기',
+        sessionDetailLoadFailed: '세션 세부 정보를 불러오지 못했습니다.',
         turnTrendSub: '턴당 토큰 수',
         cumulativeTurnTrendSub: '턴별 누적 토큰 총계',
         cumulativeTrendByTimeSub: '시간에 따른 누적 토큰',
@@ -10928,6 +10967,7 @@
         sessionViewGroup: 'Vista detallada de la sesión',
         sessionViewAnalytics: 'Resumen y gráficos',
         sessionViewChat: 'Ver conversación',
+        sessionDetailLoadFailed: 'No se pudo cargar el detalle de la sesión.',
         turnTrendSub: 'Tokens por turno',
         cumulativeTurnTrendSub: 'Tokens totales acumulados por turno',
         cumulativeTrendByTimeSub: 'Tokens acumulados con el tiempo',
@@ -11713,6 +11753,7 @@
         sessionViewGroup: 'Visão detalhada da sessão',
         sessionViewAnalytics: 'Visão geral e gráficos',
         sessionViewChat: 'Ver conversa',
+        sessionDetailLoadFailed: 'Falha ao carregar os detalhes da sessão.',
         turnTrendSub: 'Tokens por turno',
         cumulativeTurnTrendSub: 'Tokens totais acumulados por turno',
         cumulativeTrendByTimeSub: 'Tokens acumulados ao longo do tempo',
@@ -14069,6 +14110,7 @@
       const sessionModalOpen = document.getElementById('sessionModal');
       if (activeSessionDetail && sessionModalOpen && !sessionModalOpen.classList.contains('hidden')) {
         renderSessionCharts((activeSessionDetail.data || {}).turns || []);
+        if (sessionSpeedModalState.payload) renderSessionSpeedTimeline(sessionSpeedModalState.payload);
         if (graphExpandChartType) expandSessionChart(graphExpandChartType);
       }
     }
@@ -14099,6 +14141,7 @@
       if (activeSessionDetail && modal && !modal.classList.contains('hidden')) {
         const { session = {}, turns = [] } = activeSessionDetail.data || {};
         const total = Number(session.tokens || 0);
+        renderSessionModalMeta(activeSessionDetail.tool, session);
         document.getElementById('sessionModalInput').textContent = formatTokenCount(session.tokens_in || 0);
         document.getElementById('sessionModalCache').textContent = formatTokenCount(session.tokens_cache || 0);
         document.getElementById('sessionModalOutput').textContent = formatTokenCount(session.tokens_out || 0);
@@ -17493,7 +17536,7 @@
 
       if (!messages || !messages.length) {
         container.innerHTML = `
-          <div class="session-chat-empty p-8 text-center rounded-2xl text-xs">
+          <div class="session-chat-empty p-8 text-center rounded-2xl">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mx-auto mb-2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
             ${escapeHtml(t('sessionChatEmpty'))}<br/>
             ${escapeHtml(t('sessionChatEmptyHint'))}
@@ -17519,13 +17562,13 @@
           m.content_chars ? t('sessionChatChars', { count: Number(m.content_chars).toLocaleString() }) : '',
           m.token_count ? t('sessionChatTokens', { count: Number(m.token_count).toLocaleString() }) : '',
           m.has_tool_calls ? t('sessionChatToolCallChip') : '',
-        ].filter(Boolean).map((c) => `<span class="session-chat-meta-chip text-[10px] px-2 py-0.5 rounded font-mono">${escapeHtml(c)}</span>`).join(' ');
+        ].filter(Boolean).map((c) => `<span class="session-chat-meta-chip text-[10px] px-2 py-0.5 rounded font-mono" data-i18n-dynamic>${escapeHtml(c)}</span>`).join(' ');
 
         return `
           <div class="session-chat-card ${variant} p-4 sm:p-5 rounded-2xl shadow-md transition">
             <div class="session-chat-card-head flex items-center justify-between mb-3 pb-2">
               <div class="flex items-center gap-2.5">
-                <span class="session-chat-role px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold uppercase tracking-wider border">
+                <span class="session-chat-role px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold uppercase tracking-wider border" data-i18n-dynamic>
                   ${escapeHtml(t('sessionChatMessageIndex', { role: t(roleKey), index: idx + 1 }))}
                 </span>
                 ${m.model ? `<span class="session-chat-meta-chip text-[10px] px-2 py-0.5 rounded font-mono">${escapeHtml(m.model)}</span>` : ''}
@@ -17533,7 +17576,7 @@
               <span class="session-chat-time text-[11px] font-mono">${escapeHtml(String(m.timestamp || ''))}</span>
             </div>
             ${reasoningHtml}
-            <div class="session-chat-meta flex flex-wrap items-center gap-2 text-xs">${metaChips || `<span class="session-chat-time font-mono">${escapeHtml(t('sessionChatNoContent'))}</span>`}</div>
+            <div class="session-chat-meta flex flex-wrap items-center gap-2 text-xs">${metaChips || `<span class="session-chat-time font-mono" data-i18n-dynamic>${escapeHtml(t('sessionChatNoContent'))}</span>`}</div>
           </div>
         `;
       }).join('');
@@ -18079,6 +18122,7 @@
       const plot = buildSessionSpeedPlot(series, sessionSpeedModalState.group);
       if (canvas) {
         const palette = getChartPalette();
+        const ink = sessionChartInk();
         const datasets = plot.streams.filter((stream) => stream.points.some((point) => point.y !== null)).map((stream, index) => ({
           label: stream.stream, data: stream.points, borderColor: palette[index % palette.length], backgroundColor: palette[index % palette.length],
           tension: 0, pointRadius: 3, pointHoverRadius: 5, spanGaps: false, showLine: true,
@@ -18087,10 +18131,10 @@
           responsive: true, maintainAspectRatio: false, animation: false, parsing: false, normalized: false,
           interaction: { mode: 'nearest', intersect: true },
           onClick: (_event, elements, chart) => { if (elements.length) locateSessionSpeedResponse(chart.data.datasets[elements[0].datasetIndex].data[elements[0].index].speedRow); },
-          scales: { x: { type: 'linear', title: { display: true, text: plot.useTime ? t('sessionSpeedElapsedTime') : t('sessionSpeedResponseOrder') },
-            ticks: { callback: (value) => plot.useTime ? formatDuration(Number(value) * 1000) : formatNumber(value), maxTicksLimit: 10 } },
-            y: { beginAtZero: true, title: { display: true, text: t('sessionSpeedColRate') }, ticks: { callback: (value) => usageReportSpeedFormatRate(value) } } },
-          plugins: { legend: { display: datasets.length > 1, position: 'bottom' }, tooltip: { callbacks: {
+          scales: { x: { type: 'linear', title: { display: true, text: plot.useTime ? t('sessionSpeedElapsedTime') : t('sessionSpeedResponseOrder'), color: ink.tick },
+            ticks: { color: ink.tick, callback: (value) => plot.useTime ? formatDuration(Number(value) * 1000) : formatNumber(value), maxTicksLimit: 10 }, grid: { color: ink.grid } },
+            y: { beginAtZero: true, title: { display: true, text: t('sessionSpeedColRate'), color: ink.tick }, ticks: { color: ink.tick, callback: (value) => usageReportSpeedFormatRate(value) }, grid: { color: ink.grid } } },
+          plugins: { legend: { display: datasets.length > 1, position: 'bottom', labels: { color: ink.legend } }, tooltip: { callbacks: {
             title: () => '', label: (context) => sessionSpeedPointDetails(context.raw?.speedRow, payload.bucketed).split('\n'),
           } } },
         } });
@@ -18188,6 +18232,15 @@
       });
     }
 
+    // Built from t() rather than a data-i18n hook, so a language switch has to
+    // write it again; the failure line carries its own hook and is left alone.
+    function renderSessionModalMeta(tool, session) {
+      const modalMeta = document.getElementById("sessionModalMeta");
+      if (!modalMeta || modalMeta.hasAttribute("data-i18n")) return;
+      modalMeta.textContent = `${formatToolName(tool)} · ${session.project || "—"} · ${session.model || "—"} · ${formatNumber(session.token_events || 0)} ${t("events")} · ${t("activeTime")} ${formatDuration(session.active_ms)}`;
+      modalMeta.title = `${t("activeTimeHint")}\n${t("span")}: ${formatDuration(session.span_ms)}`;
+    }
+
     async function openSessionModal(tool, sessionId, ownerServer = null) {
       retireSessionSpeedModal();
       retireSessionSpeedList();
@@ -18199,6 +18252,7 @@
       modal.classList.remove("hidden");
       setSessionModalView('analytics');
       document.getElementById("sessionModalTitle").textContent = sessionShortId(sessionId);
+      document.getElementById("sessionModalMeta").removeAttribute("data-i18n");
       renderLoadingPlaceholder(document.getElementById("sessionModalMeta"));
       document.getElementById("sessionModalInput").textContent = "-";
       document.getElementById("sessionModalInputPct").textContent = "-";
@@ -18208,6 +18262,15 @@
       document.getElementById("sessionModalOutputPct").textContent = "-";
       document.getElementById("sessionModalTotal").textContent = "-";
       document.getElementById("sessionModalReasoningPct").textContent = "-";
+      // The last session's bars and turn charts must not stand under this one's
+      // loading line, or under its failure line if the read fails.
+      ["sessionShareInput", "sessionShareCache", "sessionShareOutput", "sessionShareReasoning"].forEach((prefix) => {
+        const label = document.getElementById(`${prefix}Label`);
+        const bar = document.getElementById(`${prefix}Bar`);
+        if (label) label.textContent = "-";
+        if (bar) bar.style.width = "0%";
+      });
+      renderSessionCharts([]);
       const speedPanelReset = document.getElementById("sessionSpeedPanel");
       if (speedPanelReset) speedPanelReset.hidden = true;
 
@@ -18222,9 +18285,7 @@
         const session = data.session || {};
         const turns = data.turns || [];
         document.getElementById("sessionModalTitle").textContent = sessionDisplayName(session);
-        const modalMeta = document.getElementById("sessionModalMeta");
-        modalMeta.textContent = `${formatToolName(tool)} · ${session.project || "—"} · ${session.model || "—"} · ${formatNumber(session.token_events || 0)} ${t("events")} · ${t("activeTime")} ${formatDuration(session.active_ms)}`;
-        modalMeta.title = `${t("activeTimeHint")}\n${t("span")}: ${formatDuration(session.span_ms)}`;
+        renderSessionModalMeta(tool, session);
         document.getElementById("sessionModalInput").textContent = formatTokenCount(session.tokens_in || 0);
         document.getElementById("sessionModalCache").textContent = formatTokenCount(session.tokens_cache || 0);
         document.getElementById("sessionModalOutput").textContent = formatTokenCount(session.tokens_out || 0);
@@ -18249,7 +18310,11 @@
       } catch (error) {
         if (!sessionModalCurrent(token)) return;
         console.error("Error loading session detail:", error);
-        document.getElementById("sessionModalMeta").textContent = "Failed to load session detail";
+        // A data-i18n hook while the failure shows, so a language switch
+        // translates it in place; the next open takes the hook off again.
+        const failedMeta = document.getElementById("sessionModalMeta");
+        failedMeta.setAttribute("data-i18n", "sessionDetailLoadFailed");
+        failedMeta.textContent = t("sessionDetailLoadFailed");
       }
     }
 

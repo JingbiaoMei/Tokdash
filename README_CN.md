@@ -464,3 +464,46 @@ Tokdash 读取各客户端的**本地**会话日志；本地 SQLite 索引无法
 ## License
 
 MIT License，详见 `LICENSE`。
+
+  <a href="https://github.com/aaif-goose/goose" title="Goose"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/goose.png" alt="Goose" height="34"></a>
+  <a href="https://github.com/RooCodeInc/Roo-Code" title="Roo Code"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/roo-code.png" alt="Roo Code" height="34"></a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white" alt="Python" />
+  <img src="https://img.shields.io/badge/License-MIT-green?style=flat" alt="License" />
+  <a href="https://tokdash.github.io/"><img src="https://img.shields.io/badge/Website-tokdash.github.io-1E40AF?style=flat&logo=githubpages&logoColor=white" alt="Website" /></a>
+  <a href="https://tokdash.github.io/demo/"><img src="https://img.shields.io/badge/Live%20Demo-tokdash.github.io%2Fdemo-F59E0B?style=flat&logo=githubpages&logoColor=white" alt="Live Demo" /></a>
+  <a href="https://github.com/JingbiaoMei/Tokdash/actions/workflows/ci.yml"><img src="https://github.com/JingbiaoMei/Tokdash/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://pypi.org/project/tokdash/"><img src="https://img.shields.io/pypi/v/tokdash?style=flat" alt="PyPI" /></a>
+</p>
+
+<p align="center">
+  <b>无需安装即可体验 → <a href="https://tokdash.github.io/demo/">tokdash.github.io/demo</a></b>
+</p>
+
+> [!NOTE]
+> **多台机器，一个仪表盘。** 在设置里添加运行在 WSL、Mac 或其他机器上的 Tokdash 实例：每个视图都会合并你选择的范围，Servers 标签页并排对比各台机器，额度标签页则按机器分别展示各服务商的额度窗口进度条与重置倒计时。[远程访问 →](docs/guides/REMOTE_ACCESS.md) · [额度跟踪 →](#额度跟踪可选)
+>
+> **同一作者的另一个项目：[Cosyncing](https://github.com/cosyncing/cosyncing)。** 同步并操控你的 agent —— 从 CLI 到 GUI，从桌面到手机。Cosyncing 让你的编码 agent 在你自己的网络中保持同步。
+
+| **Goose** | ✅ | ✅ |
+| **Roo Code** | ✅ | ✅ |
+
+一个本地包，一个本地数据索引 —— 四种读取方式。每个界面解析的都是你自己机器上的同一批会话日志，因此浏览器仪表盘、终端、菜单栏，以及你 Agent 的状态栏永远口径一致。
+
+| 视图 | 它是什么 | 什么时候用它 |
+|---|---|---|
+| **[WebUI](#webui)** | 完整仪表盘：Overview、Sessions、Stats、Report、Quota、Servers | 你想要全局视图、图表与逐层下钻 |
+| **[TUI](#终端仪表盘tui)** | `tokdash tui` —— 在终端里查看 Overview、Report 与 Quota | 你常驻终端，不想为了看数字打开浏览器 |
+| **[Companion](#companion-状态栏应用)** | 原生菜单栏（macOS）/ 通知区域（Windows）应用 | 你想全天可见今日费用与额度，哪怕仪表盘没有打开 |
+| **[状态栏](#状态栏statusline)** | 你 Agent 状态栏里的实时 Token / 费用条目 | 你想在打字的正下方看到费用跳动 |
+
+Goose 的用量从一个全局数据目录下的 `sessions/sessions.db` 本地读取——依次为 `$GOOSE_PATH_ROOT/data`、`$XDG_DATA_HOME/goose`、`~/.local/share/goose`（macOS 与 Linux 解析出同一个默认目录，因此没有按平台分支；Windows 位置未核实）。数据库为 WAL 模式，故通过与 ZCode 相同的复制快照路径读取。`usage_ledger` 是唯一的 token 来源：每次模型请求一行，模型就在该行上，因此混合模型的会话按请求逐条计价。`input_tokens` 已包含缓存命中部分，故新增部分按 input 计价、缓存部分按 cache 价计价；`output_tokens` 为总量，因为 Goose 在任何地方都没有持久化 reasoning 拆分。`cost`、`cost_source` 以及 `sessions.accumulated_*` / `total_tokens` 列全部忽略：accumulated 系列列只是账本求和的副本，而 `total_tokens` 只保存最后一次请求的快照，同时读取会把一次请求算两遍。成本只来自价格库，因此自建端点的模型计为 0.00。在 Goose 中删除会话确实会从这里移除其用量，因为账本行随会话一起离开数据库。Sessions 标签页只列出顶层会话，每个账本行一个轮次；活跃时间取自 Goose 写在自己 assistant 消息上的请求耗时，未命名的会话按其第一条 prompt 命名；定时 recipe 运行目前会作为普通会话列出。
+
+Roo Code 的用量从扩展的全局存储本地读取：机器上所有存在的 `<globalStorage>/rooveterinaryinc.roo-cline/tasks/<taskId>/`——含各配置文件的 VS Code、Code - Insiders 与 VSCodium 桌面树、WSL 会话写入的 `~/.vscode-server*` 根、WSL 下 `/mnt/c` 的 Windows 桌面树、Windows 的 `%APPDATA%`、macOS 的 `~/Library/Application Support`，以及 `@roo-code/cli` 写入的 `~/.vscode-mock/global-storage`。`TOKDASH_ROO_STORAGE_DIR` 是往该列表里追加迁移后的存储路径，而不是替换它。`ui_messages.json` 是 token 来源：每个完成的 `api_req_started` 请求一条记录，这正是 Roo 自身任务合计所累加的内容。`tokensIn` 含缓存，拆成 input / cacheRead / cacheWrite；`tokensOut` 为总量——Roo 会计算 reasoning token 却从不持久化；记录的 `cost` 被忽略，计价一律走价格库。未完成的请求只会留下一个没有任何 token 键的预检标记；rewind 会截短文件并追加删除标记，因此两者都不会被加回来。模型不在该文件里：它来自同目录 `api_conversation_history.json` 中 Roo 自己写的 `<model>` 标签，并按请求配对。`tasks/_index.json` 与 `history_item.json` 里的按任务合计从不读取——索引是防抖写入的，实测比进行中的任务落后四条请求。一处盲区是明说而非掩盖的：删除任务目录后，其用量仍会留在看板上，因为 Tokdash 会为消失的文件保留其记录。Sessions 标签页把一个任务目录当作一个会话（恢复之后同样如此），被委派的子任务会计价但不出现在列表里。
+
+`tokdash setup` 会提供一个可选的额度步骤（按服务商的网络授权，默认为否，以及轮询间隔），`tokdash doctor` 会报告额度状态：总开关、按服务商授权、终止开关、生效间隔及其来源、上次轮询时间，以及已保存的快照数量。
+
+额度快照及其历史保存在本地使用量数据库（`usage.sqlite3`，默认开启），**默认永久保留**——将 `TOKDASH_QUOTA_RETENTION_DAYS` 设为正整数天数可开启对更早快照的清理。如果你用 `TOKDASH_USAGE_DB=0` 关闭本地持久化，「额度」标签页将失去主要数据来源：不再保留快照历史，后台轮询也不运行，标签页只会在当前服务进程存活期间展示手动**刷新**（已授权的网络服务商）得到的内存中结果。日常额度跟踪请保持使用量数据库开启（默认）。

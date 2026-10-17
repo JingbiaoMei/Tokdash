@@ -496,3 +496,48 @@ Tokdash는 각 클라이언트의 **로컬** 세션 로그를 읽으며, 로컬 
 ## 라이선스
 
 MIT License - `LICENSE` 참조.
+
+  <a href="https://github.com/aaif-goose/goose" title="Goose"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/goose.png" alt="Goose" height="34"></a>
+  <a href="https://github.com/RooCodeInc/Roo-Code" title="Roo Code"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/roo-code.png" alt="Roo Code" height="34"></a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white" alt="Python" />
+  <img src="https://img.shields.io/badge/License-MIT-green?style=flat" alt="License" />
+  <a href="https://tokdash.github.io/"><img src="https://img.shields.io/badge/Website-tokdash.github.io-1E40AF?style=flat&logo=githubpages&logoColor=white" alt="Website" /></a>
+  <a href="https://tokdash.github.io/demo/"><img src="https://img.shields.io/badge/Live%20Demo-tokdash.github.io%2Fdemo-F59E0B?style=flat&logo=githubpages&logoColor=white" alt="Live Demo" /></a>
+  <a href="https://github.com/JingbiaoMei/Tokdash/actions/workflows/ci.yml"><img src="https://github.com/JingbiaoMei/Tokdash/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://pypi.org/project/tokdash/"><img src="https://img.shields.io/pypi/v/tokdash?style=flat" alt="PyPI" /></a>
+</p>
+
+<p align="center">
+  <b>설치 없이 바로 체험 → <a href="https://tokdash.github.io/demo/">tokdash.github.io/demo</a></b>
+</p>
+
+> [!NOTE]
+> **여러 기계를 하나의 대시보드에서.** 설정에서 WSL, Mac 또는 다른 기기에서 실행 중인 Tokdash 인스턴스를 추가하세요. 모든 뷰는 선택한 것을 합산하고, Servers 탭은 기계를 나란히 비교하며, Quota 탭은 각 제공자의 윈도우 바와 리셋 카운트다운을 기계별로 묶어 보여줍니다. [원격 접근 →](docs/guides/REMOTE_ACCESS.md) · [쿼터 추적 →](#쿼터-추적-선택사항)
+>
+> **같은 저자의 다른 프로젝트: [Cosyncing](https://github.com/cosyncing/cosyncing).** 에이전트를 동기화하고 제어하세요 — CLI에서 GUI까지, 데스크톱에서 휴대폰까지. Cosyncing은 여러분 자신의 네트워크에서 코딩 에이전트를 동기화합니다.
+
+| **Goose** | ✅ | ✅ |
+| **Roo Code** | ✅ | ✅ |
+
+하나의 로컬 패키지, 하나의 로컬 데이터 인덱스 — 그리고 이를 읽는 네 가지 방법. 모든
+인터페이스가 여러분 자신의 기기에서 동일한 세션 로그를 파싱하므로, 브라우저
+대시보드, 터미널, 메뉴 막대, 에이전트의 상태줄이 언제나 동일한 수치를 보여줍니다.
+
+| 뷰 | 무엇인가 | 이런 경우에 사용하세요 |
+|---|---|---|
+| **[WebUI](#webui)** | 전체 대시보드: Overview, Sessions, Stats, Report, Quota, Servers | 전체 조감, 차트, 드릴다운이 필요할 때 |
+| **[TUI](#터미널-대시보드-tui)** | `tokdash tui` — 터미널에서 Overview, Report, Quota | 터미널에 거주하며 브라우저 없이 수치가 필요할 때 |
+| **[Companion](#companion-상태표-앱)** | 네이티브 메뉴 막대(macOS) / 알림 영역(Windows) 앱 | 대시보드를 닫아둔 채 하루 종일 오늘의 지출과 쿼터를 눈에 담고 싶을 때 |
+| **[상태줄](#상태줄)** | 에이전트 상태줄 안의 라이브 토큰/비용 항목 | 비용 티커를 정확히 타이핑하는 그 자리에 두고 싶을 때 |
+
+Goose 사용량은 하나의 전역 데이터 디렉터리에 있는 `sessions/sessions.db`에서 로컬로 읽습니다. 순서대로 `$GOOSE_PATH_ROOT/data`, 없으면 `$XDG_DATA_HOME/goose`, 그것도 없으면 `~/.local/share/goose`입니다(macOS는 Linux와 같은 기본값으로 해석되므로 플랫폼 분기가 없고, Windows 위치는 검증되지 않았습니다). 데이터베이스는 WAL 모드가므로 ZCode와 동일한 복사 후 스냅샷 경로로 읽습니다. `usage_ledger`가 유일한 토큰 출처로, 모델 요청당 한 행이고 모델이 그 행에 적혀 있어 모델이 섞인 세션은 요청 단위로 과금됩니다. `input_tokens`는 캐시 적중분을 이미 포함하므로 신규분은 input으로, 캐시분은 캐시 단가로 계산하고, `output_tokens`는 총량입니다. Goose는 reasoning 구분 어디에도 저장하지 않기 때문입니다. `cost`, `cost_source`, 그리고 `sessions.accumulated_*` / `total_tokens` 열은 모두 무시합니다. accumulated 열은 원장 합의 사본일 뿐이고 `total_tokens`는 마지막 요청의 스냅샷이라, 둘 다 읽으면 한 요청이 두 번 계산됩니다. 요금은 가격 DB에서만 오므로 셀프호스트 모델은 0.00입니다. Goose에서 세션을 삭제하면 원장 행이 데이터베이스와 함께 사라지므로 여기에서도 사용량이 제거됩니다. Sessions 탭은 최상위 세션만 나열하고 원장 행 하나를 한 턴으로 표시하며, 활성 시간은 Goose가 자기 assistant 메시지에 적어 두는 요청 소요 시간에서 가져오고, Goose가 이름을 붙이지 않은 세션은 첫 프롬프트로 제목을 붙입니다. 예약된 recipe 실행은 현재 평범한 세션으로 listing 됩니다.
+
+Roo Code 사용량은 확장 기능의 전역 저장소에서 로컬로 읽습니다. 기계에 존재하는 모든 `<globalStorage>/rooveterinaryinc.roo-cline/tasks/<taskId>/` 디렉터리 — profiles 포함 VS Code / Code - Insiders / VSCodium 데스크톱 트리, WSL 세션이 기록하는 `~/.vscode-server*` 루트, WSL 의 `/mnt/c` 아래 Windows 데스크톱 트리, Windows 의 `%APPDATA%`, macOS 의 `~/Library/Application Support`, 그리고 `@roo-code/cli` 가 기록하는 `~/.vscode-mock/global-storage` 입니다. `TOKDASH_ROO_STORAGE_DIR` 은 옮겨진 저장 경로를 해당 목록에서 대체하는 것이 아니라 추가합니다. `ui_messages.json` 이 토큰 출처로, 완료된 `api_req_started` 요청 하나당 항목 하나이며, 이것은 Roo 자체 작업 합계가 더하는 것과 정확히 같습니다. `tokensIn` 은 캐시를 포함하므로 input / cacheRead / cacheWrite 로 나뉘고, `tokensOut` 은 총량입니다. Roo 는 reasoning 토큰을 계산하지만 저장하지 않기 때문입니다. 기록된 `cost` 는 무시하고 가격 DB 로 산정합니다. 끝나지 않은 요청에는 토큰 키가 없는 사전 표시만 남고, rewind 는 파일을 잘라낸 뒤 삭제 표시를 덧붙이므로 둘 다 다시 더해지지 않습니다. 모델은 그 파일에 없습니다. 같은 디렉터리의 `api_conversation_history.json` 안에 있는 Roo 스스로의 `<model>` 태그에서 가져와 요청마다 짝을 맞춥니다. `tasks/_index.json` 과 `history_item.json` 의 작업별 합계는 읽지 않습니다. 인덱스는 디바운스로 기록되며 진행 중이던 작업보다 4 요청 뒤처진 실측이 있습니다. 사각지대는 숨기지 않고 적습니다. 작업 디렉터리를 지워도 Tokdash 는 사라진 파일의 행을 유지하므로 대시보드 사용량이 남습니다. Sessions 탭은 작업 디렉터리 하나를 하나의 세션으로 다루며(재개 이후도 동일), 위임된 하위 작업은 과금되나 listing 되지는 않습니다.
+
+`tokdash setup`은 선택적 쿼터 단계(제공자별 네트워크 동의, 기본 No, 그리고 폴링 간격)를 제공하며, `tokdash doctor`는 쿼터 상태를 보고합니다: 마스터 스위치, 제공자별 동의, 킬 스위치, 유효 간격과 그 소스, 마지막 폴링 시각, 저장된 스냅샷 수.
+
+쿼터 스냅샷과 그 히스토리는 로컬 사용량 데이터베이스(`usage.sqlite3`, 기본값: 켜짐)에 있으며, **기본값으로는 무기한 유지**됩니다 — 오래된 스냅샷을 정리하려면 `TOKDASH_QUOTA_RETENTION_DAYS`를 일 단위의 양수로 설정하세요. `TOKDASH_USAGE_DB=0`로 로컬 영속을 옵트아웃하면 Quota 탭은 주요 데이터 경로를 잃습니다: 스냅샷 히스토리가 유지되지 않고, 백그라운드 폴러가 동작하지 않으며, 탭은 수동 **Refresh**(동의한 네트워크 제공자)의 결과를 현재 서버 프로세스 수명 동안 메모리에서만 표시합니다. 정상적인 쿼터 추적을 위해 사용량 DB를 켜 두세요(기본값).

@@ -115,6 +115,8 @@ SESSION_LABELS = {
     "openclaw": "OpenClaw",
     # distinct from the "qoder" IDE row above; the two are separate keys
     "qoder_cli": "Qoder CLI",
+    "goose": "Goose",
+    "roo_code": "Roo Code",
 }
 
 SESSION_MODELS = (

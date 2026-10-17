@@ -507,3 +507,49 @@ A documentação completa está em **[`docs/`](docs/README.md)** (comece no índ
 ## Licença
 
 Licença MIT - veja `LICENSE`.
+
+  <a href="https://github.com/aaif-goose/goose" title="Goose"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/goose.png" alt="Goose" height="34"></a>
+  <a href="https://github.com/RooCodeInc/Roo-Code" title="Roo Code"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/roo-code.png" alt="Roo Code" height="34"></a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white" alt="Python" />
+  <img src="https://img.shields.io/badge/License-MIT-green?style=flat" alt="License" />
+  <a href="https://tokdash.github.io/"><img src="https://img.shields.io/badge/Website-tokdash.github.io-1E40AF?style=flat&logo=githubpages&logoColor=white" alt="Website" /></a>
+  <a href="https://tokdash.github.io/demo/"><img src="https://img.shields.io/badge/Live%20Demo-tokdash.github.io%2Fdemo-F59E0B?style=flat&logo=githubpages&logoColor=white" alt="Live Demo" /></a>
+  <a href="https://github.com/JingbiaoMei/Tokdash/actions/workflows/ci.yml"><img src="https://github.com/JingbiaoMei/Tokdash/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://pypi.org/project/tokdash/"><img src="https://img.shields.io/pypi/v/tokdash?style=flat" alt="PyPI" /></a>
+</p>
+
+<p align="center">
+  <b>Experimente sem instalar → <a href="https://tokdash.github.io/demo/">tokdash.github.io/demo</a></b>
+</p>
+
+> [!NOTE]
+> **Várias máquinas, um painel.** Adicione nas Configurações as instâncias do Tokdash rodando no WSL, num Mac ou em qualquer outra máquina: todas as visões combinam o que você selecionar, a aba Servers compara as máquinas lado a lado, e a aba Quota mantém as barras de janela e as contagens regressivas de reset agrupadas por máquina. [Acesso remoto →](docs/guides/REMOTE_ACCESS.md) · [acompanhamento de cota →](#acompanhamento-de-cota-opcional)
+>
+> **Também do mesmo autor: [Cosyncing](https://github.com/cosyncing/cosyncing).** Sincronize e controle seus agentes — da CLI à GUI, do desktop ao celular. O Cosyncing mantém seus agentes de codificação em sincronia na sua própria rede.
+
+| **Goose** | ✅ | ✅ |
+| **Roo Code** | ✅ | ✅ |
+
+Um único pacote local, um único índice de dados local — e quatro formas de lê-lo.
+Cada superfície analisa os mesmos logs de sessão na sua própria máquina, então o
+painel no navegador, o terminal, a barra de menu e a statusline do seu agente
+sempre concordam entre si.
+
+| Visão | O que é | Quando recorrer a ela |
+|---|---|---|
+| **[WebUI](#webui)** | O painel completo: Overview, Sessions, Stats, Report, Quota, Servers | Você quer o panorama completo, gráficos e detalhamento por nível |
+| **[TUI](#painel-no-terminal-tui)** | `tokdash tui` — Overview, Report e Quota no terminal | Você vive no terminal e quer os números sem navegador |
+| **[Companion](#app-de-barra-de-status-companion)** | App nativo de barra de menu (macOS) / área de notificação (Windows) | Você quer o gasto do dia e a cota visíveis o dia todo, com o painel fechado |
+| **[Statusline](#statusline)** | Um item de tokens/custo ao vivo dentro da statusline do seu agente | Você quer o contador de custo exatamente onde digita |
+
+O uso do Goose é lido localmente de `sessions/sessions.db` em um único diretório global de dados: `$GOOSE_PATH_ROOT/data`, senão `$XDG_DATA_HOME/goose`, senão `~/.local/share/goose` (o macOS resolve o mesmo padrão do Linux, portanto não há ramificação por plataforma, e a localização no Windows não foi verificada). O banco de dados está em modo WAL, então é lido pelo mesmo caminho de cópia e snapshot do ZCode. O `usage_ledger` é a única fonte de tokens: uma linha por solicitação de modelo, com o modelo na própria linha, de modo que uma sessão com vários modelos é precificada solicitação por solicitação. `input_tokens` já contém a parte em cache, então a parte nova é faturada como input e a parte em cache à tarifa de cache; `output_tokens` é bruto porque o Goose não persiste nenhuma separação de reasoning. `cost`, `cost_source` e as colunas `sessions.accumulated_*` / `total_tokens` são ignorados: as colunas acumuladas duplicam a soma do livro-razão enquanto `total_tokens` guarda apenas o instantâneo da última solicitação, então ler ambas contaria uma mesma solicitação duas vezes. O custo vem do banco de preços, então um modelo auto-hospedado custa 0.00. Excluir uma sessão do Goose remove mesmo o uso daqui, porque as linhas do livro-razão saem do banco junto com ela. A aba Sessions lista apenas sessões de nível superior, um turno por linha do livro-razão, com o tempo ativo tomado das durações de solicitação que o Goose registra em suas próprias mensagens de assistente, e uma sessão que o Goose deixou sem nome é intitulada pelo primeiro prompt; uma execução agendada de recipe aparece por enquanto como uma sessão comum.
+
+O uso do Roo Code é lido localmente do armazenamento global da extensão: cada `<globalStorage>/rooveterinaryinc.roo-cline/tasks/<taskId>/` que exista na máquina - as árvores de desktop do VS Code, Code - Insiders e VSCodium com seus perfis, as raízes `~/.vscode-server*` que uma sessão WSL escreve, a árvore Windows sob `/mnt/c` no WSL, `%APPDATA%` no Windows, `~/Library/Application Support` no macOS e a raiz `~/.vscode-mock/global-storage` que o `@roo-code/cli` escreve. `TOKDASH_ROO_STORAGE_DIR` acrescenta um caminho de armazenamento realocado àquela lista em vez de substituí-la. O `ui_messages.json` é a fonte de tokens: uma entrada por solicitação `api_req_started` concluída, que é exatamente o que o total da própria tarefa do Roo soma. `tokensIn` inclui o cache e se divide em input / cacheRead / cacheWrite; `tokensOut` é bruto porque o Roo calcula tokens de raciocínio mas nunca os persiste, e o `cost` registrado é ignorado em favor do banco de preços. Uma solicitação que nunca terminou mantém um marcador prévio sem chaves de tokens, e um rewind trunca o arquivo e acrescenta um marcador de exclusão, então nenhum dos dois é somado de volta. O modelo não está naquele arquivo: vem da própria tag `<model>` do Roo no `api_conversation_history.json` irmão, casada com cada solicitação. `tasks/_index.json` e os totais por tarefa em `history_item.json` nunca são lidos, porque o índice é escrito com debounce e foi medido quatro solicitações atrás de uma tarefa em andamento. Um ponto cego é declarado em vez de escondido: apagar um diretório de tarefa deixa seu uso no painel, porque o Tokdash mantém as linhas de um arquivo que sumiu. A aba Sessions trata um diretório de tarefa como uma sessão, inclusive depois de uma retomada, e subtasks delegadas são faturadas mas não listadas.
+
+O `tokdash setup` oferece uma etapa opcional de cota (consentimento de rede por provedor, padrão Não, mais o intervalo de polling), e o `tokdash doctor` reporta o estado da cota: interruptor geral, consentimento por provedor, kill switch, intervalo efetivo e sua fonte, último horário de polling e a contagem de snapshots armazenados.
+
+Os snapshots de cota e seu histórico vivem no banco de uso local (`usage.sqlite3`, ligado por padrão) e são **mantidos indefinidamente por padrão** — defina `TOKDASH_QUOTA_RETENTION_DAYS` para um número positivo de dias para aparar snapshots mais antigos. Se você sair da persistência local com `TOKDASH_USAGE_DB=0`, a aba Quota perde seu principal caminho de dados: nenhum histórico de snapshot é mantido, o poler em segundo plano não roda, e a aba só mostra resultados em memória de um **Refresh** manual (provedores de rede com consentimento) pela vida do processo atual do servidor. Mantenha o banco de uso ligado (o padrão) para acompanhamento de cota normal.

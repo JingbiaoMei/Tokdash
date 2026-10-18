@@ -567,6 +567,9 @@ List of sessions for a specific tool.
 | `date_from` | string | no | – | Start date (`YYYY-MM-DD`) |
 | `date_to` | string | no | – | End date (`YYYY-MM-DD`) |
 | `include_review_sessions` | boolean | no | `false` | Include Codex review / auto-permission sessions (hidden by default) |
+| `refresh` | boolean | no | `false` | Bypass the response cache |
+
+Session responses are invalidated when source file signatures change, including SQLite WAL sidecars. Fixed database inventories (including Hermes) are checked on each request. Transcript-tree inventories reuse their last successful scan for `TOKDASH_SIG_TTL` (default 5 seconds), then refresh in the background; the next request after a changed inventory is published fetches fresh session data. `refresh=true` checks the inventory immediately. Unchanged inputs continue to use the response cache.
 
 **Response fields**
 
@@ -1063,6 +1066,7 @@ Convenience wrapper for Codex sessions. Equivalent to `/api/sessions?tool=codex`
 |---|---|---|---|
 | `period` | string | no | `"today"` |
 | `include_review_sessions` | boolean | no | `false` (Codex review / auto-permission sessions hidden by default) |
+| `refresh` | boolean | no | `false` |
 
 ---
 

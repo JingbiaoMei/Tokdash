@@ -1,6 +1,26 @@
 {
-  "current": "2.6.18",
+  "current": "2.6.19",
   "releases": [
+    {
+      "version": "2.6.19",
+      "date": "2026-10-18",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "Pricing DB 2.0.37 adds four models and reprices none of the old ones: gemini-4-argon at $2.00 in / $10.00 out, muse-spark-open at $1.25 / $4.25, nemotron-3.5-super-vl at $0.15 / $0.50, and deepseek-v4.1-flash-1017 at $0.30 / $1.20 per MTok."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "Hermes usage now lands on the model that actually answered. A session that switched models used to bill all of its tokens to one model name; each model and billing provider is now priced on its own rate and its own recorded charge, and Overview and Sessions read the same breakdown so the two cannot disagree.",
+            "A model that bills you without reporting token counts no longer disappears. A recorded fee is enough to keep a model in the usage totals and the model rankings, and a session folded into one entry no longer counts its extra rows as extra messages.",
+            "The Sessions tab now updates when your tools write instead of when a timer says so. New rollouts and database writes invalidate the cached response, quiet requests reuse the last inventory scan so the page stays fast, and refresh=true forces an immediate re-read."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.6.18",
       "date": "2026-10-16",

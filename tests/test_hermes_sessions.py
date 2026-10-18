@@ -732,3 +732,38 @@ def test_hermes_sessions_multi_model_without_a_recorded_provider(monkeypatch, tm
         "hermes:s-infer:anthropic:claude-3-5-sonnet", "hermes:s-infer:openai:gpt-4o",
     ]
     assert [t["cost"] for t in turns] == [pytest.approx(0.0022), pytest.approx(0.0044)]
+
+
+@pytest.mark.parametrize("wal", [False, True])
+def test_api_sessions_detects_source_updates_before_ttl(monkeypatch, tmp_path, wal):
+    from tokdash import api
+
+    home = _home(tmp_path)
+    _patch_env(monkeypatch, home)
+    _write_db(home, [_row("api-active", "claude-3-5-sonnet", "anthropic", datetime.now().timestamp(), 0, 0, 0, 0)])
+    conn = sqlite3.connect(home / "state.db")
+    if wal:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA wal_autocheckpoint=0")
+        # Establish the WAL/read index before capturing the first signature.
+        conn.execute("SELECT COUNT(*) FROM sessions").fetchone()
+    monkeypatch.setenv("TOKDASH_WARM_ON_START", "0")
+    api._clear_cache()
+    try:
+        first = api.get_sessions("hermes", "all")
+        assert api.get_sessions("hermes", "all") is first
+        db_stat = (home / "state.db").stat()
+        conn.execute("UPDATE sessions SET input_tokens=1000, output_tokens=100")
+        conn.commit()
+        if wal:
+            # The committed data is only in the WAL; the main DB did not move.
+            assert (home / "state.db").stat().st_mtime_ns == db_stat.st_mtime_ns
+            assert (home / "state.db").stat().st_size == db_stat.st_size
+        updated = api.get_sessions("hermes", "all")
+        assert updated["summary"]["tokens"] == 1100
+        assert updated["sessions"][0]["token_events"] == 1
+        assert updated is not first
+        assert api.get_sessions("hermes", "all") is updated
+    finally:
+        conn.close()
+        api._clear_cache()

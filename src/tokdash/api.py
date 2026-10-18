@@ -60,6 +60,7 @@ from .usage_store import (
     usage_db_path,
 )
 from . import speed_report, speed_native
+from .sources.coding_tools import _SIG_TTL
 from .sessions import (
     SESSION_TOOLS,
     get_active_time_data,
@@ -69,6 +70,7 @@ from .sessions import (
     get_session_detail,
     get_sessions_data,
     reload_pricing_db,
+    session_source_signature,
 )
 
 
@@ -320,15 +322,71 @@ def _window_cache_key(base: str, date_from: Optional[str], date_to: Optional[str
     return _pricing_cache_key(base)
 
 
+# Keep only the latest signature per tool. A revision keeps large transcript
+# inventories out of cache keys and logs, without retaining every old inventory.
+_session_source_versions: dict[str, tuple[tuple, int]] = {}
+_session_source_versions_lock = threading.Lock()
+# These sources discover transcript trees; do not walk them in front of every
+# response-cache hit. Small fixed database inventories remain checked live.
+_SESSION_TREE_SOURCES = frozenset({
+    "codex", "claude", "pi_agent", "omp", "kimi", "dsh", "reasonix",
+    "grok", "workbuddy", "qwen_code", "openclaw", "qoder_cli", "cline",
+    "antigravity_cli",
+})
+
+
+def _session_source_revision(
+    tool: str, *, force_refresh: bool = False, _startup_warm: bool = False
+) -> int:
+    if tool in _SESSION_TREE_SOURCES and _SIG_TTL > 0:
+        inventory_key = f"session_source_inventory_{tool}"
+        warm_event = _begin_startup_warm(inventory_key) if _startup_warm else None
+        try:
+            signature = get_cached_or_fetch(
+                inventory_key,
+                lambda: session_source_signature(tool),
+                force_refresh=force_refresh,
+                ttl=_SIG_TTL,
+                _startup_warm=_startup_warm,
+            )
+        finally:
+            if warm_event is not None:
+                _finish_startup_warm(inventory_key, warm_event)
+    else:
+        signature = session_source_signature(tool)
+    with _session_source_versions_lock:
+        previous = _session_source_versions.get(tool)
+        if previous is not None and (previous[0] is signature or previous[0] == signature):
+            _session_source_versions[tool] = (signature, previous[1])
+            return previous[1]
+        revision = 1 if previous is None else previous[1] + 1
+        _session_source_versions[tool] = (signature, revision)
+        return revision
+
+
 def _session_response_cache_key(
     tool: str,
     period: str,
     date_from: Optional[str],
     date_to: Optional[str],
     include_review_sessions: Optional[bool],
-) -> str:
+    *,
+    force_refresh: bool = False,
+    _startup_warm: bool = False,
+) -> Optional[str]:
+    tool = tool.strip().lower()
+    try:
+        revision = _session_source_revision(
+            tool, force_refresh=force_refresh, _startup_warm=_startup_warm
+        )
+    except (OSError, sqlite3.Error):
+        # Discovery can race a rotated/deleted file. Let the loader apply its
+        # existing degradation rules, but never cache that response against an
+        # incomplete inventory (nor let one unavailable tool abort warming).
+        logger.warning("tokdash session signature unavailable tool=%s", tool, exc_info=True)
+        return None
     return _window_cache_key(
-        f"sessions_{tool.strip().lower()}_{period}_{date_from}_{date_to}_{include_review_sessions}",
+        f"sessions_{tool}_{period}_{date_from}_{date_to}_{include_review_sessions}_source_{revision}",
         date_from,
         date_to,
     )
@@ -417,15 +475,16 @@ def _warm_caches() -> None:
     # Composed by name, not by slicing _day_warm_targets(): the warm order is the order
     # the dashboard needs these in, and stats belongs second, immediately behind the
     # Overview usage key. Reordering the per-day targets must not silently demote it.
-    warmers = [
-        _usage_warm_target(today),
-        (_window_cache_key("stats_None", None, None), lambda: compute_stats(None)),
-        *_session_warm_targets(today),
-        (_day_scoped_key(ACTIVITY_INSIGHTS_CACHE_KEY), get_codex_activity_insights),
+    def warmers():
+        yield _usage_warm_target(today)
+        yield (_window_cache_key("stats_None", None, None), lambda: compute_stats(None))
+        # Discover inventories only after the Overview and Stats have warmed.
+        yield from _session_warm_targets(today)
+        yield (_day_scoped_key(ACTIVITY_INSIGHTS_CACHE_KEY), get_codex_activity_insights)
         # Last: the heaviest warm, and the Overview is the tab that opens first.
-        *_report_warm_targets(day),
-    ]
-    _run_warmers(warmers)
+        yield from _report_warm_targets(day)
+
+    _run_warmers(warmers())
 
 
 def _day_warm_targets(day: str) -> list:
@@ -450,9 +509,19 @@ def _session_warm_targets(day: str) -> list:
     """The per-tool Sessions pairs for ``day``, plus the cross-tool active time."""
     targets: list = []
     for tool in SESSION_TOOLS:
+        try:
+            cache_key = _session_response_cache_key(
+                tool, "today", day, day, None, _startup_warm=True
+            )
+        except CacheBackpressureError:
+            # A foreground fill or a busy pool must not abort the other warmers.
+            logger.debug("tokdash inventory warm deferred tool=%s", tool)
+            continue
+        if cache_key is None:
+            continue
         targets.append(
             (
-                _session_response_cache_key(tool, "today", day, day, None),
+                cache_key,
                 lambda tool=tool: get_sessions_data(
                     tool, "today", day, day, include_review_sessions=None
                 ),
@@ -1390,7 +1459,7 @@ def _response_cache_metadata(result: CacheFetchResult) -> Dict[str, Any]:
 
 def _cached_route(
     route_name: str,
-    cache_key: str,
+    cache_key: Optional[str],
     fetch_fn,
     *,
     force_refresh: bool = False,
@@ -1398,6 +1467,8 @@ def _cached_route(
 ) -> Any:
     started = time.monotonic()
     try:
+        if cache_key is None:
+            return fetch_fn()
         result = get_cached_or_fetch(
             cache_key,
             fetch_fn,
@@ -1602,6 +1673,7 @@ def get_cached_or_fetch(
     *,
     force_refresh: bool = False,
     return_metadata: bool = False,
+    ttl: Optional[float] = None,
     _startup_warm: bool = False,
     _startup_waited: bool = False,
 ) -> Any:
@@ -1627,9 +1699,10 @@ def get_cached_or_fetch(
         cache_result = CacheFetchResult(value=value, status=status, age_seconds=age_seconds)
         return cache_result if return_metadata else value
 
+    cache_ttl = CACHE_TTL if ttl is None else max(0.0, ttl)
     now = datetime.now().timestamp()
     hit = _cache_get(key)
-    if hit is not None and now - hit[0] < CACHE_TTL and not force_refresh:
+    if hit is not None and now - hit[0] < cache_ttl and not force_refresh:
         return result(hit[1], "hit", now - hit[0])
 
     if hit is not None and not force_refresh:
@@ -1639,7 +1712,7 @@ def get_cached_or_fetch(
             # acquiring the single-flight lock.
             latest = _cache_get(key)
             locked_now = datetime.now().timestamp()
-            if latest is not None and locked_now - latest[0] < CACHE_TTL:
+            if latest is not None and locked_now - latest[0] < cache_ttl:
                 _release_key_lock(key, lock)
                 return result(latest[1], "hit", locked_now - latest[0])
             epoch = _cache_epoch_value()
@@ -1711,6 +1784,7 @@ def get_cached_or_fetch(
                     fetch_fn,
                     force_refresh=force_refresh,
                     return_metadata=return_metadata,
+                    ttl=ttl,
                     _startup_waited=True,
                 )
         _raise_backpressure(
@@ -1725,7 +1799,7 @@ def get_cached_or_fetch(
         # Re-check under the lock: a prior holder may have just stored a fresh value.
         latest = _cache_get(key)
         locked_now = datetime.now().timestamp()
-        if latest is not None and locked_now - latest[0] < CACHE_TTL and not force_refresh:
+        if latest is not None and locked_now - latest[0] < cache_ttl and not force_refresh:
             return result(latest[1], "hit", locked_now - latest[0])
         epoch = _cache_epoch_value()
         # A stale value beats waiting, so only a cold key with nothing to show parks
@@ -2271,7 +2345,11 @@ def refresh_quota() -> Dict[str, Any]:
 
 
 @app.get("/api/codex/sessions", tags=["Sessions"])
-def get_codex_sessions(period: str = "today", include_review_sessions: Optional[bool] = None) -> Dict[str, Any]:
+def get_codex_sessions(
+    period: str = "today",
+    include_review_sessions: Optional[bool] = None,
+    refresh: bool = False,
+) -> Dict[str, Any]:
     """List Codex sessions."""
     if _dev_fixture_mode() == "dense":
         from .dev_fixtures import dense_sessions
@@ -2280,13 +2358,14 @@ def get_codex_sessions(period: str = "today", include_review_sessions: Optional[
             "codex", include_review_sessions, seed=_dev_fixture_seed()
         )
     try:
-        cache_key = _window_cache_key(
-            f"codex_sessions_{period}_{include_review_sessions}", None, None
+        cache_key = _session_response_cache_key(
+            "codex", period, None, None, include_review_sessions, force_refresh=refresh
         )
         return _cached_route(
             "/api/codex/sessions",
             cache_key,
             lambda: get_codex_sessions_data(period, include_review_sessions=include_review_sessions),
+            force_refresh=refresh,
         )
     except UsageDatabaseSchemaTooNewError as e:
         # 500, not 503: 503 is the dashboard retry signal, and a database
@@ -2323,6 +2402,7 @@ def get_sessions(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     include_review_sessions: Optional[bool] = None,
+    refresh: bool = False,
 ) -> Dict[str, Any]:
     """List sessions for a tool."""
     _validate_date_params(date_from, date_to)
@@ -2339,6 +2419,7 @@ def get_sessions(
             date_from,
             date_to,
             include_review_sessions,
+            force_refresh=refresh,
         )
         return _cached_route(
             "/api/sessions",
@@ -2350,6 +2431,7 @@ def get_sessions(
                 date_to,
                 include_review_sessions=include_review_sessions,
             ),
+            force_refresh=refresh,
         )
     except UsageDatabaseSchemaTooNewError as e:
         # 500, not 503: 503 is the dashboard retry signal, and a database

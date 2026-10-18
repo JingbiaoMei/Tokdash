@@ -66,7 +66,7 @@ time.
 ## Sessions & parsing
 
 - `TOKDASH_SESSION_CACHE_TURNS` (default: `500000`) — turns the merged-session assembly cache may hold; budgeted in turns rather than sessions because one long session can outweigh a thousand short ones. Non-negative integer, `0` empties the cache and keeps it empty; empty or invalid values fall back to the default
-- `TOKDASH_SIG_TTL` (default: `5.0` seconds) — TTL of the source file-signature cache that avoids repeated glob/stat work when several requests arrive in a short window; float seconds, `0` disables the cache. The value must parse as a float — a non-numeric value fails at import
+- `TOKDASH_SIG_TTL` (default: `5.0` seconds) — TTL of the source file-signature cache that avoids repeated glob/stat work when several requests arrive in a short window; float seconds, `0` disables the cache. The value must parse as a float — a non-numeric value fails at import. Sessions API transcript inventories refresh in the background after this TTL so cache hits do not walk source trees; `refresh=true` bypasses inventory reuse
 - `TOKDASH_INCLUDE_CODEX_GUARDIAN` (default: off) — default for the `include_review_sessions` API parameter when a request omits it; set to `1`, `true`, `yes`, or `on` to include Codex guardian/review subagent sessions in Codex session listings instead of hiding them. An explicit `include_review_sessions` query parameter always wins
 
 ## Persistent usage DB (default on)

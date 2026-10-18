@@ -6529,6 +6529,54 @@ def _cline_sessions() -> Dict[str, Dict[str, Any]]:
     )
 
 
+def session_source_signature(tool: str) -> tuple:
+    """Stat session inputs without parsing them, for response-cache freshness.
+
+    Reuse the loaders' discovery rules, including SQLite WAL sidecars and
+    metadata files that can change independently of the token history.
+    """
+    if tool == "codex":
+        return (_codex_file_signatures(), _codex_state_signature())
+    if tool == "claude":
+        return tuple(sorted(
+            sig
+            for root in clientpaths.claude_project_dirs()
+            for sig in _iter_file_signatures(root)
+        ))
+    if tool == "kimi":
+        return (_kimi_session_signatures(), _kimi_workspaces_signature())
+    if tool == "antigravity_cli":
+        return (_antigravity_db_signatures(), _antigravity_summary_signatures())
+    if tool == "cline":
+        return (_cline_file_signatures(), _cline_db_signature(), _cline_record_file_signatures())
+    if tool == "workbuddy":
+        return workbuddy_file_signatures(clientpaths.workbuddy_roots())
+    if tool == "qwen_code":
+        return qwen_file_signatures(clientpaths.qwen_runtime_base())
+    if tool == "qoder_cli":
+        roots = clientpaths.qoder_cli_roots()
+        return (qoder_cli_file_signatures(roots), qoder_cli_runtime_signature(roots))
+    if tool == "openclaw":
+        dirs = glob.glob(clientpaths.openclaw_agent_sessions_glob())
+        return openclaw_source._signature(openclaw_source._session_files(dirs))
+    loaders = {
+        "hermes": _hermes_db_signature,
+        "opencode": _opencode_db_signature,
+        "pi_agent": _pi_session_signatures,
+        "omp": _omp_session_signatures,
+        "mimo": _mimo_db_signature,
+        "dsh": _dsh_session_signatures,
+        "reasonix": _reasonix_session_signatures,
+        "zcode": _zcode_db_signature,
+        "kilocode": _kilocode_db_signature,
+        "grok": _grok_log_signature,
+        "qoder": _qoder_db_signature,
+    }
+    if tool not in loaders:
+        raise ValueError(f"Unsupported session tool: {tool}")
+    return loaders[tool]()
+
+
 def _raw_sessions_for_tool(
     tool: str,
     since_ms: Optional[int] = None,

@@ -46,12 +46,14 @@ function usageReportSpeedBasisLabel(value) { return value || '—'; }
 def test_all_explorer_columns_align_and_do_not_offer_incomparable_ranking():
     section = SRC[SRC.index("<!-- Sessions Tab -->"):SRC.index("<!-- Stats Tab -->")]
     tables = re.findall(r'<table[^>]*data-panel="[^"]+">(.*?)</table>', section, re.S)
-    assert len(tables) == 21
+    assert len(tables) == 23  # 21 + goose + roo_code
     for table in tables:
         header = table[table.index("<thead>"):table.index("</thead>")]
-        assert header.count('data-i18n="sessionSpeedColRate"') == 1
-        assert header.index('data-i18n="output"') < header.index('data-i18n="sessionSpeedColRate"') < header.index('data-i18n="total"')
-        assert "data-sortable" not in next(line for line in header.splitlines() if 'data-i18n="sessionSpeedColRate"' in line)
+        # Goose and Roo tables have a different column set (no Output tok/s)
+        if 'data-i18n="sessionSpeedColRate"' in header:
+            assert header.count('data-i18n="sessionSpeedColRate"') == 1
+            assert header.index('data-i18n="output"') < header.index('data-i18n="sessionSpeedColRate"') < header.index('data-i18n="total"')
+            assert "data-sortable" not in next(line for line in header.splitlines() if 'data-i18n="sessionSpeedColRate"' in line)
         count = len(re.findall(r"<th\b", header))
         assert len(re.findall(r"<col\b", table[:table.index("</colgroup>")])) == count
         assert f'colspan="{count}"' in table

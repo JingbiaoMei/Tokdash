@@ -13,7 +13,15 @@ import pytest
 
 from tokdash import compute, osinfo
 from tokdash.pricing import PricingDatabase
-from tokdash.sources.coding_tools import BaseParser, CodingToolsUsageTracker, HermesParser, _sig_cache
+from tokdash.sources import coding_tools
+from tokdash.sources.coding_tools import (
+    BaseParser,
+    CodingToolsUsageTracker,
+    HermesParser,
+    _SIG_TTL,
+    _sig_cache,
+    _timed_sigs,
+)
 from tokdash.usage_store import (
     UsageEntryStore,
     _entry_for_storage,
@@ -373,6 +381,61 @@ def test_hermes_parser_started_at_ms_passthrough(monkeypatch, tmp_path):
     entries = parser.collect(None, None)
     assert len(entries) == 1
     assert entries[0]["timestamp"] == int(ts_ms)
+
+
+def test_timed_sigs_scan_longer_than_ttl_cap(monkeypatch):
+    """A scan that takes longer than the TTL cap is cached from completion.
+
+    Regression test for _timed_sigs:
+    1. Creates a mock scan function that takes longer than _SIG_TTL (5 seconds)
+       and longer than the dynamic TTL cap (4 * _SIG_TTL).
+    2. Calls _timed_sigs twice in succession.
+    3. Verifies the scan is called only once (the second call uses the cached result).
+    4. Verifies the cached result is not expired before the scan completes.
+    """
+    _sig_cache.clear()
+    current_time = 1000.0
+
+    monkeypatch.setattr(coding_tools._time, "monotonic", lambda: current_time)
+
+    call_count = 0
+    # _SIG_TTL defaults to 5.0s, TTL cap is 4 * _SIG_TTL = 20.0s.
+    # scan_duration (25.0s) > _SIG_TTL (5.0s) and > TTL cap (20.0s).
+    scan_duration = 25.0
+    assert scan_duration > _SIG_TTL
+    assert scan_duration > 4 * _SIG_TTL
+
+    expected_sigs = (("/path/to/state.db", 123456789, 4096),)
+
+    def mock_scan() -> tuple:
+        nonlocal call_count, current_time
+        call_count += 1
+        current_time += scan_duration
+        return expected_sigs
+
+    cache_key = "hermes:scan_longer_than_ttl_cap"
+
+    # First call: executes scan
+    res1 = _timed_sigs(cache_key, mock_scan)
+    assert res1 == expected_sigs
+    assert call_count == 1
+
+    # Verify cached entry is present and not expired before the scan completes
+    cached_entry = _sig_cache.get(cache_key)
+    assert cached_entry is not None
+    cached_ts, cached_sigs, dynamic_ttl = cached_entry
+    assert cached_sigs == expected_sigs
+    assert dynamic_ttl == 4 * _SIG_TTL
+    # Completion timestamp was stored (1025.0, not start timestamp 1000.0)
+    assert cached_ts == current_time
+    # Cache is not expired at completion time (completion time - cached_ts < dynamic_ttl)
+    assert (current_time - cached_ts) < dynamic_ttl
+    assert cached_ts + dynamic_ttl > current_time
+
+    # Second call in succession: reuses cached result without re-scanning
+    res2 = _timed_sigs(cache_key, mock_scan)
+    assert res2 == expected_sigs
+    assert call_count == 1
 
 
 def test_hermes_parser_multi_model_session(monkeypatch, tmp_path):

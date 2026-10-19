@@ -441,6 +441,19 @@ class TokdashApp(App):
        one scrollable pane, whichever one lands lower is the one whose tail sits
        under the clip, and a clipped table does not know it is clipped. */
     #sn-table { max-height: 45%; }
+    /* Speed obeys the same law, and needs it more than the others: its hour
+       view is 24 rows of its own, and it has a note above AND a caption below,
+       so any height the note does not keep gets taken back from the pane. Bounded
+       here, the table scrolls itself, the cursor drags the view with it, and the
+       caption underneath stays on screen instead of sliding off the bottom. */
+    #sp-table { max-height: 55%; }
+    /* The two tables that share their pane with a note and (for quota) a detail
+       block obey it too, for the same reason and at a size that keeps those
+       neighbours on screen. A pricing database is a few hundred models wide:
+       measured at 82 rows, the arrow key walked the cursor to a row the clip had
+       already swallowed, and an invisible cursor does not search, sort or read. */
+    #pr-table { max-height: 75%; }
+    #quota-table { max-height: 55%; }
 
     /* Textual's Horizontal defaults to height: 1fr, which turns a one-line
        toolbar into a spring: the subview row swallows the pane and shoves the

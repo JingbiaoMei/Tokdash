@@ -305,6 +305,9 @@ def test_the_combined_hour_table_names_the_model_it_measured(api):
         # a time was the other half of this finding.
         assert "timing after first token, response window" in detail, detail
         assert "a, w, " not in detail, detail
+        # And it is ON screen: a bounded table scrolls itself, so the caption
+        # underneath it stays in the pane instead of below the clip.
+        assert SHARED_MODEL in visible(app, "#sp-detail"), visible(app, "#sp-detail")
 
     run(api, body)
 
@@ -405,6 +408,37 @@ def test_enter_on_the_second_account_shows_that_account_s_plan(api):
         assert "plan Max 5x" not in detail, detail
 
     run(api, body)
+
+
+def test_a_long_pricing_list_keeps_its_cursor_on_screen(api):
+    """The arrow key may not walk the reader into the clip.
+
+    A few hundred models is an ordinary pricing database. A table sized to all of
+    its rows believes there is nothing left to scroll, so everything past the
+    bottom of the pane sits under the clip WITH the cursor on it -- and a reader
+    who cannot see the row they are on cannot search it or read it.
+    """
+    long_pricing = copy.deepcopy(api.pricing)
+    models = long_pricing["data"]["models"]
+    first = next(iter(models.values()))
+    for index in range(80):
+        models[f"probe-{index:02d}"] = copy.deepcopy(first)
+    api.pricing = long_pricing
+
+    async def body(app, pilot):
+        app.action_show_pane("pricing")
+        await settle(pilot, 3)
+        table = app.query_one("#pr-table", DataTable)
+        table.focus()
+        for _ in range(24):
+            await pilot.press("down")
+            await settle(pilot, 1)
+        row = table.cursor_coordinate.row
+        assert row >= 20, row
+        label = str(table.get_row_at(row)[0])
+        assert label in visible(app, "#pr-table"), (label, row)
+
+    run(api, body, size=(100, 30))
 
 
 # ----------------------------------------------------------------- layout law --

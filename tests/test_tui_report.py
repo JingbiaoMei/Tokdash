@@ -582,8 +582,9 @@ def test_piped_bytes_are_deterministic(monkeypatch, no_db, piped, capsys):
     # dropped line in the shared seam is caught for both surfaces.
     # 1 header + 4 hero + streak + daily + peak + 3 hour bars + weekday
     # + Daily section (header + rule + 7 rows) + 3 podium + rule + table
-    # header + 2 agent rows (kimi filtered) + 2 note + rule + db.
-    assert len(first.rstrip("\n").split("\n")) == 32
+    # header + 2 agent rows (kimi filtered) + projects (header + 1 row +
+    # unattributed) + 2 note + rule + db.
+    assert len(first.rstrip("\n").split("\n")) == 35
 
 
 # ---------------------------------------------------------------------------

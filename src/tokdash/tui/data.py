@@ -31,6 +31,8 @@ from ..api import (
     REPORT_FACETS,
     CacheBackpressureError,
     _active_time_cache_key,
+    _pricing_cache_key,
+    _session_response_cache_key,
     _active_time_payload,
     _insights_cache_key,
     _local_today,
@@ -460,3 +462,326 @@ def db_summary() -> str:
     store = UsageEntryStore()
     st = store.status()
     return f"{st['path']} · {st['usage_entries']} usage rows"
+
+
+# ---------------------------------------------------------------------------
+# Revision 5 adapters: sessions, session detail, session speed, model speed,
+# pricing. Each mirrors ONE route's call shape and cache identity, so the TUI
+# and the service cannot answer differently for the same question.
+#
+# Route cache parity comes in two flavours:
+#   * cached routes (/api/sessions) reuse the route's own key builder, which
+#     embeds the source-signature revision, so a TUI read lands on the same
+#     entry the warmer/service filled;
+#   * uncached routes (/api/session, /api/output-speed, /api/session-speed)
+#     run their closure directly -- those routes never cache, so neither do we.
+#     /api/pricing-db caches nothing either, but its answer depends on files
+#     that can change underneath us, so the local read uses the codebase's own
+#     pricing identity (``_pricing_cache_key``) rather than inventing one.
+# ---------------------------------------------------------------------------
+
+
+def _fetch_uncached_remote_or_local(
+    route_path: str,
+    params: dict[str, Any],
+    local_closure: Callable[[], Any],
+    *,
+    refresh: bool,
+    remote: bool,
+    key: str | None = None,
+) -> FetchOutcome:
+    """Remote-first read whose local path matches an UNCACHED route.
+
+    ``key`` opts the local path back into the process cache; leave it None to
+    reproduce a route that computes on every request. ``FetchOutcome`` answers
+    "hit" with no age for those: there is no cache to be stale.
+    """
+
+    def _once() -> FetchOutcome:
+        if remote:
+            svc = _remote_service(force_reprobe=refresh)
+            if svc is not None:
+                try:
+                    payload, meta = _remote.remote_get(svc, route_path, params)
+                except _remote.ServiceGone:
+                    _latch_remote_gone()
+                else:
+                    status = str(meta.get("status") or "hit") if meta else "hit"
+                    age = meta.get("age_seconds") if meta else None
+                    return FetchOutcome(value=payload, status=status, age_seconds=age)
+        if key is None:
+            return FetchOutcome(value=local_closure(), status="hit", age_seconds=None)
+        return _outcome(
+            get_cached_or_fetch(key, local_closure, force_refresh=refresh, return_metadata=True)
+        )
+
+    return _with_backpressure_retry(_once)
+
+
+def sessions_cache_key(
+    tool: str,
+    period: str,
+    date_from: str | None,
+    date_to: str | None,
+    include_review_sessions: bool | None,
+    *,
+    refresh: bool = False,
+) -> str | None:
+    """The route's own session key (None when the source inventory is unreadable,
+    which is the route's signal to answer WITHOUT caching)."""
+    return _session_response_cache_key(
+        tool, period, date_from, date_to, include_review_sessions, force_refresh=refresh
+    )
+
+
+def fetch_sessions(
+    tool: str,
+    period: str = "today",
+    date_from: str | None = None,
+    date_to: str | None = None,
+    include_review_sessions: bool | None = None,
+    *,
+    refresh: bool = False,
+    remote: bool = True,
+) -> FetchOutcome:
+    """One source's session list. There is no ``tool=all``: callers fan out."""
+    from ..sessions import get_sessions_data  # lazy: keeps the Overview path light
+
+    params: dict[str, Any] = {
+        "tool": tool,
+        "period": period,
+        "date_from": date_from,
+        "date_to": date_to,
+    }
+    if include_review_sessions is not None:
+        params["include_review_sessions"] = include_review_sessions
+    if refresh:
+        params["refresh"] = True
+    return _fetch_remote_or_local(
+        "/api/sessions",
+        params,
+        sessions_cache_key(
+            tool, period, date_from, date_to, include_review_sessions, refresh=refresh
+        ),
+        lambda: get_sessions_data(
+            tool,
+            period,
+            date_from,
+            date_to,
+            include_review_sessions=include_review_sessions,
+        ),
+        refresh=refresh,
+        remote=remote,
+    )
+
+
+def fetch_session_detail(
+    tool: str, session_id: str, *, refresh: bool = False, remote: bool = True
+) -> FetchOutcome:
+    """Whole-session turns. The route takes ONLY tool + session_id: no date
+    filter exists, so the answer is always the ENTIRE session."""
+    from ..sessions import get_session_detail  # lazy
+
+    return _fetch_uncached_remote_or_local(
+        "/api/session",
+        {"tool": tool, "session_id": session_id},
+        lambda: get_session_detail(tool, session_id),
+        refresh=refresh,
+        remote=remote,
+    )
+
+
+def fetch_session_speed(
+    tool: str,
+    session_id: str,
+    *,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    model: str | None = None,
+    measurement_kind: str | None = None,
+    token_basis: str | None = None,
+    max_points: int = 1000,
+    refresh: bool = False,
+    cache_only: bool = False,
+    remote: bool = True,
+) -> FetchOutcome:
+    """Selected-session timing. Paired dates are optional: omitted means the
+    server's own "Entire session" scope, which is what the session detail shows.
+
+    Never send both refresh and cache_only -- cache_only wins server-side, and a
+    caller that meant to rebuild would silently get the old snapshot.
+    """
+    from ..session_speed import timeline  # lazy: reads the derived DB only
+
+    if refresh and cache_only:
+        raise ValueError("refresh and cache_only are mutually exclusive (cache_only wins)")
+    params: dict[str, Any] = {
+        "tool": tool,
+        "session_id": session_id,
+        "date_from": date_from,
+        "date_to": date_to,
+        "model": model,
+        "measurement_kind": measurement_kind,
+        "token_basis": token_basis,
+        "max_points": max_points,
+        "refresh": refresh,
+        "cache_only": cache_only,
+    }
+    return _fetch_uncached_remote_or_local(
+        "/api/session-speed",
+        params,
+        lambda: timeline(
+            tool,
+            session_id,
+            date_from=date_from,
+            date_to=date_to,
+            model=model,
+            kind=measurement_kind,
+            basis=token_basis,
+            max_points=max_points,
+            refresh=refresh,
+            cache_only=cache_only,
+        ),
+        refresh=refresh,
+        remote=remote,
+    )
+
+
+SPEED_VIEWS: tuple[str, ...] = ("across-models", "trend", "time-of-day")
+SPEED_DEFAULT_PERIOD = "year"  # the route default; the TUI always sends explicit dates
+
+
+def fetch_output_speed(
+    *,
+    view: str = "across-models",
+    period: str = SPEED_DEFAULT_PERIOD,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    source: str | None = None,
+    model: str | None = None,
+    measurement_kind: str | None = None,
+    token_basis: str | None = None,
+    bucket: str = "auto",
+    refresh: bool = False,
+    cache_only: bool = False,
+    include_request_windows: bool = False,
+    remote: bool = True,
+) -> FetchOutcome:
+    """Model output speed, from the derived timing cache.
+
+    ``include_request_windows`` defaults to False (the dashboard's default). The
+    ROUTE default is True, which would quietly widen the measurement set to
+    windows that include the initial wait, so the TUI states it every time.
+
+    A normal GET may queue a build (``cache_only=False``); ``r`` sends
+    ``refresh=True``. Never both: cache_only takes server-side precedence.
+    """
+    from ..speed_cache import payload  # lazy: derived-DB reader only
+
+    if view not in SPEED_VIEWS:
+        raise ValueError(f"unknown speed view {view!r}")
+    if refresh and cache_only:
+        raise ValueError("refresh and cache_only are mutually exclusive (cache_only wins)")
+    params: dict[str, Any] = {
+        "view": view,
+        "period": period,
+        "date_from": date_from,
+        "date_to": date_to,
+        "source": source,
+        "model": model,
+        "measurement_kind": measurement_kind,
+        "token_basis": token_basis,
+        "bucket": bucket,
+        "refresh": refresh,
+        "cache_only": cache_only,
+        "include_request_windows": include_request_windows,
+    }
+    return _fetch_uncached_remote_or_local(
+        "/api/output-speed",
+        params,
+        lambda: payload(
+            date_from or "",
+            date_to or "",
+            view=view,
+            source=source or "",
+            model=model or "",
+            kind=measurement_kind or "",
+            basis=token_basis or "",
+            bucket=bucket,
+            refresh=refresh,
+            cache_only=cache_only,
+            include_request_windows=include_request_windows,
+        ),
+        refresh=refresh,
+        remote=remote,
+    )
+
+
+def fetch_output_speed_job_status(job_id: str, *, remote: bool = True) -> FetchOutcome:
+    """One status snapshot for a build this process (or the service) queued.
+
+    Explicit recovery only -- the visible-page path is follow_output_speed_job().
+    A 404 from the service means the job belongs to a process we cannot see, so
+    it falls back to the in-process reader like every other ServiceGone.
+    """
+    from ..speed_cache import job_status  # lazy
+
+    return _fetch_uncached_remote_or_local(
+        f"/api/output-speed/jobs/{job_id}",
+        {},
+        lambda: job_status(job_id),
+        refresh=False,
+        remote=remote,
+    )
+
+
+def follow_output_speed_job(
+    job_id: str,
+    on_event: Callable[[dict[str, Any]], None],
+    *,
+    timeout: float = 300.0,
+) -> int:
+    """Stream one build's status events; return the number of delivered events.
+
+    Returns 0 when there is no service to subscribe to (the kill switch, a dev
+    build beside another version, nothing listening). Callers then say
+    "Build requested - r Reload" instead of pretending the pane updates itself.
+    """
+    svc = _remote_service()
+    if svc is None:
+        return 0
+    return _remote.remote_sse(
+        svc, f"/api/output-speed/jobs/{job_id}/events", on_event, timeout=timeout
+    )
+
+
+def fetch_pricing_db(*, refresh: bool = False, remote: bool = True) -> FetchOutcome:
+    """The EFFECTIVE pricing database (override, else packaged baseline)."""
+
+    def _local() -> dict[str, Any]:
+        from ..api import (  # local imports keep the module import graph flat
+            PRICING_DB_PATH,
+            _baseline_version,
+            _effective_pricing_db,
+            _format_pricing_db,
+            _pricing_override_path,
+        )
+
+        data, source = _effective_pricing_db()
+        return {
+            "path": str(_pricing_override_path()),
+            "baseline_path": str(PRICING_DB_PATH),
+            "baseline_version": _baseline_version(),
+            "source": source,
+            "data": data,
+            "text": _format_pricing_db(data),
+        }
+
+    return _fetch_remote_or_local(
+        "/api/pricing-db",
+        {"refresh": True} if refresh else {},
+        _pricing_cache_key("pricing_db"),
+        _local,
+        refresh=refresh,
+        remote=remote,
+    )

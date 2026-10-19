@@ -14,7 +14,9 @@ Hard boundaries (each has a test in test_tui_remote.py):
 - Pure stdlib. NO textual/rich import here — the same headless law as ``data.py``
   (that file imports this one), and the report path must stay importable on a
   stripped install.
-- Read-only: this module only ever GETs. No POST, no writes, ever.
+- Read-only: this module only ever GETs. No POST, no writes, ever. The one
+  streaming reader (:func:`remote_sse`) is a GET of a job-events route; it opens
+  no other path and still sends no body.
 - Tests never open a real socket: they monkeypatch :func:`_get_opener`. Tests
   never probe localhost either: the suite's conftest sets TOKDASH_TUI_NO_REMOTE=1
   and :func:`probe_service` returns ``None`` before any socket code runs.
@@ -30,6 +32,7 @@ import http.client
 import json
 import os
 import socket
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -170,3 +173,69 @@ def remote_get(
         raise ServiceGone(f"{path} → non-object JSON payload from {svc.base}")
     meta = payload.pop("response_cache", None)
     return payload, meta
+
+
+class StreamLost(RuntimeError):
+    """An event stream ended before its terminal event (or never opened).
+
+    Distinct from :class:`ServiceGone` on purpose: losing a subscription says
+    nothing about whether the service can still answer ordinary reads, so the
+    caller keeps its last-good rows and offers a manual reload instead of
+    falling back to a whole in-process recompute.
+    """
+
+
+def remote_sse(
+    svc: RemoteService,
+    path: str,
+    on_event: Any,
+    *,
+    timeout: float = 300.0,
+    read_timeout: float = 30.0,
+    stop: Any = None,
+) -> int:
+    """Consume a server-sent-JSON status stream, calling ``on_event`` per payload.
+
+    Used for one speed build's progress (``/api/output-speed/jobs/{id}/events``),
+    which the server closes itself once the job reaches ``ready`` or ``error``.
+    We stop at that terminal event too, so a stale subscription cannot outlive
+    its job. ``stop`` is polled between lines: a caller that navigates away or
+    supersedes the load closes the stream on the next line rather than waiting
+    for the server.
+
+    Returns the number of delivered payloads when the stream reached a terminal
+    event. Anything else -- a connect failure, a mid-stream drop, the deadline,
+    or ``stop()`` turning true -- raises :class:`StreamLost`, because a silently
+    truncated progress feed would otherwise leave a UI showing a build that
+    finished, failed or vanished minutes ago.
+    """
+    url = svc.base + path
+    terminal = False
+    delivered = 0
+    deadline = time.monotonic() + max(1.0, timeout)
+    try:
+        with _get_opener().open(url, timeout=read_timeout) as resp:
+            for raw in resp:
+                if stop is not None and stop():
+                    break
+                line = raw.decode("utf-8", "replace").strip()
+                if not line.startswith("data:"):
+                    continue  # "event:" markers, comments, blank separators
+                try:
+                    status = json.loads(line[5:].strip())
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(status, dict):
+                    continue
+                on_event(status)
+                delivered += 1
+                if status.get("state") in ("ready", "error"):
+                    terminal = True
+                    break
+                if time.monotonic() > deadline:
+                    break
+    except Exception as exc:  # noqa: BLE001 - any transport failure is a lost stream
+        raise StreamLost(f"{path} -> event stream lost: {exc!r}") from exc
+    if not terminal:
+        raise StreamLost(f"{path} -> event stream ended without a terminal status")
+    return delivered

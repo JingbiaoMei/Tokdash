@@ -195,9 +195,24 @@ async def report(app, pilot):
 
 
 async def report_when(app, pilot):
+    # A NIGHT SHARE WORTH READING. The fixture's 0.0 cannot tell a percentage
+    # from a ratio printed with a "%" stuck on it, which is exactly the mistake
+    # this frame is here to catch.
+    FAKE.insights = {
+        **FAKE.insights,
+        "hourly": {**FAKE.insights.get("hourly", {}), "night_share": 0.213},
+    }
     await report(app, pilot)
     app.query_one("#rp-tab-when").press()
     await fx.settle(pilot, 2)
+
+
+async def report_scan_failed(app, pilot):
+    """A facet read that FAILED is named as failed, not left "still running"."""
+    FAKE.insights = RuntimeError("capture: analytics reader unavailable")
+    await report(app, pilot)
+    app.query_one("#rp-tab-when").press()
+    await fx.settle(pilot, 4)
 
 
 async def report_projects(app, pilot):
@@ -228,6 +243,13 @@ async def speed_hour(app, pilot):
     await speed(app, pilot)
     app.query_one("#sp-mode-hour").press()
     await fx.settle(pilot, 5)
+
+
+async def speed_hour_chooser(app, pilot):
+    """``k`` inside Hour: every comparison key this snapshot measured."""
+    await speed_hour(app, pilot)
+    await pilot.press("k")
+    await fx.settle(pilot, 2)
 
 
 async def speed_detail(app, pilot):
@@ -374,6 +396,9 @@ CASES = [
     ("41-speed-whole-request-100x30", (100, 30), speed_whole_request, "today", False),
     ("42-speed-combined-hour-100x30", (100, 30), speed_combined_hour, "today", False),
     ("43-overview-month-120x36", (120, 36), None, "month", False),
+    ("44-speed-hour-chooser-100x30", (100, 30), speed_hour_chooser, "today", False),
+    ("45-report-scan-failed-100x30", (100, 30), report_scan_failed, "today", False),
+    ("46-speed-hour-80x24", (80, 24), speed_hour, "today", False),
 ]
 
 

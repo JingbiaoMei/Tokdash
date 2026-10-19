@@ -1232,11 +1232,11 @@ def test_build_progress_from_the_job_events_reaches_the_note(api):
         await settle(pilot, 4)
         assert len(api.called("speed")) == 1
         # What following a queued build actually looks like: the pane knows the
-        # job it subscribed for and the load generation that asked (an event
-        # from an older build is dropped, not painted).
+        # job it subscribed for and the subscription token it subscribed under
+        # (an event from an older build, or a stale stream, is dropped).
         app._sp_following = True
         app._sp_follow_job = "job-9"
-        app._sp_follow_gen = app._gen
+        app._sp_follow_epoch = app._sp_follow_token
         app._on_speed_event({"id": "job-9", "state": "building",
                              "completed_inputs": 3, "total_inputs": 9})
         await settle(pilot, 2)

@@ -917,10 +917,18 @@ def quota_detail_rows(
          and str(b.get("account") or "default") == account_id),
         None,
     )
+    # Resolved before the heading, because the heading needs it: the card's own
+    # ``plan`` names the DEFAULT install by producer contract (older readers keep
+    # reading it), while every install's own plan lives on its ``accounts`` row.
+    account = next((a for a in _accounts_of(card)
+                    if str(a.get("account") or "default") == account_id), None)
+    plan = (account or {}).get("plan") or (
+        card.get("plan") if account_id in ("", "default") else None
+    )
     lines: list[list[Run]] = [[
         Run(f"{tool_label(provider, labels)}", "bold"),
         Run(f" · account {account_id}", "muted"),
-        Run(f" · plan {card.get('plan')}" if card.get("plan") else "", "muted"),
+        Run(f" · plan {plan}" if plan else "", "muted"),
         Run(f" · card status {card.get('status') or 'unknown'}", "muted"),
         Run(" · network not consented"
             if card.get("network_enabled") is False else "", "warn"),
@@ -950,8 +958,6 @@ def quota_detail_rows(
             Run("" if source.endswith("_api") else " (local logs can lag the provider)",
                 "" if source.endswith("_api") else "warn"),
         ])
-    account = next((a for a in _accounts_of(card)
-                    if str(a.get("account") or "default") == account_id), None)
     if account is not None:
         status = str(account.get("status") or "ok")
         lines.append([

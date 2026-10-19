@@ -64,6 +64,15 @@ def test_h_lists_every_supported_source_and_the_pane_reads_only_that_one(api):
     async def body(app, pilot):
         app.action_show_pane("sessions")
         await settle(pilot, 2)
+        # Wait for the supported-source fan-out to STOP issuing. Twenty reads are
+        # still leaving the thread pool half a second after the tab opens, and
+        # counting them mid-flight made a request of the FIRST load look like a
+        # request of the filter that came after it.
+        for _ in range(12):
+            issued = len(api.called("sessions"))
+            await settle(pilot, 1)
+            if len(api.called("sessions")) == issued:
+                break
         before = len(api.called("sessions"))
         await pilot.press("h")
         await settle(pilot, 1)
@@ -339,7 +348,7 @@ def test_an_event_for_another_job_cannot_move_the_note(api):
         await settle(pilot, 2)
         app._sp_following = True
         app._sp_follow_job = "the-job-in-force"
-        app._sp_follow_gen = app._gen
+        app._sp_follow_epoch = app._sp_follow_token
         app._sp_job_note = "the note the reader is looking at"
         app._on_speed_event({"id": "a-job-from-an-older-load", "state": "error"})
         assert app._sp_job_note == "the note the reader is looking at"

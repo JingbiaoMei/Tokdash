@@ -578,6 +578,10 @@ class TokdashApp(App):
         self._rp_active: dict | None = None
         # Soft-failure text for the two facet scans, carried into the body.
         self._rp_warnings: list[str] = []
+        # The analytics scan answered WITH a failure, as opposed to not having
+        # answered yet: When and Projects say "still running" only while it is
+        # genuinely outstanding.
+        self._rp_insights_failed = False
         self._rp_section = "summary"
         self._rp_project_sort = "tokens"
         # Speed
@@ -602,7 +606,12 @@ class TokdashApp(App):
         # window, new filter). The stream polls this between lines.
         self._sp_follow_token = 0
         self._sp_follow_job: str | None = None
-        self._sp_follow_gen = -1
+        # The token the LIVE subscription was opened under. Events and the
+        # stream's completion answer to this, not to the app-wide load
+        # generation: a reload or a series change moves the generation while the
+        # build it watches stays the same, and a guard on that generation left
+        # the pane claiming to watch a stream nobody held.
+        self._sp_follow_epoch = -1
         # Last state the build stream reported, and the build this pane stopped
         # watching (see _stop_watching). Both are per-job, never global.
         self._sp_job_state = ""
@@ -1119,6 +1128,7 @@ class TokdashApp(App):
         self._rp_insights = None
         self._rp_active = None
         self._rp_warnings = []
+        self._rp_insights_failed = False
         try:
             try:
                 u = await self._rp_usage_job(period, date_from, date_to, refresh).wait()
@@ -1138,6 +1148,7 @@ class TokdashApp(App):
                     if gen != self._gen:
                         return
                     self._rp_warnings = [_report_warning("analytics scan", exc)]
+                    self._rp_insights_failed = True
                 else:
                     if gen != self._gen:
                         return
@@ -1237,6 +1248,9 @@ class TokdashApp(App):
                 "sources": (merged or {}).get("sources") or [],
                 "kinds": (merged or {}).get("measurement_kinds") or [],
                 "empty_reason": None if merged else "no merged model series in this snapshot",
+                # The chooser needs the whole merged list, not just the entry
+                # this table happens to be charting.
+                "model_series": pool,
             }
             self._paint_speed()
             return
@@ -1248,6 +1262,25 @@ class TokdashApp(App):
             return
         self._sp_hours = h.value
         self._paint_speed()
+
+    def _speed_selection_label(self) -> str:
+        """The exact key or merged model the Trend / Hour table is charting.
+
+        Falls back to the selection the loader actually took when the reader has
+        not picked one, so the note describes the rows on screen rather than an
+        empty "nothing chosen".
+        """
+        if self._sp_lens == "combined":
+            model = self._sp_model or next(
+                (str(entry.get("model"))
+                 for entry in ((self._sp_trend or {}).get("model_series")
+                               or (self._sp_hours or {}).get("model_series") or [])
+                 if entry.get("model")),
+                None,
+            )
+            return f"merged model {model}" if model else ""
+        key = self._sp_key or self._default_speed_key()
+        return self._speed_key_label(key) if key else ""
 
     def _default_speed_key(self) -> tuple | None:
         keys = views.speed_trend_rows(self._sp_trend or {}).get("keys") or []
@@ -1277,13 +1310,16 @@ class TokdashApp(App):
                 # than re-subscribing: a snapshot that is still "building" is
                 # not a reason to ask the same dead stream a second time.
                 self._sp_job_note = self._sp_gaveup_note
-            elif not self._sp_following and self._active_pane() == "speed":
-                # Owned by THIS load: both the job identity and the generation
-                # are recorded so a late event from a superseded build cannot be
-                # painted as if it belonged to the window on screen.
+            elif self._active_pane() == "speed" and (
+                    not self._sp_following or self._sp_follow_job != str(job_id)):
+                if self._sp_following:
+                    # This snapshot names a DIFFERENT build than the one being
+                    # followed: hand the note over to the new job rather than
+                    # letting a stream for the old one keep painting it.
+                    self._stop_speed_follow()
                 self._sp_following = True
                 self._sp_follow_job = str(job_id)
-                self._sp_follow_gen = self._gen
+                self._sp_follow_epoch = self._sp_follow_token
                 self._follow_speed_job(str(job_id))
         else:
             self._sp_job = None
@@ -1293,12 +1329,14 @@ class TokdashApp(App):
     @work(group="speed-follow", exclusive=True, exit_on_error=False)
     async def _follow_speed_job(self, job_id: str) -> None:
         token = self._sp_follow_token
-        gen = self._gen
         result = await self._speed_job_follow(job_id).wait()
-        if token != self._sp_follow_token or gen != self._gen:
-            # Superseded -- the user navigated, re-ranged or changed the source.
-            # The load that replaced this one owns the note and the flag now, and
-            # clearing either here would take the new subscription's state down.
+        if token != self._sp_follow_token:
+            # Superseded -- the user navigated away, re-ranged, or changed the
+            # source or timing set, each of which retires this build. The
+            # subscription that replaced this one owns the note and the flag now,
+            # and clearing either here would take the new stream's state down.
+            # A manual reload is deliberately NOT in that list: it re-reads the
+            # same snapshot and the same queued build, so the stream stays.
             return
         self._sp_following = False
         if self._active_pane() != "speed":
@@ -1353,14 +1391,22 @@ class TokdashApp(App):
         named = status.get("id") or status.get("job_id")
         if named and self._sp_follow_job and str(named) != str(self._sp_follow_job):
             return
-        if self._sp_follow_gen != self._gen or self._active_pane() != "speed":
+        if self._sp_follow_epoch != self._sp_follow_token or self._active_pane() != "speed":
+            # Not the subscription in force, or nobody is looking at the pane it
+            # belongs to. Either way the event has no screen to paint.
             return
         state = str(status.get("state") or "")
         self._sp_job_state = state or self._sp_job_state
         done = status.get("completed_inputs")
         total = status.get("total_inputs")
         progress = f" {done}/{total}" if done is not None and total else ""
-        self._sp_job_note = f"building{progress} · last-good rows shown"
+        if state in _SP_JOB_DONE:
+            # The build landed; the completion below re-reads cache-only. Say
+            # which of the two the reader is watching rather than calling a
+            # finished build "building" until that read returns.
+            self._sp_job_note = "build finished · re-reading snapshot"
+        else:
+            self._sp_job_note = f"building{progress} · last-good rows shown"
         if state == "error":
             self._sp_job_note = "build failed · r Retry"
         self._paint_speed()
@@ -1531,6 +1577,7 @@ class TokdashApp(App):
             self._rp_insights = None
             self._rp_active = None
             self._rp_warnings = []
+            self._rp_insights_failed = False
         elif pane == "speed":
             self._sp_payload = None
             self._sp_trend = None
@@ -1919,20 +1966,77 @@ class TokdashApp(App):
         self._sp_inventory = tuple(sorted(x for x in seen if x))
         return self._sp_inventory
 
+    def _speed_model_inventory(self) -> list:
+        """Every merged model this scope can answer for, from either payload.
+
+        Trend mode holds the trend response and Hour mode holds its own copy of
+        one; only one of the two slots is ever filled, so reading a single slot
+        made ``k`` a dead key the moment the reader left the Trend view.
+        """
+        seen: list = []
+        for payload in (self._sp_trend, self._sp_hours):
+            for entry in ((payload or {}).get("model_series") or []):
+                model = entry.get("model")
+                if model and model not in seen:
+                    seen.append(model)
+        return seen
+
+    def _speed_key_inventory(self) -> list:
+        """Every exact (source, model, kind, basis) this scope offers.
+
+        The trend response names the comparison keys; the across-models snapshot
+        carries the same populations as flat rows, and that snapshot is what is
+        in hand when the reader is on Hour and never opened Trend.
+        """
+        keys = [
+            tuple(k)
+            for k in views.speed_trend_rows(self._sp_trend or {}).get("keys") or []
+        ]
+        seen = set(keys)
+        for row in (self._sp_payload or {}).get("rows") or []:
+            key = (
+                row.get("source"),
+                row.get("model"),
+                row.get("measurement_kind"),
+                row.get("token_basis"),
+            )
+            if any(key) and key not in seen:
+                seen.add(key)
+                keys.append(key)
+        return keys
+
+    @staticmethod
+    def _speed_key_label(key: object) -> str:
+        """One comparison key in the pane's own words, not its wire ids.
+
+        The Across table already calls a timing kind "response window" and a
+        basis "output + reasoning". A chooser that picks the SAME key has to say
+        the same words, or the two surfaces read like two different measurements.
+        """
+        source, model, kind, basis = (list(key) + [None, None, None, None])[:4]
+        parts = [
+            str(part) for part in (
+                source,
+                model,
+                views.TIMING_KIND_LABELS.get(str(kind), str(kind)) if kind else "",
+                views.TOKEN_BASIS_LABELS.get(str(basis), str(basis)) if basis else "",
+            ) if part
+        ]
+        return " / ".join(parts) or EM_DASH
+
     def action_choose_series(self) -> None:
         if self._active_pane() != "speed" or self._sp_mode == "across":
             return
-        trend = views.speed_trend_rows(self._sp_trend or {}, lens=self._sp_lens)
         if self._sp_lens == "combined":
             # A merged model IS the selection in this lens: one identity, not a
             # four-part key. Kept as a string end to end so nothing downstream
             # has to guess which lens produced it.
-            options = [(str(model), str(model)) for model in trend.get("models") or []]
+            options = [(str(model), str(model)) for model in self._speed_model_inventory()]
             active = self._sp_model
         else:
             options = [
-                (" / ".join(str(x) for x in key if x), tuple(key))
-                for key in trend.get("keys") or []
+                (self._speed_key_label(key), tuple(key))
+                for key in self._speed_key_inventory()
             ]
             active = self._sp_key
         if not options:
@@ -1963,6 +2067,7 @@ class TokdashApp(App):
         if self._active_pane() != "speed":
             return
         self._sp_include_windows = not self._sp_include_windows
+        self._sync_toggle_states()  # the button shows the set now in force
         self._sp_key = None
         self._sp_model = None
         self._sp_gaveup = None  # a different population may need its own build
@@ -2171,6 +2276,11 @@ class TokdashApp(App):
             self._sync_toggle_states()
             self._restart_speed()  # re-read the snapshot for the new view
             return
+        if button_id == "sp-windows":
+            # The button and the x key are one control; a test that drives only
+            # the key cannot see that the button on screen did nothing.
+            self.action_toggle_windows()
+            return
         if button_id.startswith("sp-lens-"):
             self._sp_lens = "stream" if button_id.endswith("stream") else "combined"
             self._sync_toggle_states()
@@ -2312,7 +2422,7 @@ class TokdashApp(App):
                     and self._sp_gaveup != cache.get("job_id")):
                 self._sp_following = True
                 self._sp_follow_job = str(cache["job_id"])
-                self._sp_follow_gen = self._gen
+                self._sp_follow_epoch = self._sp_follow_token
                 self._follow_speed_job(str(cache["job_id"]))
         elif self._sp_following:
             # A hidden pane holds no subscription. The build goes on server-side
@@ -3011,6 +3121,23 @@ class TokdashApp(App):
     def _report_warnings(self) -> list[list[Run]]:
         return [[Run(text, "warn")] for text in self._rp_warnings]
 
+    def _report_scan_failed(self) -> list[list[Run]]:
+        """The facet scan answered with a failure: name it, never wait for it.
+
+        "Still running" is a promise that waiting pays off. When the read raised,
+        no amount of waiting fills the section, and the real reason -- sitting in
+        ``_rp_warnings`` -- stayed off the screen while the section looked busy.
+        """
+        detail = next((w for w in self._rp_warnings if w.startswith("analytics")), "")
+        lines = [[Run("analytics scan failed — this section has no facet to draw", "bad")]]
+        if detail:
+            lines.append([Run(detail, "warn")])
+        lines.append([Run("r Reload re-runs the scan for this window", "muted")])
+        return lines
+
+    def _report_facet_pending_or_failed(self) -> list[list[Run]]:
+        return self._report_scan_failed() if self._rp_insights_failed else self._report_pending()
+
     def _report_when_lines(self, width: int) -> list[list[Run]]:
         """All 24 hours and all seven weekdays, with the denominator named.
 
@@ -3023,7 +3150,7 @@ class TokdashApp(App):
         -- so this paints it instead of the summary version of it.
         """
         if self._rp_insights is None:
-            return self._report_pending()
+            return self._report_facet_pending_or_failed()
         glyphs = _safe_glyphs()
         two_columns = width >= 92
         bar = max(4, (width - (79 if two_columns else 40)) // (2 if two_columns else 1))
@@ -3044,7 +3171,11 @@ class TokdashApp(App):
             head.append(Run(f" · busiest weekday {when['peak_weekday']}", "muted"))
         if when["night_share"] is not None:
             head.append(
-                Run(f" · night share {when['night_share']:.1f}% ({when['night_label']})", "muted")
+                # The facet answers with a RATIO (night / total), so it goes
+                # through the same percent formatter the CLI report uses; a
+                # bare "%" suffix turned 50% into 0.5%.
+                Run(f" · night share {fmt_hit(when['night_share'])}"
+                    f" ({when['night_label']})", "muted")
             )
         if head:
             lines.append(head)
@@ -3063,7 +3194,10 @@ class TokdashApp(App):
                         continue
                     cells += [
                         Run(f"{entry['hour']} ", "muted"),
-                        Run(entry["bar"], "accent"),
+                        # A fixed bar cell: the bar is the only variable-length
+                        # thing in the row, and un-padded it slid the figures --
+                        # and the whole second column -- a few cells per row.
+                        Run(entry["bar"].ljust(bar), "accent"),
                         Run(" ", "muted"),
                         Run(f"{entry['tokens']:>9}", "muted"),
                         Run(f"{entry['share']:>7}", "muted"),
@@ -3080,7 +3214,7 @@ class TokdashApp(App):
             for entry in when["weekdays"]:
                 lines.append([
                     Run(f"{entry['day']:<9}", "muted"),
-                    Run(entry["bar"], "accent"),
+                    Run(entry["bar"].ljust(bar), "accent"),
                     Run(" ", "muted"),
                     Run(f"{entry['tokens']:>9}", "muted"),
                     Run(f"{entry['share']:>7}", "muted"),
@@ -3098,7 +3232,7 @@ class TokdashApp(App):
         ranked rows, never as a fake project.
         """
         if self._rp_insights is None:
-            return self._report_pending()
+            return self._report_facet_pending_or_failed()
         projects = views.report_projects(
             self._rp_insights,
             sort=self._rp_project_sort,
@@ -3162,6 +3296,14 @@ class TokdashApp(App):
                           else "decode windows (excludes the initial wait)"),
             f"cache {state}",
         ]
+        if self._sp_mode in ("trend", "hour"):
+            # Which ONE thing the table below measures. Both views answer for a
+            # single comparison key or merged model, and that identity belongs
+            # above the rows: a 24-row hour table fills the pane, so a caption
+            # underneath it left a screen full of rates with no name attached.
+            selection = self._speed_selection_label()
+            if selection:
+                note_bits.insert(1, f"measuring {selection}")
         if self._sp_job_note:
             note_bits.append(self._sp_job_note)
         hidden = payload.get("hidden_request_windows") or []
@@ -3295,8 +3437,9 @@ class TokdashApp(App):
             merged = " · ".join(
                 part for part in (
                     f"sources {', '.join(hours['sources'])}" if hours.get("sources") else "",
-                    "timing " + ", ".join(views._kinds(hours["kinds"]))
-                    if hours.get("kinds") else "",
+                    # _kinds already returns the joined label; joining it again
+                    # spelled it out one character at a time.
+                    "timing " + views._kinds(hours["kinds"]) if hours.get("kinds") else "",
                 ) if part
             )
             lines = [[Run(f"merged model {model}" + (f" · {merged}" if merged else ""), "muted")]]

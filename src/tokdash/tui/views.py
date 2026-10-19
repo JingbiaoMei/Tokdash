@@ -1219,7 +1219,20 @@ def speed_hour_rows(payload: dict, *, lens: str = "stream") -> dict:
             }
             for h in range(24)
         ]
-        return {"rows": rows, "available": any(not r["gap"] for r in rows), "note": "merged model hours"}
+        return {
+            "rows": rows,
+            "available": any(not r["gap"] for r in rows),
+            # Identity rides along with the rates. An hour table that cannot say
+            # which merged model it measured, over which sources and which timing
+            # kinds, is a chart of nobody -- and the painter reads THESE keys, so
+            # dropping them here is what printed "merged model —" over a screen
+            # full of perfectly good measurements.
+            "selected_key": payload.get("selected_key") or {},
+            "sources": payload.get("sources") or [],
+            "kinds": payload.get("kinds") or [],
+            "empty_reason": payload.get("empty_reason"),
+            "note": "merged model hours",
+        }
     hourly = payload.get("hourly") or []
     peak = max((_num(b.get("output_tok_per_s")) for b in hourly if isinstance(b, dict)), default=0.0)
     rows = [

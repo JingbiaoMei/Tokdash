@@ -919,7 +919,7 @@ class TokdashApp(App):
     def _speed_job_status_job(self, job_id: str) -> FetchOutcome:
         return fetch_output_speed_job_status(job_id)
 
-    @work(thread=True, exit_on_error=False)
+    @work(group="speed-follow-io", exclusive=True, thread=True, exit_on_error=False)
     def _speed_job_follow(self, job_id: str) -> dict:
         """Blocking SSE follow (thread job: it must never sit on the loop).
 
@@ -1276,6 +1276,24 @@ class TokdashApp(App):
         self._sp_hours = h.value
         self._paint_speed()
 
+    def _speed_trend_selection(self) -> tuple[object, str]:
+        """The ONE series the Trend table charts, and what to call it.
+
+        The two lenses select different THINGS: the combined lens names a merged
+        model, the per-stream lens an exact comparison key. Both fall back to the
+        snapshot's own first series, and this is the single place that decides.
+        Passing the per-stream key to the merged renderer -- what used to happen
+        -- left the heading naming one model while the rows measured another.
+        """
+        trend = self._sp_trend or {}
+        if self._sp_lens == "combined":
+            pool = [str(e.get("model")) for e in trend.get("model_series") or [] if e.get("model")]
+            model = self._sp_model if self._sp_model in pool else (pool[0] if pool else None)
+            return model, (f"merged model {model}" if model else "")
+        keys = [tuple(k) for k in views.speed_trend_rows(trend).get("keys") or []]
+        key = self._sp_key if self._sp_key in keys else (keys[0] if keys else None)
+        return key, (self._speed_key_label(key) if key else "")
+
     def _speed_selection_label(self) -> str:
         """The exact key or merged model the Trend / Hour table is charting.
 
@@ -1283,6 +1301,8 @@ class TokdashApp(App):
         not picked one, so the note describes the rows on screen rather than an
         empty "nothing chosen".
         """
+        if self._sp_mode == "trend":
+            return self._speed_trend_selection()[1]
         if self._sp_lens == "combined":
             model = self._sp_model or next(
                 (str(entry.get("model"))
@@ -1342,7 +1362,17 @@ class TokdashApp(App):
     @work(group="speed-follow", exclusive=True, exit_on_error=False)
     async def _follow_speed_job(self, job_id: str) -> None:
         token = self._sp_follow_token
-        result = await self._speed_job_follow(job_id).wait()
+        try:
+            result = await self._speed_job_follow(job_id).wait()
+        except Exception as exc:  # noqa: BLE001 — a dropped stream is a note, not a crash
+            # The reader is gone, so the completion it was meant to deliver will
+            # never arrive. The flag has to come down WITH it -- left raised, the
+            # pane believes it is still watching, keeps saying "re-reading
+            # snapshot", and never follows the build in force. Only for the
+            # subscription still in force: a superseded one belongs to nobody.
+            if token == self._sp_follow_token:
+                self._stop_watching(job_id, f"update connection lost ({type(exc).__name__})")
+            return
         if token != self._sp_follow_token:
             # Superseded -- the user navigated away, re-ranged, or changed the
             # source or timing set, each of which retires this build. The
@@ -2093,11 +2123,16 @@ class TokdashApp(App):
 
     def _load_hours_start(self) -> None:
         self._gen += 1
+        gen = self._gen
 
         async def _run() -> None:
-            await self._load_hours(self._gen)
+            await self._load_hours(gen)
 
-        self.run_worker(_run(), exclusive=True, exit_on_error=False)
+        # Its OWN group. An exclusive worker with no group lands in Textual's
+        # "default" group, where it cancels every ungrouped worker -- including
+        # the open build subscription, whose reader is a thread worker. Choosing
+        # a series is a view change, not a reason to drop a live stream.
+        self.run_worker(_run(), group="speed-series", exclusive=True, exit_on_error=False)
 
     def _load_speed_trend_only(self) -> None:
         gen = self._gen
@@ -2105,7 +2140,7 @@ class TokdashApp(App):
         async def _run() -> None:
             await self._load_trend(gen)
 
-        self.run_worker(_run(), exclusive=True, exit_on_error=False)
+        self.run_worker(_run(), group="speed-series", exclusive=True, exit_on_error=False)
 
     def action_cycle_bucket(self) -> None:
         if self._active_pane() != "speed":
@@ -2191,7 +2226,7 @@ class TokdashApp(App):
             self.action_show_pane("overview")
             self._set_window(self._win)
         elif pane == "speed":
-            self._show_speed_row(focused, str(key))
+            self._show_speed_row(focused, str(key))  # dispatches on the view
         elif pane == "quota":
             identity = self._quota_idents.get(str(key))
             if identity is None:
@@ -2205,7 +2240,109 @@ class TokdashApp(App):
             self._paint_quota()
 
     def _show_speed_row(self, table: DataTable, key: str) -> None:
-        """One row's measurement context: what the rate was divided by.
+        """What the row under the cursor measured, in the view's own terms.
+
+        The three Speed views key their rows differently: a comparison identity
+        for Across models, a server bucket for Trend, an hour of the day for Hour.
+        Looking every key up as the first kind is what told a reader that a valid
+        bucket or hour "is no longer in this snapshot", so the view decides which
+        resolver runs.
+        """
+        # The same tests the painter applies to choose its table: while a Trend or
+        # Hour read is still in flight the pane is showing the Across-models rows,
+        # and those keys are comparison identities.
+        if self._sp_mode == "trend" and self._sp_trend is not None:
+            self._show_speed_bucket(str(key))
+        elif self._sp_mode == "hour" and self._sp_hours is not None:
+            self._show_speed_hour(str(key))
+        else:
+            self._show_speed_comparison(str(key))
+
+    def _show_speed_bucket(self, key: str) -> None:
+        """One Trend bucket: the series, its window, and the overlap it measured."""
+        detail = self.query_one("#sp-detail", Static)
+        detail.display = True
+        series, label = self._speed_trend_selection()
+        trend = views.speed_trend_rows(self._sp_trend or {}, key=series, lens=self._sp_lens)
+        row = next((r for r in trend["rows"] if r["key"] == key), None)
+        if row is None:
+            detail.update(emit_markup([[
+                Run(f"selected {key} · bucket is no longer in this snapshot", "warn")
+            ]]))
+            return
+        rate = row["per_stream"] if self._sp_lens == "stream" else row["combined"]
+        # The bucket's OWN key leads: at day resolution two adjacent buckets share
+        # a window, so a detail that named only the window could not say which
+        # bucket the cursor was on -- and "which one" is why the key was pressed.
+        lines = [[Run(f"{label or EM_DASH} · {key}", "header")]]
+        if row["span"]:
+            lines.append([Run("window ", "muted"), Run(row["span"])])
+        if row["gap"]:
+            lines.append([Run("no measured response in this bucket · a gap, not a zero", "warn")])
+        lines.append([
+            Run("rate ", "muted"), Run(rate),
+            Run("  · responses ", "muted"), Run(row["calls"]),
+            Run("  · parallelism ", "muted"), Run(row["parallelism"]),
+        ])
+        if self._sp_lens == "stream":
+            lines.append([
+                Run("per-stream ", "muted"), Run(row["per_stream"]),
+                Run("  · combined ", "muted"), Run(row["combined"]),
+                Run("  · p10 ", "muted"), Run(row["p10"]),
+                Run("  · p90 ", "muted"), Run(row["p90"]),
+            ])
+        lines.append([Run(trend["spread_note"], "muted")])
+        lines.append([Run(
+            "one bucket of the series named above · b changes the resolution, k the series",
+            "muted")])
+        detail.update(emit_markup(lines))
+
+    def _show_speed_hour(self, hour: str) -> None:
+        """One hour of the day: the rate, the responses behind it, and its reach."""
+        detail = self.query_one("#sp-detail", Static)
+        detail.display = True
+        combined = self._sp_lens == "combined"
+        hours = views.speed_hour_rows(self._sp_hours or {}, lens=self._sp_lens)
+        row = next((r for r in hours["rows"] if r["hour"] == hour), None)
+        if row is None:
+            detail.update(emit_markup([[
+                Run(f"selected {hour} · hour is no longer in this snapshot", "warn")
+            ]]))
+            return
+        key = hours.get("selected_key") or {}
+        if combined:
+            who = " ".join(
+                part for part in (
+                    f"merged model {key.get('model')}" if key.get("model") else "",
+                    "sources " + ", ".join(hours["sources"]) if hours.get("sources") else "",
+                    "timing " + views._kinds(hours["kinds"]) if hours.get("kinds") else "",
+                ) if part
+            )
+        else:
+            who = self._speed_key_label(
+                (key.get("source"), key.get("model"),
+                 key.get("measurement_kind"), key.get("token_basis"))
+            )
+        lines = [[Run(f"{who or EM_DASH} · {hour}", "header")]]
+        if row["gap"]:
+            lines.append([Run("nothing measured in this hour · a gap, not a zero", "warn")])
+        cells = [
+            Run("rate ", "muted"), Run(row["rate"]),
+            Run("  · responses ", "muted"), Run(row.get("calls", EM_DASH)),
+        ]
+        if combined:
+            cells += [Run("  · parallelism ", "muted"), Run(row.get("parallelism", EM_DASH))]
+        else:
+            cells += [
+                Run("  · eligible ", "muted"), Run(row.get("eligible", EM_DASH)),
+                Run("  · coverage ", "muted"), Run(row.get("coverage", EM_DASH)),
+            ]
+        lines.append(cells)
+        lines.append([Run(hours["note"], "muted")])
+        detail.update(emit_markup(lines))
+
+    def _show_speed_comparison(self, key: str) -> None:
+        """One Across-models row: what the rate was divided by.
 
         A tok/s figure means nothing without its comparison key, its basis and
         how much of the window it actually covers, so Enter shows those rather
@@ -2220,7 +2357,7 @@ class TokdashApp(App):
         detail.display = True
         if row is None:
             detail.update(emit_markup([[Run(f"selected {model} · row is no longer in this snapshot", "warn")]]))
-            return
+            return  # the snapshot moved under the cursor between paint and keypress
         lines = [[Run(f"{row['model']} · {row['timing']}", "header")]]
         if self._sp_lens == "stream":
             lines.append([
@@ -3392,7 +3529,10 @@ class TokdashApp(App):
 
     def _paint_speed_trend(self, wide: bool) -> None:
         table = self.query_one("#sp-table", DataTable)
-        trend = views.speed_trend_rows(self._sp_trend or {}, key=self._sp_key, lens=self._sp_lens)
+        # The renderer and the note above it resolve the series together, so the
+        # heading can name model two only when the rows measure model two.
+        series, _label = self._speed_trend_selection()
+        trend = views.speed_trend_rows(self._sp_trend or {}, key=series, lens=self._sp_lens)
         spec = [("bucket", "Bucket", 16, False), ("span", "Window", 24, True)]
         spec.append(("rate", "tok/s per stream", 8, False) if self._sp_lens == "stream"
                     else ("rate", "tok/s combined", 8, False))

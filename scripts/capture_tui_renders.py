@@ -351,6 +351,42 @@ async def speed_combined_hour(app, pilot):
     await fx.settle(pilot, 4)
 
 
+async def speed_trend_detail(app, pilot):
+    """Enter on a bucket: the bucket's own key, its window, and whose series it is."""
+    await speed_trend(app, pilot)
+    app.query_one("#sp-table").focus()
+    await pilot.press("enter")
+    await fx.settle(pilot, 2)
+
+
+async def speed_trend_second_model(app, pilot):
+    """A merged-model pick changes the RATES, not just the name above the table."""
+    other = copy.deepcopy(fx.SPEED_TREND["model_series"][0])
+    other.update(model="claude-opus-4-7", combined=[233.0, 244.0], calls=[7, 8],
+                 parallelism=[2.5, 2.5])
+    FAKE.speed_trend["model_series"].append(other)
+    await speed_combined(app, pilot)
+    app.query_one("#sp-mode-trend").press()
+    await fx.settle(pilot, 4)
+    await pilot.press("k")
+    await fx.settle(pilot, 2)
+    await pilot.press("down")
+    await pilot.press("enter")
+    await fx.settle(pilot, 4)
+
+
+async def speed_hour_detail(app, pilot):
+    """Enter on an hour: that hour's rate, its responses, and the selection."""
+    await speed(app, pilot)
+    app.query_one("#sp-mode-hour").press()
+    await fx.settle(pilot, 4)
+    table = app.query_one("#sp-table")
+    table.focus()
+    table.move_cursor(row=9)
+    await pilot.press("enter")
+    await fx.settle(pilot, 2)
+
+
 CASES = [
     # name, size, body, initial period, monochrome
     ("01-overview-today-120x36", (120, 36), None, "today", False),
@@ -399,6 +435,9 @@ CASES = [
     ("44-speed-hour-chooser-100x30", (100, 30), speed_hour_chooser, "today", False),
     ("45-report-scan-failed-100x30", (100, 30), report_scan_failed, "today", False),
     ("46-speed-hour-80x24", (80, 24), speed_hour, "today", False),
+    ("47-speed-trend-detail-100x30", (100, 30), speed_trend_detail, "today", False),
+    ("48-speed-trend-second-model-100x30", (100, 30), speed_trend_second_model, "today", False),
+    ("49-speed-hour-detail-80x24", (80, 24), speed_hour_detail, "today", False),
 ]
 
 

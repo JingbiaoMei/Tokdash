@@ -654,9 +654,16 @@ def quota_table(
     now_ts: float,
     glyphs: str = "blocks",
     labels: dict | None = None,
-) -> tuple[list[list[Run]], list[list[str]], str, list[list[Run]]]:
-    """(banner segments, DataTable string rows, note, credits section) for the
-    Quota tab.
+) -> tuple[list[list[Run]], list[list[str]], str, list[list[Run]], list[dict | None]]:
+    """(banner segments, DataTable string rows, note, credits, row identities).
+
+    ``keys[i]`` is what ``rows[i]`` IS: ``{"provider", "account", "bucket"}`` for
+    a usage window, ``{"provider", "status_only": True}`` for the dimmed
+    no-windows card, and None for the blank spacer between providers. The table
+    paints display text whose Provider cell is deliberately blank on
+    continuation rows, so the identity cannot be recovered from the cells a
+    reader sees -- Enter on a row needs this, or "open the account" has nothing
+    to open.
 
     Rows mirror the web companion card: Provider | Window (normalized
     "5-hour"/"Weekly") | remaining bar + "62.3% left" (the bar and the
@@ -706,6 +713,7 @@ def quota_table(
     ]]
 
     rows: list[list[str]] = []
+    keys: list[dict | None] = []
     # Credits are a property of the CARDS, not of a rendered window row —
     # collected whole (all providers) before the per-provider loop, so the
     # no-windows early-continue can't drop a card's grants. Round 4:
@@ -728,6 +736,7 @@ def quota_table(
     def _gap() -> None:
         if rows:  # never before the FIRST group — no leading blank row
             rows.append(["", "", "", "", "", ""])
+            keys.append(None)  # a spacer carries no account
 
     for provider in sorted(providers.keys()):
         card = providers[provider] or {}
@@ -737,6 +746,7 @@ def quota_table(
                 _gap()
                 rows.append([str(provider), EM_DASH, EM_DASH, EM_DASH, EM_DASH,
                              "unavailable"])
+                keys.append({"provider": str(provider), "status_only": True})
             # else: no windows but the card says something (e.g. "local_plan")
             # — nothing tabular to show; render no row.
             continue
@@ -800,6 +810,8 @@ def quota_table(
                 trend,
                 str(card.get("status") or "unavailable"),
             ])
+            keys.append({"provider": str(provider), "account": acct,
+                         "bucket": str(bucket.get("bucket") or "")})
     notes: list[str] = []
     if not (state or {}).get("enabled"):
         notes.append("quota tracking is off — enable it with `tokdash quota consent --enabled on`")
@@ -807,4 +819,159 @@ def quota_table(
         notes.append("network quota polling is not consented — grant it with `tokdash quota consent --<provider>-api on`")
     if not any_points:
         notes.append("no 24h quota history yet — press u to poll once")
-    return banner, rows, " · ".join(notes), credits_section
+    trouble = [
+        f"{provider} {account.get('account') or 'default'}"
+        for provider, card in sorted(providers.items())
+        for account in _accounts_of(card)
+        if str(account.get("status") or "ok") != "ok"
+    ]
+    if trouble:
+        # A narrow table drops the Status column before it cuts a word, and a
+        # stale credential under a healthy-looking percentage is exactly the
+        # thing that must not depend on a column being on screen.
+        notes.append(
+            f"{len(trouble)} account{'s' if len(trouble) != 1 else ''} reporting a "
+            f"problem ({', '.join(trouble[:3])}) — enter a row for its status"
+        )
+    return banner, rows, " · ".join(notes), credits_section, keys
+
+
+def quota_account_problem_lines(state: dict) -> list[list[Run]]:
+    """Accounts whose card says anything other than ok, as warning rows.
+
+    Kept separate from the table's Status column because that column is the
+    first thing a narrow terminal gives up; the account's freshness is not.
+    """
+    lines: list[list[Run]] = []
+    for provider, card in sorted(((state or {}).get("providers") or {}).items()):
+        for account in _accounts_of(card):
+            status = str(account.get("status") or "ok")
+            if status == "ok":
+                continue
+            detail = account.get("status_detail") or ""
+            lines.append([
+                Run(f"{provider} {account.get('account') or 'default'}: ", "bold"),
+                Run(status, "warn"),
+                Run(f" {detail}".rstrip(), "muted"),
+                Run(f" · {_fmt_epoch_full(account.get('status_at') or account.get('updated_at'))}",
+                    "muted"),
+            ])
+    return lines
+
+
+def _accounts_of(card: Any) -> list[dict]:
+    """GET /api/quota's ``accounts`` as a LIST of {account, status, ...} rows.
+
+    Not a mapping keyed by account id, and the window data does NOT live inside
+    it: windows are the card's top-level ``buckets``, each carrying its own
+    ``account``. Reading either as a dict silently finds nothing, which is how a
+    stale token disappears from the pane.
+    """
+    accounts = (card or {}).get("accounts") or []
+    if isinstance(accounts, dict):  # older shape: {account_id: {...}}
+        return [dict(value or {}, account=str(name))
+                for name, value in accounts.items() if isinstance(value, dict)]
+    return [entry for entry in accounts if isinstance(entry, dict)]
+
+
+def quota_detail_rows(
+    state: dict, identity: dict | None, *, now_ts: float, labels: dict | None = None
+) -> list[list[Run]]:
+    """Everything the reader should know about the row under the cursor.
+
+    A window's remaining percentage is the least interesting thing on the card:
+    what a reader needs underneath it is WHICH account that meter belongs to,
+    whether the answer came from the provider API or a local log that may lag,
+    when it was last observed, and whether that account is complaining. Consent
+    and the poll clock close it out, because "it says 0% left" and "the token
+    expired three hours ago" look identical without them.
+    """
+    # ``labels`` arrives as data, exactly as quota_table takes it: charts never
+    # reaches into the backend for a display name.
+    providers = (state or {}).get("providers") or {}
+    identity = identity or {}
+    provider = str(identity.get("provider") or "")
+    card = providers.get(provider)
+    if card is None:
+        for name, entry in providers.items():
+            if str(name).lower() == provider.lower():
+                provider, card = str(name), entry
+                break
+    if not isinstance(card, dict):
+        return [[Run(f"no quota card for {provider or 'this row'}", "warn")]]
+
+    if identity.get("status_only"):
+        return [[
+            Run(f"{tool_label(provider, labels)} · ", "bold"),
+            Run("no usable quota windows", "warn"),
+            Run(f" · card status {card.get('status') or 'unknown'}", "muted"),
+            Run(f" · detected {bool(card.get('detected'))}"
+                f" · network {'consented' if card.get('network_enabled') else 'not consented'}", "muted"),
+        ]]
+
+    bucket_key = str(identity.get("bucket") or "")
+    account_id = str(identity.get("account") or "default")
+    bucket = next(
+        (b for b in (card.get("buckets") or [])
+         if isinstance(b, dict) and str(b.get("bucket") or "") == bucket_key
+         and str(b.get("account") or "default") == account_id),
+        None,
+    )
+    lines: list[list[Run]] = [[
+        Run(f"{tool_label(provider, labels)}", "bold"),
+        Run(f" · account {account_id}", "muted"),
+        Run(f" · plan {card.get('plan')}" if card.get("plan") else "", "muted"),
+        Run(f" · card status {card.get('status') or 'unknown'}", "muted"),
+        Run(" · network not consented"
+            if card.get("network_enabled") is False else "", "warn"),
+    ]]
+    if bucket is None:
+        lines.append([Run("that window is no longer in the snapshot — press r", "warn")])
+    else:
+        remaining = _remaining_pct(bucket)
+        window = _window_label(provider, bucket, now_ts)
+        raw_label = str(bucket.get("bucket_label") or bucket_key)
+        source = str(bucket.get("source") or "")
+        if bucket.get("unlimited") is True:
+            level = [Run("unlimited", "ok")]
+        elif remaining is None:
+            level = [Run("never measured", "warn")]
+        else:
+            level = [Run(f"{remaining:.1f}%", "bold"), Run(" left", "muted"),
+                     Run(f" (used {100.0 - remaining:.1f}%)", "muted")]
+        lines.append([Run("window ", "muted"), Run(window, "bold"),
+                      Run(f" ({raw_label})" if raw_label != window else "", "muted"),
+                      Run("  ·  ", "muted"), *level])
+        lines.append([
+            Run("resets ", "muted"), Run(_reset_cell(bucket, now_ts), "bold"),
+            Run("  · observed ", "muted"),
+            Run(_fmt_epoch_full(bucket.get("observed_at") or bucket.get("captured_at")), "bold"),
+            Run("  · source ", "muted"), Run(source or "unknown", "bold"),
+            Run("" if source.endswith("_api") else " (local logs can lag the provider)",
+                "" if source.endswith("_api") else "warn"),
+        ])
+    account = next((a for a in _accounts_of(card)
+                    if str(a.get("account") or "default") == account_id), None)
+    if account is not None:
+        status = str(account.get("status") or "ok")
+        lines.append([
+            Run("account status ", "muted"),
+            Run(status, "ok" if status == "ok" else "warn"),
+            Run(f" {account.get('status_detail')}" if account.get("status_detail") else "", "warn"),
+            Run("  · last seen ", "muted"),
+            Run(_fmt_epoch_full(account.get("status_at") or account.get("updated_at")), "muted"),
+        ])
+    elif account_id != "default":
+        lines.append([Run(f"account {account_id} is not on the card", "warn")])
+    if (card.get("status_account") or "") and str(card.get("status_account")) == account_id:
+        lines.append([Run("this account is the one that names the card's status", "muted")])
+    poll = (state or {}).get("poll") or {}
+    consent = (state or {}).get("consent") or {}
+    granted = ", ".join(str(k) for k, v in consent.items() if v) or "none"
+    lines.append([
+        Run("poll every ", "muted"), Run(f"{poll.get('interval_minutes', '?')} min", "muted"),
+        Run(" · last run ", "muted"), Run(_fmt_epoch_full(poll.get("last_run")), "muted"),
+        Run(" · network consent: ", "muted"), Run(granted, "muted"),
+        Run(" · u polls once", "muted"),
+    ])
+    return lines

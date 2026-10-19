@@ -184,14 +184,28 @@ def test_stats_named_year_is_a_whole_calendar_year():
     assert year.describe(TODAY).startswith("2025  (")
 
 
-def test_stats_ladder_walks_years_and_returns_to_the_trailing_rung():
+def test_stats_ladder_walks_both_ways_from_the_year_in_progress():
     trailing = StatsWindow(None)
     assert trailing.step(1, TODAY) == trailing  # already the newest rung
-    first = trailing.step(-1, TODAY)
-    assert first == StatsWindow(2025)
-    assert first.step(-1, TODAY) == StatsWindow(2024)
+    # The rung under "trailing 365 days" is THIS calendar year. The old ladder
+    # stepped straight past it, so "show me the year so far" had no key.
+    current = trailing.step(-1, TODAY)
+    assert current == StatsWindow(2026)
+    assert current.step(-1, TODAY) == StatsWindow(2025)
+    # The way back is the same ladder, run the other way.
+    assert StatsWindow(2025).step(1, TODAY) == StatsWindow(2026)
     assert StatsWindow(2026).step(1, TODAY) == trailing
     assert StatsWindow(2026).step(5, TODAY) == trailing
+
+
+def test_the_current_year_is_named_for_the_days_it_can_answer():
+    # /api/stats can only answer the current year THROUGH today; naming a window
+    # the data cannot reach is the mistake this module exists to stop.
+    current = StatsWindow(TODAY.year)
+    assert current.bounds(TODAY) == (dt.date(2026, 1, 1), TODAY)
+    assert current.describe(TODAY).startswith("2026 to date")
+    # A past year stays a whole calendar year.
+    assert StatsWindow(2025).bounds(TODAY) == (dt.date(2025, 1, 1), dt.date(2025, 12, 31))
 
 
 # ------------------------------------------- custom-date validation stays put --
@@ -212,7 +226,8 @@ def test_a_half_typed_date_keeps_its_text_and_names_the_problem():
         ("today", ("today", 1)),
         ("week", ("7d", 7)),
         ("year", ("365d", 365)),
-        ("month", ("rolling30", 30)),   # compute's month is 30 ROLLING days
+        # No "month" row: it is the one period the resolver will not reduce to a
+        # length, and it has its own test below.
         ("3days", ("rolling3", 3)),
         ("14days", ("rolling14", 14)),
         ("14", ("rolling14", 14)),
@@ -248,13 +263,22 @@ def test_a_period_window_steps_by_its_own_length_and_survives_midnight():
     assert fortnight.redate(TODAY + dt.timedelta(days=1)).date_to == TODAY + dt.timedelta(days=1)
 
 
-def test_a_period_window_borrows_no_preset_button():
-    # A 30-day trailing window is NOT "This Month"; lighting that button would
-    # claim a calendar window the dates do not show.
+def test_the_month_period_takes_the_calendar_month_and_thirty_days_does_not():
+    # ``month`` is the ONE period compute refuses to reduce to a length:
+    # period_to_range_args opens the first of the current calendar month, so
+    # --period month must show October 1..19 and light the button that names
+    # those dates. A 30-day ask is still a rolling window, and lighting "This
+    # Month" under September-20 dates would claim a window the numbers do not
+    # show.
     month = window_for_period("month", TODAY)
-    assert month.preset not in PRESET_BY_KEY
-    assert month.short_label == "Last 30 Days"
     assert isinstance(month, DateWindow)
+    assert month.preset == "month" and month.preset in PRESET_BY_KEY
+    assert (month.date_from, month.date_to) == (dt.date(2026, 10, 1), TODAY)
+
+    rolling = window_for_days(30, TODAY)
+    assert rolling.preset not in PRESET_BY_KEY
+    assert rolling.short_label == "Last 30 Days"
+    assert rolling.date_from == dt.date(2026, 9, 20)
 
 
 def test_window_for_days_reuses_only_identical_presets():

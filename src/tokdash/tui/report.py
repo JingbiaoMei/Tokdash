@@ -76,10 +76,13 @@ _DAILY_MAX_ROWS = 31
 _ANSI_STYLES = {"ok": _ok, "bad": _bad, "warn": _warn, "bold": _bold,
                 "accent": _accent, "header": _bold}
 # "muted"/None render plain in ANSI (the engine has no dim code); markup has one.
-# "header" is the section-header fill: reverse-video on the TUI panes (the
-# engine has no reverse helper, so the piped report just keeps it bold).
+# "header" is the section heading. The piped report keeps it bold (the engine has
+# no colour helper for a piped stdout), and the TUI pane paints it in the
+# approved palette's heading colour: the revision-5 design separates sections
+# with a quiet heading and the surface tone under them, not with a filled band
+# across the pane, which reads as one giant selection.
 _MARKUP_STYLES = {"ok": "green", "bad": "red", "warn": "yellow", "bold": "bold",
-                  "accent": "cyan", "muted": "dim", "header": "reverse bold"}
+                  "accent": "cyan", "muted": "dim", "header": "bold #c5d2e3"}
 
 
 #: The report's sections, in the order the piped report emits them. The TUI's

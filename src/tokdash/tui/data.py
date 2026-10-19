@@ -25,7 +25,7 @@ import threading
 import time
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from ..api import (
     REPORT_FACETS,
@@ -675,6 +675,13 @@ def fetch_output_speed(
 
     A normal GET may queue a build (``cache_only=False``); ``r`` sends
     ``refresh=True``. Never both: cache_only takes server-side precedence.
+
+    With no date pair the PERIOD decides, and it decides the same way the route
+    decides: ``GET /api/output-speed`` runs ``resolve_period(period, ...)`` and
+    hands its timing reader explicit dates, so the local fallback resolves the
+    period here rather than handing the reader an empty window. That keeps one
+    selection ("All Time") meaning one span over the service and over an
+    in-process read, instead of each inventing its own bounds.
     """
     from ..speed_cache import payload  # lazy: derived-DB reader only
 
@@ -682,6 +689,11 @@ def fetch_output_speed(
         raise ValueError(f"unknown speed view {view!r}")
     if refresh and cache_only:
         raise ValueError("refresh and cache_only are mutually exclusive (cache_only wins)")
+    if not (date_from and date_to):
+        from ..compute import resolve_period
+
+        resolved = resolve_period(period)
+        date_from, date_to = str(resolved["from"]), str(resolved["to"])
     params: dict[str, Any] = {
         "view": view,
         "period": period,
@@ -740,18 +752,25 @@ def follow_output_speed_job(
     on_event: Callable[[dict[str, Any]], None],
     *,
     timeout: float = 300.0,
+    stop: Optional[Callable[[], bool]] = None,
 ) -> int:
     """Stream one build's status events; return the number of delivered events.
 
     Returns 0 when there is no service to subscribe to (the kill switch, a dev
     build beside another version, nothing listening). Callers then say
     "Build requested - r Reload" instead of pretending the pane updates itself.
+
+    ``stop`` is polled between stream lines. A visible-page subscription belongs
+    to the page that opened it: once that pane is hidden, or the window/source it
+    was watching has been replaced, the reader closes on the next line instead of
+    holding a socket and calling a callback for a view nobody is looking at.
     """
     svc = _remote_service()
     if svc is None:
         return 0
     return _remote.remote_sse(
-        svc, f"/api/output-speed/jobs/{job_id}/events", on_event, timeout=timeout
+        svc, f"/api/output-speed/jobs/{job_id}/events", on_event,
+        timeout=timeout, stop=stop,
     )
 
 

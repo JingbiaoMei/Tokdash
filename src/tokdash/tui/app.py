@@ -35,7 +35,7 @@ import asyncio
 import os
 import sys
 import time
-from datetime import date, timedelta
+from datetime import date
 
 from rich.cells import cell_len
 from rich.markup import escape
@@ -62,7 +62,7 @@ from textual.widgets import (
 )
 
 from ..api import REPORT_FACETS, CacheBackpressureError, _local_today
-from ..compute import period_is_recognized
+from ..compute import period_is_recognized, resolve_period
 from ..sessions import SESSION_TOOLS, TOOL_LABELS
 from ..usage_store import UsageDatabaseSchemaTooNewError
 from .data import (
@@ -94,9 +94,11 @@ from .formatting import (
     fmt_tokens,
     glyph_style,
     tool_label,
+    tool_tint,
 )
-from .charts import quota_table
+from .charts import quota_detail_rows, quota_table
 from .ranges import (
+    ALL_PERIOD,
     PRESETS,
     PRESET_BY_KEY,
     RANGE_KEYS,
@@ -135,6 +137,17 @@ PANE_TITLES = {
 RANGE_PANES = ("overview", "sessions", "report", "speed")
 # Panes that take the Speed source filter (independent of Sessions' filter).
 SPEED_PERIOD_DEFAULT = "year"
+# The ONE table per pane that Enter opens a row in. Sessions grows a second
+# table -- the turns of the open session -- and a turn is not a session: Enter
+# there must do nothing rather than hand a turn number to the session loader.
+PANE_TABLE = {
+    "overview": "ov-table",
+    "sessions": "sn-table",
+    "stats": "st-days",
+    "speed": "sp-table",
+    "quota": "quota-table",
+    "pricing": "pr-table",
+}
 
 _SKELETON = "computing… first run scans session logs and can take tens of seconds"
 
@@ -159,6 +172,20 @@ def _num_cell(value: str) -> Text:
     column-level justify, so alignment rides on each cell as a rich Text; the
     name column stays a plain (escaped) string."""
     return Text(value, justify="right")
+
+
+def _source_cell(tool: object, label: object = None) -> Text:
+    """A source name in its own palette colour.
+
+    The approved design marks every harness with a coloured badge; a table cell
+    has no badge, so the label carries the colour instead. This is identity, not
+    decoration -- the Overview, Sessions and Speed tables all list sources
+    against near-identical figures, and the colour is what lets the eye follow
+    one harness down a page. A monochrome terminal strips it (Textual installs a
+    Monochrome filter for NO_COLOR), leaving the same words.
+    """
+    text = str(label or tool or EM_DASH)
+    return Text(text, style=f"bold {tool_tint(tool)}")
 
 
 def _clamp_report_width(raw: int) -> int:
@@ -266,7 +293,51 @@ class PresetPicker(ModalScreen):
         )
 
 
-class SpeedKeyPicker(ModalScreen):
+class ChoicePicker(ModalScreen):
+    """A titled keyboard chooser over (label, value) rows, with the current one marked.
+
+    Three places need exactly this -- the speed series, the source filter in
+    Sessions and Speed, and Stats\' year -- and a list is the only shape that is
+    safe: nothing here can be typed wrong, and every option shows what it means
+    before it is chosen. Chosen rows come back by value; Escape returns None and
+    changes nothing.
+    """
+
+    BINDINGS = [Binding("escape, q", "dismiss", "Close")]
+
+    def __init__(
+        self, title: str, options: list[tuple[str, object]], active: object = None
+    ) -> None:
+        super().__init__()
+        self._title = title
+        self._options = list(options)
+        self._active = active
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="view-picker"):
+            yield Static(self._title, id="view-picker-title")
+            yield ListView(
+                *[
+                    ListItem(
+                        Static(Text(("● " if value == self._active else "   ") + label)),
+                        id=f"choice-{index}",
+                    )
+                    for index, (label, value) in enumerate(self._options)
+                ],
+                id="view-picker-list",
+            )
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        item_id = getattr(event.item, "id", None) or ""
+        index = item_id[len("choice-"):] if item_id.startswith("choice-") else None
+        try:
+            value = self._options[int(index)][1]
+        except (TypeError, ValueError, IndexError):
+            value = None
+        self.dismiss(value)
+
+
+class SpeedKeyPicker(ChoicePicker):
     """Pick one speed comparison key (source/model/kind/basis) or merged model.
 
     Trend and hour-of-day are only meaningful for ONE key at a time, so the
@@ -274,30 +345,8 @@ class SpeedKeyPicker(ModalScreen):
     hand-typed combination that measures nothing.
     """
 
-    def __init__(self, options: list[tuple[str, object]]) -> None:
-        super().__init__()
-        self._options = options
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="view-picker"):
-            yield Static("Series to chart", id="view-picker-title")
-            yield ListView(
-                *[
-                    ListItem(Static(Text(label)), id=f"key-{index}")
-                    for index, (label, _value) in enumerate(self._options)
-                ],
-                id="view-picker-list",
-            )
-
-    def on_list_view_selected(self, event: ListView.Selected) -> None:
-        item = event.item
-        item_id = getattr(item, "id", None) or ""
-        index = item_id[len("key-"):] if item_id.startswith("key-") else None
-        try:
-            value = self._options[int(index)][1]
-        except (TypeError, ValueError, IndexError):
-            value = None
-        self.dismiss(value)
+    def __init__(self, options: list[tuple[str, object]], active: object = None) -> None:
+        super().__init__("Series to chart", options, active)
 
 
 class TokdashApp(App):
@@ -378,6 +427,21 @@ class TokdashApp(App):
     #range-dates-input { width: 34; }
     Input.-disabled { opacity: 100%; }
 
+    /* The turns of the open session, under its summary: a table and not a
+       paragraph, because EVERY turn of the whole session has to stay reachable.
+       The max-height is what makes that true rather than merely intended: a
+       table sized to all of its rows believes it has nothing left to scroll, so
+       the rows past the bottom of the pane sit below the clip with the cursor
+       walking onto them invisibly. Bounded, the table scrolls itself and the
+       cursor drags the view with it, which is the only way turn 1 of 400 (or
+       turn 400 of 400) ever reaches the screen. Hidden until a session is open,
+       like the detail line above it. */
+    #sn-turns { display: none; margin-top: 1; max-height: 40%; }
+    /* The session list gets the same treatment: with two unbounded tables in
+       one scrollable pane, whichever one lands lower is the one whose tail sits
+       under the clip, and a clipped table does not know it is clipped. */
+    #sn-table { max-height: 45%; }
+
     /* Textual's Horizontal defaults to height: 1fr, which turns a one-line
        toolbar into a spring: the subview row swallows the pane and shoves the
        table to the bottom. Toolbars are one row tall, always. */
@@ -440,7 +504,11 @@ class TokdashApp(App):
         Binding("s", "cycle_sort", "Sort", show=False),
         Binding("h", "choose_sources", "Sources", show=False),
         Binding("p", "stats_year", "Stats year", show=False),
+        # A plain terminal reports shift+p as an uppercase "P"; Textual matches
+        # binding keys literally, so both spellings are declared.
+        Binding("P, shift+p", "stats_year(1)", "Next year", show=False),
         Binding("k", "choose_series", "Series", show=False),
+        Binding("x", "toggle_windows", "Timing set", show=False),
         Binding("b", "cycle_bucket", "Bucket", show=False),
         Binding("enter", "open_row", "Open", show=False),
         Binding("escape", "close_detail", "Close", show=False),
@@ -478,6 +546,10 @@ class TokdashApp(App):
         self._cache_str: dict[str, str] = {}
         self._cache_status: dict[str, str] = {}
         self._reread_done: set[tuple[str, int]] = set()
+        # The (period, date_from, date_to) each pane's RETAINED payload answered
+        # ("stats" keys on its own annual rung). A pane may only paint a payload
+        # under the scope that produced it; see _scope_ok.
+        self._payload_scope: dict[str, tuple | None] = dict.fromkeys(PANI, None)
         self._db_line: str | None = None
         self._polling = False
         # Overview
@@ -517,10 +589,20 @@ class TokdashApp(App):
         self._sp_payload: dict | None = None
         self._sp_trend: dict | None = None
         self._sp_hours: dict | None = None
-        self._sp_key: tuple | None = None
+        self._sp_key: tuple | None = None      # exact key, per-stream lens
+        self._sp_model: str | None = None      # merged model, combined lens
+        # Every source the timing scan knows about, seen so far -- kept apart
+        # from the rows the CURRENT filter displays, so the chooser cannot
+        # forget a source just because something else is on screen.
+        self._sp_inventory: tuple[str, ...] = ()
         self._sp_job: dict | None = None
         self._sp_job_note = ""
         self._sp_following = False
+        # Bumped whenever a live subscription must stop (navigation away, new
+        # window, new filter). The stream polls this between lines.
+        self._sp_follow_token = 0
+        self._sp_follow_job: str | None = None
+        self._sp_follow_gen = -1
         # Last state the build stream reported, and the build this pane stopped
         # watching (see _stop_watching). Both are per-job, never global.
         self._sp_job_state = ""
@@ -529,7 +611,11 @@ class TokdashApp(App):
         # Quota / Pricing
         self._quota_state_val: dict | None = None
         self._quota_history_val: dict | None = None
-        self._quota_detail: str | None = None
+        # Rows painted as markup, so an account status keeps the colour that
+        # says whether the number above it can be trusted.
+        self._quota_detail: list[list[Run]] | None = None
+        # Row key -> what that row IS, for the rows the table shows right now.
+        self._quota_idents: dict[str, dict | None] = {}
         self._pricing: dict | None = None
         self._pr_search = ""
 
@@ -561,6 +647,7 @@ class TokdashApp(App):
                 yield Input(placeholder="search project, id, model", id="sn-search")
                 yield DataTable(id="sn-table", cursor_type="row", zebra_stripes=False)
                 yield Static("", id="sn-detail")
+                yield DataTable(id="sn-turns", cursor_type="row", zebra_stripes=False)
             with TabPane("Stats", id="pane-stats"):
                 yield Static("", id="st-window")
                 yield Static("", id="st-summary")
@@ -581,6 +668,7 @@ class TokdashApp(App):
                     yield Button("Hour of day", id="sp-mode-hour")
                     yield Button("Per stream", id="sp-lens-stream")
                     yield Button("Combined", id="sp-lens-combined")
+                    yield Button("Whole-request timing", id="sp-windows")
                 yield Static("", id="sp-note")
                 yield DataTable(id="sp-table", cursor_type="row", zebra_stripes=False)
                 yield Static("", id="sp-detail")
@@ -768,12 +856,17 @@ class TokdashApp(App):
         )
 
     @work(thread=True, exit_on_error=False)
-    def _speed_hour_job(self, key: tuple) -> FetchOutcome:
+    def _speed_hour_job(self, key) -> FetchOutcome:
+        """Hour-of-day for one selection: an exact key, or one merged model.
+
+        The lens decides what ``key`` IS, and it decides first: unpacking a
+        merged model's name as a four-part comparison key raised before the lens
+        was ever consulted, so the combined hour view could not open at all.
+        """
         date_from, date_to = self._speed_dates()
-        source, model, kind, basis = key
         if self._sp_lens == "combined":
             # A merged model's hours come from the trend payload: the exact-key
-            # time-of-day route needs one key, and a merged model IS not one key.
+            # time-of-day route needs one key, and a merged model is not one key.
             return fetch_output_speed(
                 view="trend",
                 period=SPEED_PERIOD_DEFAULT,
@@ -785,6 +878,7 @@ class TokdashApp(App):
                 cache_only=True,
                 include_request_windows=self._sp_include_windows,
             )
+        source, model, kind, basis = key
         return fetch_output_speed(
             view="time-of-day",
             period=SPEED_PERIOD_DEFAULT,
@@ -811,15 +905,34 @@ class TokdashApp(App):
         so the paint stays on the event loop. Returns a small result dict rather
         than raising: a lost subscription is a NOTE with a recovery key, not an
         app crash.
+
+        ``stop`` is polled by the reader between lines. Without it a stream the
+        user walked away from stayed open -- and kept painting -- until the
+        service decided to close it, so a build for a window nobody is looking at
+        could still move the note on screen.
         """
+        token = self._sp_follow_token
         try:
             delivered = follow_output_speed_job(
                 job_id,
                 lambda status: self.call_from_thread(self._on_speed_event, status),
+                stop=lambda: self._sp_follow_token != token,
             )
             return {"ok": True, "delivered": delivered}
         except Exception as exc:  # noqa: BLE001 — connection loss is a note, not a crash
             return {"ok": False, "error": str(exc)}
+
+    def _stop_speed_follow(self) -> None:
+        """Close any live build subscription and give up the following flag.
+
+        Called on navigation away, a new window, a new source and a new timing
+        set. ``_sp_following`` is what keeps the pane from subscribing twice to
+        one job, so it comes down WITH the stream: left raised, the pane believed
+        it was already watching and never followed the job that replaced it.
+        """
+        self._sp_follow_token += 1
+        self._sp_following = False
+        self._sp_follow_job = None
 
     @work(thread=True, exit_on_error=False)
     def _qp_state_job(self, refresh: bool) -> FetchOutcome:
@@ -866,20 +979,26 @@ class TokdashApp(App):
 
     def _speed_dates(self) -> tuple[str, str]:
         """Speed always travels as explicit dates; an open-ended period would ask
-        the timing cache for a window the shared range never named."""
+        the timing cache for a window the shared range never named.
+
+        All Time resolves through ``resolve_period``, the very helper
+        ``GET /api/output-speed`` runs, so "All Time" on the strip means the
+        endpoint\'s own full span. It used to be replaced by a 365-day window
+        while the label stayed "All Time": measurements older than that vanished
+        and the comparison population changed under a constant name.
+        """
         _period, date_from, date_to = self._request()
-        if not date_from or not date_to:
-            # All Time: the timing cache still needs bounds, so ask for the whole
-            # span the usage resolver itself would pick, widened to a year window.
-            end = self._today
-            return ((end - timedelta(days=365)).isoformat(), end.isoformat())
-        return (date_from, date_to)
+        if date_from and date_to:
+            return (date_from, date_to)
+        resolved = resolve_period(ALL_PERIOD)
+        return (str(resolved["from"]), str(resolved["to"]))
 
     @work(group="overview", exclusive=True, exit_on_error=False)
     async def _load_overview(self, refresh: bool) -> None:
         gen = self._gen
         self._begin_load("overview", gen)
-        period, date_from, date_to = self._request()
+        scope = self._request()
+        period, date_from, date_to = scope
         outcomes: list[FetchOutcome] = []
         try:
             try:
@@ -887,12 +1006,14 @@ class TokdashApp(App):
                 if gen != self._gen:
                     return
                 self._ov_usage = u.value
+                self._payload_scope["overview"] = scope
                 outcomes.append(u)
                 self._paint_overview()
                 a = await self._active_job(period, date_from, date_to, refresh).wait()
                 if gen != self._gen:
                     return
                 self._ov_active = a.value
+                self._payload_scope["overview"] = scope
                 outcomes.append(a)
                 self._paint_overview()
             except Exception as exc:  # noqa: BLE001 — the failure matrix classifies
@@ -916,7 +1037,8 @@ class TokdashApp(App):
         """
         gen = self._gen
         self._begin_load("sessions", gen)
-        period, date_from, date_to = self._request()
+        scope = self._request()
+        period, date_from, date_to = scope
         sources = list(self._sn_sources)
         outcomes: list[FetchOutcome] = []
         self._sn_payloads = {}
@@ -937,10 +1059,15 @@ class TokdashApp(App):
                         if gen != self._gen:
                             return
                         self._sn_failed.append(tool)
+                        # This scope HAS been answered -- badly, but answered.
+                        # Leaving it unstamped would leave a "computing" notice
+                        # where the partial-failure line belongs.
+                        self._payload_scope["sessions"] = scope
                         continue
                     if gen != self._gen:
                         return
                     self._sn_payloads[tool] = outcome.value
+                    self._payload_scope["sessions"] = scope
                     outcomes.append(outcome)
                     self._paint_sessions()  # progressive: rows land as sources answer
                 if gen != self._gen:
@@ -961,6 +1088,7 @@ class TokdashApp(App):
     async def _load_stats(self, refresh: bool) -> None:
         gen = self._gen
         self._begin_load("stats", gen)
+        scope = ("stats", self._stats_win.request())
         outcomes: list[FetchOutcome] = []
         try:
             try:
@@ -968,6 +1096,7 @@ class TokdashApp(App):
                 if gen != self._gen:
                     return
                 self._stats_payload = s.value
+                self._payload_scope["stats"] = scope
                 outcomes.append(s)
                 self._paint_stats()
             except Exception as exc:  # noqa: BLE001
@@ -984,7 +1113,8 @@ class TokdashApp(App):
     async def _load_report(self, refresh: bool) -> None:
         gen = self._gen
         self._begin_load("report", gen)
-        period, date_from, date_to = self._request()
+        scope = self._request()
+        period, date_from, date_to = scope
         outcomes: list[FetchOutcome] = []
         self._rp_insights = None
         self._rp_active = None
@@ -995,6 +1125,7 @@ class TokdashApp(App):
                 if gen != self._gen:
                     return
                 self._rp_usage = u.value
+                self._payload_scope["report"] = scope
                 outcomes.append(u)
                 self._paint_report()
                 # The two facet scans are SOFT here exactly as they are in the
@@ -1011,6 +1142,7 @@ class TokdashApp(App):
                     if gen != self._gen:
                         return
                     self._rp_insights = i.value
+                    self._payload_scope["report"] = scope
                     outcomes.append(i)
                 self._paint_report()
                 try:
@@ -1044,6 +1176,7 @@ class TokdashApp(App):
         the old snapshot back."""
         gen = self._gen
         self._begin_load("speed", gen)
+        scope = self._request()
         outcomes: list[FetchOutcome] = []
         try:
             try:
@@ -1051,6 +1184,7 @@ class TokdashApp(App):
                 if gen != self._gen:
                     return
                 self._sp_payload = p.value
+                self._payload_scope["speed"] = scope
                 self._sp_trend = None
                 self._sp_hours = None
                 outcomes.append(p)
@@ -1078,24 +1212,41 @@ class TokdashApp(App):
         self._paint_speed()
 
     async def _load_hours(self, gen: int) -> None:
+        """Fill the hour-of-day table for the ONE selection this lens offers.
+
+        Per stream the route answers for an exact (source, model, kind, basis)
+        key. Combined has no such key: the merged series carries its own 24 local
+        hours under ``hours``, and the entry's top-level arrays are the TIME
+        buckets -- charting those as hours is how 24 measured bins once printed
+        24 gaps.
+        """
+        if self._sp_lens == "combined":
+            h = await self._speed_hour_job(self._sp_model or "").wait()
+            if gen != self._gen:
+                return
+            pool = ((h.value or {}).get("model_series")) or []
+            model = self._sp_model or next(
+                (str(entry.get("model")) for entry in pool if entry.get("model")), None
+            )
+            merged = next(
+                (entry for entry in pool if entry.get("model") == model), None
+            )
+            self._sp_hours = {
+                "hours": (merged or {}).get("hours") or {},
+                "selected_key": {"model": model} if model else {},
+                "sources": (merged or {}).get("sources") or [],
+                "kinds": (merged or {}).get("measurement_kinds") or [],
+                "empty_reason": None if merged else "no merged model series in this snapshot",
+            }
+            self._paint_speed()
+            return
         key = self._sp_key or self._default_speed_key()
         if key is None:
-            return
-        if self._sp_lens == "combined" and not isinstance(key[0], str):
             return
         h = await self._speed_hour_job(key).wait()
         if gen != self._gen:
             return
-        payload = h.value
-        if self._sp_lens == "combined":
-            model = self._sp_key[1] if self._sp_key else None
-            merged = next(
-                (s for s in payload.get("model_series") or [] if s.get("model") == model),
-                None,
-            )
-            self._sp_hours = {"hours": merged or {}, "selected_key": {"model": model}}
-        else:
-            self._sp_hours = payload
+        self._sp_hours = h.value
         self._paint_speed()
 
     def _default_speed_key(self) -> tuple | None:
@@ -1127,7 +1278,12 @@ class TokdashApp(App):
                 # not a reason to ask the same dead stream a second time.
                 self._sp_job_note = self._sp_gaveup_note
             elif not self._sp_following and self._active_pane() == "speed":
+                # Owned by THIS load: both the job identity and the generation
+                # are recorded so a late event from a superseded build cannot be
+                # painted as if it belonged to the window on screen.
                 self._sp_following = True
+                self._sp_follow_job = str(job_id)
+                self._sp_follow_gen = self._gen
                 self._follow_speed_job(str(job_id))
         else:
             self._sp_job = None
@@ -1136,7 +1292,14 @@ class TokdashApp(App):
 
     @work(group="speed-follow", exclusive=True, exit_on_error=False)
     async def _follow_speed_job(self, job_id: str) -> None:
+        token = self._sp_follow_token
+        gen = self._gen
         result = await self._speed_job_follow(job_id).wait()
+        if token != self._sp_follow_token or gen != self._gen:
+            # Superseded -- the user navigated, re-ranged or changed the source.
+            # The load that replaced this one owns the note and the flag now, and
+            # clearing either here would take the new subscription's state down.
+            return
         self._sp_following = False
         if self._active_pane() != "speed":
             return
@@ -1173,12 +1336,25 @@ class TokdashApp(App):
 
     def _stop_watching(self, job_id: str, what: str) -> None:
         """Note a build this pane can no longer follow, and stop asking."""
+        self._stop_speed_follow()
         self._sp_gaveup = job_id
         self._sp_gaveup_note = f"{what} · r Reload"
         self._sp_job_note = self._sp_gaveup_note
         self._paint_speed()
 
     def _on_speed_event(self, status: dict) -> None:
+        """One build-progress event, and only ever for the build in force.
+
+        The stream is a side channel: it answers to no generation guard, so a
+        subscription that outlived its load could move the note under a window it
+        knows nothing about. Both the job the payload names and the generation
+        that subscribed have to still match, or the event is dropped.
+        """
+        named = status.get("id") or status.get("job_id")
+        if named and self._sp_follow_job and str(named) != str(self._sp_follow_job):
+            return
+        if self._sp_follow_gen != self._gen or self._active_pane() != "speed":
+            return
         state = str(status.get("state") or "")
         self._sp_job_state = state or self._sp_job_state
         done = status.get("completed_inputs")
@@ -1342,17 +1518,31 @@ class TokdashApp(App):
         self._inflight[pane] = gen
         self._open_loads[pane] = self._open_loads.get(pane, 0) + 1
         self._stranded.discard(pane)
-        # Drop the PREVIOUS window's late-arriving payloads for the secondary
-        # sources of this pane: usage repaints mid-load and reads these slots, so
-        # left filled they would mix last window's figures into the new window.
+        # A load drops every payload this pane is about to replace -- secondary
+        # slots AND the primary one. Clearing only the secondaries left the old
+        # window's headline figures in hand, and any repaint that happened before
+        # the new answer arrived (a sort, a search, a resize) put them under the
+        # NEW date label. Empty plus "computing" is the honest middle state.
         if pane == "overview":
+            self._ov_usage = None
             self._ov_active = None
         elif pane == "report":
+            self._rp_usage = None
             self._rp_insights = None
             self._rp_active = None
             self._rp_warnings = []
+        elif pane == "speed":
+            self._sp_payload = None
+            self._sp_trend = None
+            self._sp_hours = None
+        elif pane == "stats":
+            self._stats_payload = None
         elif pane == "quota":
             self._quota_history_val = None
+            # The account detail is painted from the same snapshot as the table:
+            # left standing, it would describe a poll that no longer answers.
+            self._quota_detail = None
+        self._payload_scope[pane] = None
         self._load_started[pane] = time.monotonic()
         self._paint_loading(pane)
         self._update_status()
@@ -1394,6 +1584,26 @@ class TokdashApp(App):
             self._reread_done.add((pane, gen))
             self.set_timer(STALE_REREAD_SECONDS, lambda: self._maybe_reread(pane, gen))
         self._update_status()
+
+    def _scope_ok(self, pane: str) -> bool:
+        """May this pane paint the payloads it is holding right now?
+
+        Only under the scope that produced them. A range change while a request
+        is in flight (or a visited pane that a range change left behind) leaves
+        the previous window's answer in hand, and every repaint path -- sort,
+        search, subview, resize, a cache status that just turned stale -- reads
+        those slots. Painting them below the new dates is the one arrangement of
+        figure and label that is always wrong, so the pane holds its pending
+        notice instead, and the generation guard is no longer the only wall.
+        """
+        expected = (
+            ("stats", self._stats_win.request()) if pane == "stats" else self._request()
+        )
+        return self._payload_scope.get(pane) == expected
+
+    def _paint_pending(self, pane: str) -> None:
+        """The held state for a pane whose data is not this window's."""
+        self._paint_loading(pane)
 
     def _repaint_pane(self, pane: str) -> None:
         """Repaint one pane from the payloads already in hand (no new reads)."""
@@ -1518,11 +1728,21 @@ class TokdashApp(App):
         """
         self._win = window
         self._gen += 1
+        self._stop_speed_follow()  # any watched build belongs to the old window
         self._paint_rangebar()
         for pane in RANGE_PANES:
-            if self._started[pane] or pane == self._active_pane():
+            if pane == self._active_pane():
                 self._started[pane] = True
+                self._stranded.discard(pane)
                 self._reload_pane(pane)
+            elif self._started[pane]:
+                # Visited, now hidden: mark it out of date and let the tab hook
+                # pay when the user actually looks at it. Pressing "]" used to
+                # fan out across every pane ever opened -- Speed's read can
+                # queue a timing build and Sessions' fans out one request per
+                # source -- so ordinary date stepping did background work for
+                # views nobody is reading.
+                self._stranded.add(pane)
         self._update_status()
 
     def action_set_range(self, token: str) -> None:
@@ -1575,14 +1795,27 @@ class TokdashApp(App):
             box.value = ""
             self._paint_rangebar()
 
-    def action_stats_year(self) -> None:
+    def action_stats_year(self, delta: int = -1) -> None:
+        """``p`` an earlier year, ``P`` a later one, back up to trailing 365 days.
+
+        The ladder runs: trailing 365 days, this calendar year, then earlier
+        years. It used to jump past the year the reader is standing in and had no
+        way back, so "show me 2026" was unreachable and one key could only run
+        away from the present.
+        """
         if self._active_pane() != "stats":
             return
-        # p walks the annual ladder: trailing 365 days, then whole calendar years.
-        self._stats_win = self._stats_win.step(-1, self._today)
+        moved = self._stats_win.step(1 if delta > 0 else -1, self._today)
+        if moved == self._stats_win:
+            return
+        self._set_stats_window(moved)
+
+    def _set_stats_window(self, window) -> None:
+        self._stats_win = window
         # The new window has its own months. Carrying the old page number over
         # lands on some unrelated month of the new year (or off the end of it).
         self._stats_month = None
+        self._stats_selected = None
         self._gen += 1
         self._started["stats"] = True
         self._load_stats(False)
@@ -1602,52 +1835,143 @@ class TokdashApp(App):
             self._paint_report()
 
     def action_choose_sources(self) -> None:
+        """``h`` — pick which sources this pane reads.
+
+        A chooser, not a blind cycle: with ten supported tools, cycling is a
+        hundred keystrokes and no way to see where you are. Sessions fans out
+        over its own selection and Speed filters by its own; the two stay
+        separate on purpose, so filtering one does not silently filter the other.
+        """
         pane = self._active_pane()
         if pane == "sessions":
-            # Cycle: all supported sources -> the three busiest in practice ->
-            # back. Sessions and Speed keep SEPARATE source filters on purpose.
-            self._sn_sources = _next_source_cycle(self._sn_sources, SESSION_TOOLS)
-            self._gen += 1
-            self._started["sessions"] = True
-            self._load_sessions(False)
-        elif pane == "speed":
-            sources = sorted(
-                {
-                    str(row.get("source"))
-                    for row in (self._sp_payload or {}).get("rows") or []
-                    if row.get("source")
-                }
+            options: list[tuple[str, object]] = [
+                (f"All supported sources ({len(SESSION_TOOLS)})", ""),
+            ]
+            options += [
+                (f"{label}  (tool={tool})", tool)
+                for tool, label in (
+                    (tool, tool_label(tool, TOOL_LABELS)) for tool in SESSION_TOOLS
+                )
+            ]
+            active = "" if set(self._sn_sources) == set(SESSION_TOOLS) else (
+                self._sn_sources[0] if len(self._sn_sources) == 1 else None
             )
-            options = [None] + sources
-            current = self._sp_source
-            self._sp_source = options[(options.index(current) + 1) % len(options)] if current in options else None
-            self._gen += 1
-            self._started["speed"] = True
-            self._load_speed(False)
+            self.push_screen(ChoicePicker("Sources to read", options, active), self._on_sources)
+        elif pane == "speed":
+            options = [("All measured sources", "")]
+            options += [(f"only {source}", source) for source in self._speed_inventory()]
+            self.push_screen(
+                ChoicePicker("Source to measure", options, self._sp_source or ""),
+                self._on_speed_source,
+            )
+
+    def _on_sources(self, value: object) -> None:
+        if value is None:
+            return
+        self._sn_sources = tuple(SESSION_TOOLS) if value == "" else (str(value),)
+        self._sn_selected_key = None
+        self._gen += 1
+        self._started["sessions"] = True
+        self._load_sessions(False)
+
+    def _on_speed_source(self, value: object) -> None:
+        if value is None:
+            return
+        self._sp_source = None if value == "" else str(value)
+        self._restart_speed()
+
+    def _restart_speed(self, *, cache_only: bool = True) -> None:
+        """Re-read the timing snapshot for a new view, lens, source or timing set.
+
+        Mode, lens, source and the whole-request toggle all change WHICH rows and
+        which merged populations exist, so each one drops the exact key / merged
+        model it was charting (that selection may not survive the change), stops
+        watching any build queued for the old one, and re-reads. Repainting the
+        previous payload is what made a lens switch look like a working view.
+        """
+        self._sp_key = None
+        self._sp_model = None
+        self._sp_gaveup = None
+        self._stop_speed_follow()
+        self._gen += 1
+        self._started["speed"] = True
+        self._load_speed(False, cache_only)
+
+    def _speed_inventory(self) -> tuple[str, ...]:
+        """Every source the timing scan knows, not just the rows on screen.
+
+        A filtered response answers for ONE source, so deriving the inventory
+        from the displayed rows made every other source unreachable after the
+        first pick. Unavailable and hidden-by-filter sources count too: the
+        reader is entitled to ask what they measured.
+        """
+        seen = set(self._sp_inventory)
+        payload = self._sp_payload or {}
+        for row in payload.get("rows") or []:
+            if row.get("source"):
+                seen.add(str(row["source"]))
+        for entry in payload.get("source_status") or []:
+            if isinstance(entry, dict) and entry.get("source"):
+                seen.add(str(entry["source"]))
+        for entry in payload.get("hidden_request_windows") or []:
+            if isinstance(entry, dict) and entry.get("source"):
+                seen.add(str(entry["source"]))
+        self._sp_inventory = tuple(sorted(x for x in seen if x))
+        return self._sp_inventory
 
     def action_choose_series(self) -> None:
         if self._active_pane() != "speed" or self._sp_mode == "across":
             return
-        trend = self._sp_trend or {}
-        options = [
-            (" / ".join(str(x) for x in key if x), tuple(key))
-            for key in (views.speed_trend_rows(trend).get("keys") or [])
-        ]
+        trend = views.speed_trend_rows(self._sp_trend or {}, lens=self._sp_lens)
         if self._sp_lens == "combined":
-            options = [(str(m), str(m)) for m in (views.speed_trend_rows(trend).get("models") or [])]
+            # A merged model IS the selection in this lens: one identity, not a
+            # four-part key. Kept as a string end to end so nothing downstream
+            # has to guess which lens produced it.
+            options = [(str(model), str(model)) for model in trend.get("models") or []]
+            active = self._sp_model
+        else:
+            options = [
+                (" / ".join(str(x) for x in key if x), tuple(key))
+                for key in trend.get("keys") or []
+            ]
+            active = self._sp_key
         if not options:
             return
-        self.push_screen(SpeedKeyPicker(options), self._on_series_picked)
+        self.push_screen(SpeedKeyPicker(options, active), self._on_series_picked)
 
     def _on_series_picked(self, value) -> None:
         if value is None:
             return
-        self._sp_key = value
+        if self._sp_lens == "combined":
+            self._sp_model = str(value)
+        else:
+            self._sp_key = tuple(value)
         self._gen += 1
         if self._sp_mode == "hour":
             self._load_hours_start()
         else:
             self._load_speed_trend_only()
+
+    def action_toggle_windows(self) -> None:
+        """``x`` — widen the measurement set to whole request windows.
+
+        Some sources time the whole request rather than the decode window, so
+        with the decode-only default they can have usage and no measured speed.
+        The choice belongs to the user and is stated on screen every time,
+        because the two sets are different populations, not a bigger sample.
+        """
+        if self._active_pane() != "speed":
+            return
+        self._sp_include_windows = not self._sp_include_windows
+        self._sp_key = None
+        self._sp_model = None
+        self._sp_gaveup = None  # a different population may need its own build
+        self._stop_speed_follow()
+        self._gen += 1
+        self._started["speed"] = True
+        # A plain read: the first look at the widened set is allowed to queue the
+        # work that computes it, and the subscription reports when it lands.
+        self._load_speed(False)
 
     def _load_hours_start(self) -> None:
         self._gen += 1
@@ -1714,6 +2038,9 @@ class TokdashApp(App):
             self._sn_detail_key = None
             self._sn_detail = None
             self._paint_sessions()
+            # The detail and its turn table just went away; focus has to land
+            # back on the list rather than on whatever the hidden table was.
+            self.query_one("#sn-table", DataTable).focus()
         elif pane == "speed":
             self.query_one("#sp-detail", Static).display = False
         elif pane == "quota":
@@ -1724,10 +2051,15 @@ class TokdashApp(App):
         focused = self.focused
         if not isinstance(focused, DataTable):
             return
+        pane = self._active_pane()
+        if focused.id != PANE_TABLE.get(pane):
+            # Focus is on a table this pane shows SECONDARILY (the open
+            # session's turns). Keys mean the row under the cursor, so the
+            # action has to know which table it is standing in.
+            return
         key = _row_key_at(focused, focused.cursor_row)
         if key is None:
             return
-        pane = self._active_pane()
         if pane == "overview":
             self._ov_selected = key
             self._paint_overview()
@@ -1743,7 +2075,15 @@ class TokdashApp(App):
         elif pane == "speed":
             self._show_speed_row(focused, str(key))
         elif pane == "quota":
-            self._quota_detail = quota_detail_text(self._quota_state_val or {}, focused, str(key))
+            identity = self._quota_idents.get(str(key))
+            if identity is None:
+                # The blank spacer between provider groups. It is a row because a
+                # DataTable cannot space rows any other way; it names no account.
+                return
+            self._quota_detail = quota_detail_rows(
+                self._quota_state_val or {}, identity,
+                now_ts=time.time(), labels=TOOL_LABELS,
+            )
             self._paint_quota()
 
     def _show_speed_row(self, table: DataTable, key: str) -> None:
@@ -1829,15 +2169,13 @@ class TokdashApp(App):
         if button_id.startswith("sp-mode-"):
             self._sp_mode = button_id[len("sp-mode-"):]
             self._sync_toggle_states()
-            self._gen += 1
-            self._started["speed"] = True
-            self._load_speed(False, True)  # lens/mode changes re-read the snapshot
+            self._restart_speed()  # re-read the snapshot for the new view
             return
         if button_id.startswith("sp-lens-"):
             self._sp_lens = "stream" if button_id.endswith("stream") else "combined"
-            self._sp_key = None
             self._sync_toggle_states()
-            self._paint_speed()
+            self._restart_speed()  # a new lens is a new population, not a repaint
+            return
 
     def _sync_toggle_states(self) -> None:
         for key, active in (
@@ -1851,6 +2189,7 @@ class TokdashApp(App):
             ("sp-mode-hour", self._sp_mode == "hour"),
             ("sp-lens-stream", self._sp_lens == "stream"),
             ("sp-lens-combined", self._sp_lens == "combined"),
+            ("sp-windows", self._sp_include_windows),
         ):
             try:
                 self.query_one(f"#{key}", Button).set_class(active, "-selected")
@@ -1972,7 +2311,14 @@ class TokdashApp(App):
             if (cache.get("job_id") and not self._sp_following
                     and self._sp_gaveup != cache.get("job_id")):
                 self._sp_following = True
+                self._sp_follow_job = str(cache["job_id"])
+                self._sp_follow_gen = self._gen
                 self._follow_speed_job(str(cache["job_id"]))
+        elif self._sp_following:
+            # A hidden pane holds no subscription. The build goes on server-side
+            # and the next look at Speed re-reads it (or re-subscribes); a stream
+            # kept open behind another view only paints a pane nobody sees.
+            self._stop_speed_follow()
         self._update_status()
 
     # ------------------------------------------------------------ painting --
@@ -2089,6 +2435,9 @@ class TokdashApp(App):
 
     def _paint_overview(self) -> None:
         self._sync_toggle_states()
+        if not self._scope_ok("overview"):
+            self._paint_pending("overview")
+            return
         usage = self._ov_usage or {}
         note = self.query_one("#ov-note", Static)
         status = views.status_note(
@@ -2124,6 +2473,7 @@ class TokdashApp(App):
         table: DataTable,
         spec: tuple[tuple[str, str, int, bool], ...],
         rows: list[tuple] | None = None,
+        budget: int | None = None,
     ) -> None:
         """Rebuild a table's columns for the view it is showing right now.
 
@@ -2145,7 +2495,7 @@ class TokdashApp(App):
             (key, label, max(int(width), cell_len(label) + 1, need.get(key, 0) + 1), optional)
             for key, label, width, optional in spec
         ]
-        budget = _table_budget(table)
+        budget = _table_budget(table) if budget is None else budget
         table.clear(columns=True)
         for key, label, width in fit_columns(sized, budget):
             # A column narrower than its own label prints "Hour (server clock" --
@@ -2217,7 +2567,7 @@ class TokdashApp(App):
         selected = self._ov_selected
         for row in rows:
             self._add_row(table, [
-                ("harness", escape(row["harness"])),
+                ("harness", _source_cell(row["tool"], row["harness"])),
                 ("tokens", _num_cell(row["tokens"])),
                 ("share", _num_cell(usage_share(usage, row["tokens_sort"]))),
                 ("cost", _num_cell(row["cost"])),
@@ -2331,6 +2681,9 @@ class TokdashApp(App):
         widget.update(emit_markup(lines))
 
     def _paint_sessions(self) -> None:
+        if not self._scope_ok("sessions"):
+            self._paint_pending("sessions")
+            return
         table = self.query_one("#sn-table", DataTable)
         wide = self._pane_width("sessions") >= 104
         result = views.session_rows(
@@ -2370,7 +2723,7 @@ class TokdashApp(App):
         self._shape(table, tuple(spec))
         for row in result["rows"]:
             self._add_row(table, [
-                ("harness", escape(row["harness"])),
+                ("harness", _source_cell(row["tool"], row["harness"])),
                 ("session", escape(row["display"])),
                 ("last", escape(row["last_seen_shown"])),
                 ("model", escape(row["model"])),
@@ -2379,16 +2732,79 @@ class TokdashApp(App):
             ], key=(row["tool"], row["session_id"]))
         self._restore_cursor(table, self._sn_selected_key)
         detail = self.query_one("#sn-detail", Static)
+        turns = self.query_one("#sn-turns", DataTable)
         if self._sn_detail_key is None:
             detail.display = False
+            turns.display = False
+            turns.clear()
             return
         detail.display = True
         detail.update(emit_markup(session_detail_lines(
             self._sn_detail, self._sn_detail_speed, self._sn_detail_note,
             self._sn_detail_key, self._win, TOOL_LABELS,
         )))
+        self._paint_turns()
+
+    def _paint_turns(self) -> None:
+        """EVERY turn the whole-session response carried, oldest first.
+
+        Sizing the viewport is the painter's job; dropping rows is not. With the
+        turns in a table the reader can arrow to turn 1 of 400, which is the
+        reading that explains where a session's tokens went.
+        """
+        turns = self.query_one("#sn-turns", DataTable)
+        was_shown = turns.display
+        rows = views.session_detail_rows(self._sn_detail or {})
+        pane_width = self._pane_width("sessions")
+        wide = pane_width >= 104
+        # Which column gives when the pane is tight: the stamp. The turn index
+        # already carries the order; the model is the reason the reader opened
+        # the session at all -- it is where the tokens went.
+        spec = [("index", "Turn", 7, False), ("at", "Recorded", 20, True),
+                ("model", "Model", 28, False), ("tokens", "Tokens", 9, False)]
+        if wide:
+            spec.append(("output", "Output", 9, True))
+        spec.append(("cost", "Cost", 9, False))
+        self._shape(
+            turns,
+            tuple(spec),
+            # A table that has never been shown has no measured region, and the
+            # generic fallback is narrower than the pane it is about to fill --
+            # which used to drop a whole column on the first look at a session.
+            None,
+            None if turns.content_region.width else pane_width - 4,
+        )
+        for row in rows:
+            self._add_row(turns, [
+                ("index", escape(f"#{row['index']}")),
+                ("at", escape(row["timestamp"])),
+                ("model", escape(row["model"])),
+                ("tokens", _num_cell(row["tokens"])),
+                ("output", _num_cell(row["output"])),
+                ("cost", _num_cell(row["cost"])),
+            ], key=row["index"])
+        turns.display = bool(rows)
+        if rows and not was_shown and isinstance(self.focused, DataTable) \
+                and self.focused.id == "sn-table":
+            # The reader pressed Enter on a session to see it; the keyboard
+            # follows the thing they asked for. Anywhere else (search box, a
+            # repaint after sorting) focus stays exactly where it was.
+            turns.focus()
+            # ...and the pane scrolls to meet it. The table only just became
+            # visible, so focus's own scroll-into-view measured a zero-height
+            # widget; at 80x24 that left the focused rows under the fold, with
+            # the arrow keys busy somewhere the reader could not see. Two hops
+            # because the summary block above this table re-wraps when the
+            # session's own text arrives, and the first refresh measures the
+            # pane as it was BEFORE that re-wrap -- one hop stops a row short.
+            self.call_after_refresh(
+                lambda: self.call_after_refresh(turns.scroll_visible)
+            )
 
     def _paint_stats(self) -> None:
+        if not self._scope_ok("stats"):
+            self._paint_pending("stats")
+            return
         payload = getattr(self, "_stats_payload", None) or {}
         start, end = self._stats_win.bounds(self._today)
         self.query_one("#st-window", Static).update(
@@ -2414,7 +2830,8 @@ class TokdashApp(App):
             [Run("Tokens ", "muted"), Run(summary["tokens"]), Run("  · Messages ", "muted"),
              Run(summary["messages"]), Run("  · Most used ", "muted"), Run(summary["most_used"]),
              Run("  · Costliest ", "muted"), Run(summary["costliest"])],
-            [Run("annual window only · messages read from stats.messages · no model or project tables here", "muted")],
+            [Run("annual window only · messages count assistant and user turns, "
+                 "not sessions · no model or project tables here", "muted")],
         ]
         self.query_one("#st-summary", Static).update(emit_markup(lines))
         cal = views.stats_calendar(
@@ -2540,6 +2957,9 @@ class TokdashApp(App):
 
     def _paint_report(self) -> None:
         self._sync_toggle_states()
+        if not self._scope_ok("report"):
+            self._paint_pending("report")
+            return
         if self._rp_usage is None:
             return
         width = _clamp_report_width(self._pane_width("report"))
@@ -2570,36 +2990,167 @@ class TokdashApp(App):
                 )
             )
         elif self._rp_section == "when":
-            markup = emit_markup(
-                build_report_segments(
-                    self._rp_usage,
-                    self._rp_insights,
-                    self._rp_active,
-                    window=window,
-                    width=width,
-                    glyphs=_safe_glyphs(),
-                    sections=("when",),
-                )
-            )
+            markup = emit_markup(self._report_when_lines(width))
         else:
-            markup = emit_markup(
-                build_report_segments(
-                    self._rp_usage,
-                    self._rp_insights,
-                    self._rp_active,
-                    window=window,
-                    width=width,
-                    glyphs=_safe_glyphs(),
-                    sections=("projects",),
-                )
-            )
+            markup = emit_markup(self._report_projects_lines(width))
+        sort_note = (
+            " · projects ranked by " + ("cost" if self._rp_project_sort == "cost" else "tokens")
+            if self._rp_section == "projects" else " · s sorts projects"
+        )
         self.query_one("#rp-hints", Static).update(
-            emit_markup([[Run(f"{self._win.describe()} · {width} columns · s sorts projects", "muted")]])
+            emit_markup([[
+                Run(f"{self._win.describe()} · {width} columns{sort_note}", "muted")
+            ]])
         )
         self.query_one("#rp-body", Static).update(markup)
 
+    def _report_pending(self) -> list[list[Run]]:
+        """The scan is still running: say so, and never paint a zero for it."""
+        return [[Run("analytics scan still running — this section fills in", "warn")]]
+
+    def _report_warnings(self) -> list[list[Run]]:
+        return [[Run(text, "warn")] for text in self._rp_warnings]
+
+    def _report_when_lines(self, width: int) -> list[list[Run]]:
+        """All 24 hours and all seven weekdays, with the denominator named.
+
+        The one-shot report prints the three busiest hours and one weekday
+        because a terminal report is a summary; a PANE is where the rest of the
+        facet lives, and the reader who wants to know whether 03:00 was quiet or
+        simply not recorded has to be able to ask. ``views.report_when`` already
+        builds the whole grid from ``insights.hourly`` / ``.weekday`` over
+        ``insights.totals`` -- the same denominator every other facet divides by
+        -- so this paints it instead of the summary version of it.
+        """
+        if self._rp_insights is None:
+            return self._report_pending()
+        glyphs = _safe_glyphs()
+        two_columns = width >= 92
+        bar = max(4, (width - (79 if two_columns else 40)) // (2 if two_columns else 1))
+        when = views.report_when(self._rp_insights, width=bar, glyphs=glyphs)
+        lines: list[list[Run]] = [[
+            Run("Tokens by hour of day  ", "header"),
+            Run(f"({when['timezone']})", "muted"),
+        ]]
+        lines.append([
+            Run("shares divide the analytics scan total ", "muted"),
+            Run(when["denominator"], "muted"),
+            Run(" · a quiet hour is a zero, a facet that never answered is a dash", "muted"),
+        ])
+        head = []
+        if when["peak_hour"] is not None:
+            head.append(Run(f"peak hour {when['peak_hour']}", "muted"))
+        if when["peak_weekday"]:
+            head.append(Run(f" · busiest weekday {when['peak_weekday']}", "muted"))
+        if when["night_share"] is not None:
+            head.append(
+                Run(f" · night share {when['night_share']:.1f}% ({when['night_label']})", "muted")
+            )
+        if head:
+            lines.append(head)
+        lines.append([Run("  ·  ", "muted")])
+        if when["missing_hours"]:
+            lines.append([Run("no hourly facet in this scan", "warn")])
+        else:
+            hours = when["hours"]
+            per = (len(hours) + 1) // 2 if two_columns else len(hours)
+            for row in range(per):
+                cells: list[Run] = []
+                for column in range(2 if two_columns else 1):
+                    entry = hours[row + column * per]
+                    if entry is None:
+                        cells.append(Run(" " * min(width, 40)))
+                        continue
+                    cells += [
+                        Run(f"{entry['hour']} ", "muted"),
+                        Run(entry["bar"], "accent"),
+                        Run(" ", "muted"),
+                        Run(f"{entry['tokens']:>9}", "muted"),
+                        Run(f"{entry['share']:>7}", "muted"),
+                        Run(f"{entry['cost']:>8}", "muted"),
+                    ]
+                    if column == 0 and two_columns:
+                        cells.append(Run("   ", "muted"))
+                lines.append(cells)
+            lines.append([Run("  ·  ", "muted")])
+        if when["missing_weekdays"]:
+            lines.append([Run("no weekday facet in this scan", "warn")])
+        else:
+            lines.append([Run("By weekday", "header")])
+            for entry in when["weekdays"]:
+                lines.append([
+                    Run(f"{entry['day']:<9}", "muted"),
+                    Run(entry["bar"], "accent"),
+                    Run(" ", "muted"),
+                    Run(f"{entry['tokens']:>9}", "muted"),
+                    Run(f"{entry['share']:>7}", "muted"),
+                ])
+        lines += self._report_warnings()
+        return lines
+
+    def _report_projects_lines(self, width: int) -> list[list[Run]]:
+        """Project attribution, ALL of it, ranked by the sort in force.
+
+        Two things the summary version could not do: honour ``s`` (the shared
+        renderer hardcodes tokens, so the key did nothing), and stop at ten
+        without saying the list went on. The pane scrolls, so the whole ranking
+        is what belongs here -- with the unattributed residual OUTSIDE the
+        ranked rows, never as a fake project.
+        """
+        if self._rp_insights is None:
+            return self._report_pending()
+        projects = views.report_projects(
+            self._rp_insights,
+            sort=self._rp_project_sort,
+            anonymous=not bool(
+                ((self._rp_insights or {}).get("projects") or {}).get("names_included", True)
+            ),
+        )
+        name_width = max(18, width - 41)
+        leader = "cost" if projects["sort"] == "cost" else "tokens"
+        lines: list[list[Run]] = [[
+            Run("Projects  ", "header"),
+            Run(f"ranked by {leader} · s sorts", "muted"),
+        ], [
+            Run("shares divide the analytics scan total ", "muted"),
+            Run(projects["totals"], "muted"),
+        ], [
+            Run(f"{'project':<{name_width}}", "muted"),
+            Run(f"{'tokens':>9}", "muted"),
+            Run(f"{'share':>7}", "muted"),
+            Run(f"{'cost':>9}", "muted"),
+            Run(f"{'msgs':>6}", "muted"),
+        ]]
+        if not projects["rows"]:
+            lines.append([Run("no projects in this scan", "warn")])
+        for row in projects["rows"]:
+            lines.append([
+                Run(_fit(row["project"], name_width).ljust(name_width), "muted"),
+                Run(f"{row['tokens']:>9}", "muted"),
+                Run(f"{row['share']:>7}", "muted"),
+                Run(f"{row['cost']:>9}", "muted"),
+                Run(f"{row['messages']:>6}", "muted"),
+            ])
+        un = projects["unattributed"]
+        lines.append([
+            Run(f"{'unattributed':<{name_width}}", "muted"),
+            Run(f"{un['tokens']:>9}", "muted"),
+            Run(f"{un['share']:>7}", "muted"),
+            Run(f"{un['cost']:>9}", "muted"),
+            Run("", "muted"),
+        ])
+        if projects["coverage_note"]:
+            lines.append([Run(projects["coverage_note"], "muted")])
+        if projects["reason"]:
+            lines.append([Run(f"attribution unavailable: {projects['reason']}", "warn")])
+        lines += self._report_warnings()
+        return lines
+
     def _paint_speed(self) -> None:
         self._sync_toggle_states()
+        if not self._scope_ok("speed"):
+            self._paint_pending("speed")
+            return
         payload = self._sp_payload or {}
         cache = payload.get("cache") or {}
         state = str(cache.get("state") or "unknown")
@@ -2647,8 +3198,13 @@ class TokdashApp(App):
         for row in result["rows"]:
             self._add_row(table, [
                 ("model", escape(row["model"])),
-                ("harness", escape(row.get("harness", EM_DASH))),
-                ("sources", escape(row.get("sources", EM_DASH))),
+                ("harness", _source_cell(row.get("harness"), row.get("harness"))),
+                # The merged lens names EVERY source behind one model; the tint
+                # follows the first of them so the row is not a wall of grey.
+                ("sources", _source_cell(
+                    str(row.get("sources") or "").split(",")[0] or None,
+                    row.get("sources"),
+                )),
                 ("timing", escape(row["timing"])),
                 ("rate", _num_cell(row["rate"])),
                 ("measured", _num_cell(row["measured"])),
@@ -2663,7 +3219,8 @@ class TokdashApp(App):
                 Run("no measured rows for this window", "warn"),
                 Run(" · try all sources"
                     + (f" · measurements exist {available['from']} .. {available['to']}" if available else "")
-                    + ("" if self._sp_include_windows else " · or include whole-request timing"),
+                    + ("" if self._sp_include_windows
+                       else " · or press x to include whole-request timing"),
                     "muted"),
             ]]))
             return
@@ -2710,28 +3267,59 @@ class TokdashApp(App):
     def _paint_speed_hours(self) -> None:
         table = self.query_one("#sp-table", DataTable)
         hours = views.speed_hour_rows(self._sp_hours or {}, lens=self._sp_lens)
-        self._shape(table, (
-            ("hour", "Hour (server clock)", 18, False), ("rate", "tok/s", 8, False),
-            ("calls", "Responses", 10, True), ("coverage", "Coverage", 9, True),
-        ))
+        combined = self._sp_lens == "combined"
+        spec = [
+            ("hour", "Hour (server clock)", 18, False),
+            ("rate", "tok/s", 8, False),
+            ("calls", "Responses", 10, True),
+        ]
+        # A merged model has no per-hour coverage dict to show, so the combined
+        # lens spends the last column on the overlap the server measured rather
+        # than holding up a Coverage column that could only ever print a dash.
+        spec.append(("par", "Parallelism", 12, True) if combined
+                    else ("coverage", "Coverage", 9, True))
+        self._shape(table, tuple(spec))
         for row in hours["rows"]:
-            self._add_row(table, [
+            cells = [
                 ("hour", escape(row["hour"])),
                 ("rate", _num_cell(row["rate"])),
                 ("calls", _num_cell(row.get("calls", EM_DASH))),
-                ("coverage", _num_cell(row.get("coverage", EM_DASH))),
-            ], key=row["hour"])
+            ]
+            cells.append(("par", _num_cell(row.get("parallelism", EM_DASH))) if combined
+                         else ("coverage", _num_cell(row.get("coverage", EM_DASH))))
+            self._add_row(table, cells, key=row["hour"])
         detail = self.query_one("#sp-detail", Static)
         detail.display = True
-        key = hours.get("selected_key") or {}
-        label = " / ".join(str(v) for v in key.values() if v) or "merged model"
-        detail.update(emit_markup([
-            [Run(f"key {label} · {hours['note']}", "muted")],
-            [Run(f"days with measurements: {hours.get('days_with_measurements', EM_DASH)} · an hour that measured nothing is a gap, not a zero", "muted")],
-        ]))
+        if self._sp_lens == "combined":
+            model = (hours.get("selected_key") or {}).get("model") or EM_DASH
+            merged = " · ".join(
+                part for part in (
+                    f"sources {', '.join(hours['sources'])}" if hours.get("sources") else "",
+                    "timing " + ", ".join(views._kinds(hours["kinds"]))
+                    if hours.get("kinds") else "",
+                ) if part
+            )
+            lines = [[Run(f"merged model {model}" + (f" · {merged}" if merged else ""), "muted")]]
+            if hours.get("empty_reason"):
+                lines.append([Run(str(hours["empty_reason"]), "warn")])
+            lines.append([Run(
+                "combined = summed tokens over the UNION of busy time · "
+                "an hour that measured nothing is a gap, not a zero", "muted")])
+        else:
+            key = hours.get("selected_key") or {}
+            label = " / ".join(
+                views._kinds([v]) if k == "measurement_kind" else str(v)
+                for k, v in key.items() if v
+            )
+            lines = [
+                [Run(f"selection {label or EM_DASH} · {hours['note']}", "muted")],
+                [Run(f"days with measurements: {hours.get('days_with_measurements', EM_DASH)} · "
+                     "an hour that measured nothing is a gap, not a zero", "muted")],
+            ]
+        detail.update(emit_markup(lines))
 
     def _paint_quota(self) -> None:
-        banner, rows, note, credit_lines = quota_table(
+        banner, rows, note, credit_lines, row_keys = quota_table(
             self._quota_state_val or {},
             self._quota_history_val,
             now_ts=time.time(),
@@ -2749,15 +3337,24 @@ class TokdashApp(App):
         # measured against the rows they are about to hold, and fit_columns drops
         # a whole optional column rather than cutting a word in half.
         self._shape(table, QUOTA_COLUMNS, list(rows))
-        for row in rows:
+        self._quota_idents = {}
+        for index, (row, identity) in enumerate(zip(rows, row_keys)):
             cells = list(row)
             status = str(cells[-1]) if cells else ""
             if status:
                 cells[-1] = Text(status, style="green" if status == "ok" else "red")
+            if identity and cells and str(cells[0]).strip():
+                # The Provider column is the row's source identity, and the
+                # account rows are exactly where two accounts of one provider
+                # have to be told apart at a glance.
+                cells[0] = _source_cell(identity.get("provider"), cells[0])
+            row_key = _quota_row_key(identity, index)
+            self._quota_idents[row_key] = identity
             self._add_row(
                 table,
                 [(key, escape(str(cell)) if not isinstance(cell, Text) else cell)
                  for key, cell in zip([c[0] for c in QUOTA_COLUMNS], cells)],
+                key=row_key,
             )
         credits = self.query_one("#quota-credits", Static)
         credits.display = bool(credit_lines)
@@ -2766,7 +3363,7 @@ class TokdashApp(App):
         detail = self.query_one("#quota-detail", Static)
         if self._quota_detail:
             detail.display = True
-            detail.update(emit_markup([[Run(line, "muted")] for line in self._quota_detail.split("\n")]))
+            detail.update(emit_markup(self._quota_detail))
         else:
             detail.display = False
             detail.update("")
@@ -2921,6 +3518,10 @@ def _clip_text(cell: object, width: int) -> object:
     digits, and a column too narrow for one loses the figure rather than a label.
     A crop always shows itself as a crop.
     """
+    if isinstance(cell, Text):
+        if width <= 1 or len(cell.plain) <= width:
+            return cell
+        return Text(_fit(cell.plain, width), style=cell.style)
     if not isinstance(cell, str) or width <= 1:
         return cell
     return _fit(cell, width)
@@ -2970,6 +3571,24 @@ def usage_share(usage: dict, tokens: float) -> str:
     return f"{100.0 * float(tokens or 0) / total:.1f}%"
 
 
+def _quota_row_key(identity: dict | None, index: int) -> str:
+    """A stable row key that carries the row\'s identity across a repaint.
+
+    The table shows display text with the Provider cell deliberately blank on
+    continuation rows, so what a reader sees cannot be turned back into
+    (provider, account, window). The key is where that identity lives instead:
+    a pipe-joined string, because Textual wraps whatever it is given and
+    everything downstream reads it back as text.
+    """
+    if not identity:
+        return f"quota-gap-{index}"
+    if identity.get("status_only"):
+        return f"quota|{identity.get('provider') or ''}|status"
+    return (f"quota|{identity.get('provider') or ''}"
+            f"|{identity.get('account') or 'default'}"
+            f"|{identity.get('bucket') or ''}")
+
+
 def session_detail_lines(
     detail: dict | None,
     speed: dict | None,
@@ -2996,7 +3615,8 @@ def session_detail_lines(
     lines: list[list[Run]] = [
         [Run(header, "header")],
         [
-            Run("Entire session (this endpoint takes no dates) · opened from ", "muted"),
+            Run("Entire session — every turn it recorded, not only the days "
+                "in the range · opened from ", "muted"),
             Run(window.describe()),
         ],
         [
@@ -3008,82 +3628,38 @@ def session_detail_lines(
             Run(str(session.get("last_seen_at") or EM_DASH)[:19]),
         ],
     ]
-    turns = views.session_detail_rows(detail or {}, limit=12)
-    if not turns:
-        lines.append([Run("no turns recorded for this session", "muted")])
-    for turn in turns[-8:]:
-        lines.append([
-            Run(f"  #{turn['index']:<4}", "muted"),
-            Run(f"{turn['timestamp']:<20}", "muted"),
-            Run(f"{turn['model'][:28]:<28}"),
-            Run(f"{turn['tokens']:>9} tokens · {turn['cost']:>8}"),
-        ])
     total_turns = len(detail.get("turns") or [])
-    if total_turns > 8:
-        lines.append([Run(f"  … {total_turns - 8} earlier turns (this view shows the last 8)", "muted")])
+    # The turns themselves are a table, not a paragraph. This used to print the
+    # last eight of twelve into a Static with no way back, which made the
+    # earlier work behind the session total unreadable; the count and the
+    # pointers stay here, the data goes to #sn-turns where every row is reachable.
+    if total_turns:
+        lines.append([
+            Run(f"{fmt_int(total_turns)} turn{'' if total_turns == 1 else 's'} recorded", "muted"),
+            Run(" · listed below, oldest first · arrows walk them", "muted"),
+        ])
+    else:
+        lines.append([Run("no turns recorded for this session", "muted")])
     if speed is None:
         lines.append([Run("timing: not requested yet", "muted")])
     else:
         summary = speed.get("summary") or {}
         scope = speed.get("scope") or {}
         state = (speed.get("cache") or {}).get("state") or "unknown"
+        covered = str(scope.get("kind") or "").replace("_", " ")
         lines.append([
-            Run("timing (Entire session) · ", "muted"),
+            Run("timing · ", "muted"),
             Run(f"{fmt_int(speed.get('total_responses'))} responses · "
                 f"{fmt_int(summary.get('speed_calls'))} measured · "
                 f"{views._rate(summary.get('output_tok_per_s'))} tok/s · "
-                f"cache {state} · scope {scope.get('kind') or EM_DASH}"),
+                f"cache {state}"
+                + (f" · measured over the {covered}" if covered else "")),
         ])
         if speed.get("truncated"):
             lines.append([Run("  series truncated to the point budget; aggregates still cover the session", "muted")])
     if note:
         lines.append([Run(note, "warn")])
     return lines
-
-
-def quota_detail_text(state: dict, table: DataTable, key: str) -> str:
-    """Detail for the selected quota row: plan, absolute reset, observation time,
-    source and account errors.
-
-    A high remaining percentage does NOT override stale credentials or an old
-    sample, so those stay visible next to the number rather than behind it.
-    """
-    try:
-        row = table.zrows[table.get_row_index(key)] if hasattr(table, "zrows") else None
-    except (KeyError, ValueError):
-        row = None
-    cells = [str(c) for c in (row or [])]
-    provider = (cells[0].split("@")[0] if cells else "").strip()
-    window_label = cells[1].strip() if len(cells) > 1 else ""
-    for name, entry in ((state or {}).get("providers") or {}).items():
-        if provider and provider.lower() not in str(name).lower():
-            continue
-        if not isinstance(entry, dict):
-            continue
-        bits = [f"provider {name}"]
-        if entry.get("plan"):
-            bits.append(f"plan {entry['plan']}")
-        for account_id, account in (entry.get("accounts") or {}).items():
-            if not isinstance(account, dict):
-                continue
-            bits.append(f"account {account_id}")
-            if account.get("error"):
-                bits.append(f"account error {account['error']}")
-            for wid, window in (account.get("windows") or {}).items():
-                if not isinstance(window, dict):
-                    continue
-                if window_label and window_label.lower() not in str(window.get("label") or wid).lower():
-                    continue
-                bits.append(
-                    f"{wid}: used {window.get('used_percent')}% "
-                    f"resets {window.get('resets_at') or EM_DASH} "
-                    f"observed {window.get('observed_at') or window.get('captured_at') or EM_DASH}"
-                )
-            break
-        if entry.get("status"):
-            bits.append(f"status {entry['status']}")
-        return " · ".join(str(b) for b in bits)
-    return "no account detail for this row"
 
 
 _CARD_SURFACE = "#121924"

@@ -241,6 +241,55 @@ def tool_label(key: object, labels: dict | None = None) -> str:
     return " ".join(w[:1].upper() + w[1:] for w in fallback.split(" "))
 
 
+#: Per-source foreground tints, taken from the approved revision-5 palette
+#: (docs/local/.../review/color-v5.js). The web draws each harness as a coloured
+#: badge; a terminal table has no badge, so the label itself carries the colour.
+#: Pastels on purpose: these sit on the #121924 table surface and must stay
+#: readable next to the grey figure columns.
+TOOL_TINTS: dict[str, str] = {
+    "codex": "#79dfbd",
+    "claude": "#f2bd78",
+    "opencode": "#ee91bd",
+    "kimi": "#86bdff",
+    "omp": "#c4a1ff",
+    "qwen_code": "#e3d57e",
+    "cursor": "#adbdcc",
+    "gemini": "#8ed4e0",
+    "grok": "#e5a88d",
+    "mimo": "#bab4f0",
+    "pi_agent": "#9dcda2",
+    "dsh": "#e6a2cf",
+    "reasonix": "#d3b29b",
+    "zcode": "#c3c88c",
+    "kilocode": "#8cc8cf",
+    "hermes": "#d4ba8c",
+    "antigravity_cli": "#b0b9e7",
+    "cline": "#c9aca2",
+    "workbuddy": "#9dbdc5",
+    "qoder": "#ccbe9d",
+    "qoder_cli": "#aaaedb",
+    "openclaw": "#dc9f9f",
+}
+
+# A source the palette has not met still gets a stable colour of its own, so a
+# new harness never arrives looking like a column of figures.
+_TINT_FALLBACK: tuple[str, ...] = (
+    "#c4a1ff", "#86bdff", "#79dfbd", "#f2bd78",
+    "#ee91bd", "#8cdeeb", "#e3d57e", "#adbdcc",
+)
+
+
+def tool_tint(tool: object) -> str:
+    """The palette colour for one source id; unknown ids hash to the palette."""
+    key = str(tool or "")
+    hit = TOOL_TINTS.get(key)
+    if hit:
+        return hit
+    if not key:
+        return "#cdd8e6"
+    return _TINT_FALLBACK[sum(key.encode("utf-8", "ignore")) % len(_TINT_FALLBACK)]
+
+
 def text_bar(value: float, maxv: float, *, width: int = 20, glyphs: str = "blocks") -> str:
     """Inline bar row: round(width * value / maxv) filled glyphs ("█", "#" in
     ascii mode). maxv <= 0 → empty string: nothing to scale against renders

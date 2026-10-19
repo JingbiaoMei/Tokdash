@@ -318,17 +318,23 @@ def window_for_days(days: int, today: date) -> DateWindow:
 def window_for_period(token: str, today: date) -> DateWindow:
     """The window a CLI period token selects, or Today for anything it does not know.
 
-    ``tokdash tui --period`` has always spoken compute's period language, and
-    compute's "month" is 30 ROLLING days -- not This Month. Translating the
-    token through the preset table would quietly move the on-screen dates, so
-    the token goes through the same arithmetic the routes use. Deferred import:
-    this module stays cheap to import, and the app's startup path pays it once.
+    ``tokdash tui --period`` speaks compute's period language, so the token is
+    translated the way the ROUTES translate it -- including the one period the
+    resolver refuses to reduce to a length. ``period_to_range_args`` special-cases
+    "month" as the FIRST of the current calendar month, so ``--period month``
+    opens October 1..18, not a 30-day rolling window; a TUI that went through
+    ``period_to_days`` alone would show September 19 under the same command line.
+    Deferred import: this module stays cheap to import, and the startup path
+    pays it once.
     """
     from ..compute import period_is_recognized, period_to_days
 
     text = str(token or "").strip().lower()
     if not text or not period_is_recognized(text):
         return window_for("today", today)
+    if text == "month":
+        # The resolver's calendar special case, kept rather than re-derived.
+        return window_for("month", today)
     days = period_to_days(text)
     if days >= 36500:  # compute's ALL_TIME_DAYS: the one windowless answer
         return window_for("all", today)
@@ -389,22 +395,35 @@ class StatsWindow:
         return self.year
 
     def bounds(self, today: date) -> tuple[date, date]:
+        """The inclusive days this rung covers, never a day that has not happened.
+
+        A NAMED year runs Jan 1 to Dec 31 -- except the current one, which the
+        endpoint can only answer through today. Naming a window the data cannot
+        reach is the mistake this whole module exists to stop.
+        """
         if self.year is None:
             return today - timedelta(days=364), today
-        return date(self.year, 1, 1), date(self.year, 12, 31)
+        return date(self.year, 1, 1), min(date(self.year, 12, 31), today)
 
     def describe(self, today: date) -> str:
         start, end = self.bounds(today)
         if self.year is None:
             return f"Trailing 365 Days  ({start.isoformat()} .. {end.isoformat()})"
+        if end < date(self.year, 12, 31):
+            return (f"{self.year} to date  ({start.isoformat()} .. {end.isoformat()})")
         return f"{self.year}  ({start.isoformat()} .. {end.isoformat()})"
 
     def step(self, delta: int, today: date) -> StatsWindow:
-        """One calendar year along the ladder; trailing is the newest rung."""
+        """One rung either way: trailing 365 days, then whole calendar years.
+
+        The newest rung is the trailing window and the one below it is THIS
+        calendar year, so a reader standing on "last 365 days" can ask for the
+        year they are in -- which the old ladder stepped straight past. Past
+        "now" there is nothing to return, and delta > 0 walks back up to the
+        trailing rung rather than into a year nobody has lived through.
+        """
         if self.year is None:
-            if delta < 0:
-                return StatsWindow(today.year - 1)
-            return self
+            return StatsWindow(today.year) if delta < 0 else self
         nxt = self.year + delta
         if nxt > today.year:
             return StatsWindow(None)  # newest rung is the trailing year

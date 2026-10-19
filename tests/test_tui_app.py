@@ -374,9 +374,10 @@ def test_overview_paints_window_cards_and_status(monkeypatch):
         assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         # The window line IS the section header. It prints the window the APP
         # resolved (not the payload's echo of some other window), and the
-        # reverse fill only arrives if it went through emit_markup.
+        # palette heading only arrives if it went through emit_markup -- a
+        # heading, not a filled band across the pane.
         assert static_text(app, "ov-range") == \
-            "[reverse bold]2026-09-20  (1 day)  ·  Overview[/]"
+            "[bold #c5d2e3]2026-09-20  (1 day)  ·  Overview[/]"
         cards = str(app.query_one("#ov-cards").content)
         assert "12.4M" in cards and "$142.31" in cards and "4,820" in cards
         assert "1h 30m" in cards  # agent SUM, not the 1h clock union
@@ -979,10 +980,24 @@ def test_p_is_the_stats_year_key_and_never_moves_the_shared_window(monkeypatch):
         assert await wait_for(app, pilot, lambda: app._state["stats"] == "ok")
         assert app._stats_win.year is None  # trailing 365 is the top rung
         assert "Trailing 365 Days" in static_text(app, "st-window")
+        # 'p' walks DOWN the ladder, and the rung below the trailing window is
+        # the calendar year the reader is standing in.
+        await pilot.press("p")
+        assert app._stats_win.year == TODAY.year
+        assert await wait_for(app, pilot, lambda: (TODAY.year, False) in calls.stats)
+        assert app._win == window_before  # Stats' year stays inside Stats
         await pilot.press("p")
         assert app._stats_win.year == TODAY.year - 1
         assert await wait_for(app, pilot, lambda: (TODAY.year - 1, False) in calls.stats)
-        assert app._win == window_before  # Stats' year stays inside Stats
+        # 'P' walks back UP, and comes to rest on the trailing rung: a year
+        # nobody has lived through is not a window.
+        await pilot.press("P")
+        assert app._stats_win.year == TODAY.year
+        await pilot.press("P")
+        assert app._stats_win.year is None
+        await pilot.press("P")
+        assert app._stats_win.year is None
+        assert app._win == window_before
 
     drive(app, steps)
 
@@ -1512,11 +1527,12 @@ def test_rolling_seven_days_steps_a_whole_seven_days(monkeypatch):
 
 
 
-def test_the_shared_window_steps_every_started_pane(monkeypatch):
-    # Date-pinned panes reload TOGETHER: a Report body left standing on the old
-    # window would show another window's data, the same bug class as midnight.
-    # Revision 5 has ONE window for the dated panes, so one step is one step
-    # for all of them and every job of the load carries the same pair.
+def test_the_shared_window_steps_the_visible_pane_and_marks_the_rest(monkeypatch):
+    # A pane left standing on the old window would show another window's data,
+    # so a date step has to reach every pane that reads the range. It does that
+    # by RELOADING the one on screen and marking the visited-but-hidden ones out
+    # of date: refetching them in the background used to include Speed's read,
+    # which can queue a timing build for a view nobody is looking at.
     calls = patch_fetchers(monkeypatch)
     app = TokdashApp("today")
 
@@ -1524,6 +1540,8 @@ def test_the_shared_window_steps_every_started_pane(monkeypatch):
         assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         await pilot.press("2")
         assert await wait_for(app, pilot, lambda: app._state["report"] == "ok")
+        await pilot.press("1")  # visit Report, then leave it hidden
+        assert await wait_for(app, pilot, lambda: app._active_pane() == "overview")
         before = len(calls.usage)
         await pilot.press("left_square_bracket")
         assert await wait_for(
@@ -1531,13 +1549,20 @@ def test_the_shared_window_steps_every_started_pane(monkeypatch):
             lambda: ("today", "2026-09-19", "2026-09-19") in calls.usage_full,
         )
         assert app._win.label == "Yesterday" and app._win.shift == 1
-        # The active-time job carried the pair too, on both panes.
+        # The active-time job carried the pair too.
         assert any(t[:3] == ("today", "2026-09-19", "2026-09-19")
                    for t in calls.active_full)
-        assert await wait_for(app, pilot, lambda: app._state["report"] == "ok")
-        assert len(calls.usage) >= before + 2  # Overview and Report refetched
-        # The Report body prints the window the strip names.
-        assert "2026-09-19" in static_text(app, "rp-body")
+        # Only the visible pane re-read; Report waits for the tab.
+        assert len(calls.usage) == before + 1, calls.usage
+        assert "report" in app._stranded
+        # Going back pays the debt at the NEW window, and the body prints the
+        # window the strip names.
+        await pilot.press("2")
+        assert await wait_for(
+            app, pilot, lambda: "2026-09-19" in static_text(app, "rp-body")
+        )
+        assert "report" not in app._stranded
+        assert len(calls.usage) >= before + 2, calls.usage
 
     drive(app, steps)
 

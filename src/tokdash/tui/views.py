@@ -348,12 +348,51 @@ def status_note(
             names = ", ".join(str(k) for k in unavailable)
         else:
             names = ", ".join(str(x) for x in unavailable)
-        bits.append(f"time unavailable: {names}")
+        bits.append(f"agent time unmeasured: {names}")
+    n, names = source_errors(usage)
+    if n:
+        # A usage scan that dropped a source answers with SMALLER totals, not
+        # wrong ones -- but the reader cannot tell that from a quiet window. The
+        # producer names the failures; the Overview has to repeat them. Counting
+        # first is the guard: the helper answers (0, "") when nothing failed, and
+        # a two-slot tuple is truthy even when it says nothing went wrong.
+        bits.append(
+            f"usage partial: {n} source{'s' if n != 1 else ''} unreadable ({names})"
+            f" · totals below are short by {'that source' if n == 1 else 'those sources'}"
+        )
     if usage_status == "stale":
         bits.append("showing the last computed snapshot")
     if (usage or {}).get("range", {}).get("recognized") is False:
         bits.append("range not recognised by the server")
     return " · ".join(bits) if bits else None
+
+
+def source_errors(usage: dict | None) -> tuple[int, str]:
+    """(count, names) of the usage sources the scan could not read.
+
+    ``source_errors`` is the producer's own list. It arrives in several shapes
+    over the versions this TUI talks to -- a list of names, a list of {source}
+    rows, or a {source: reason} mapping -- and all of them name the same thing:
+    the totals on screen are missing that source.
+    """
+    raw = (usage or {}).get("source_errors")
+    if not raw:
+        return (0, "")
+    names: list[str] = []
+    if isinstance(raw, dict):
+        names = [str(key) for key in raw]
+    elif isinstance(raw, str):
+        names = [raw]
+    elif isinstance(raw, (list, tuple)):
+        for entry in raw:
+            if isinstance(entry, dict):
+                named = entry.get("source") or entry.get("tool") or entry.get("name")
+                if named:
+                    names.append(str(named))
+            elif entry:
+                names.append(str(entry))
+    names = [n for n in dict.fromkeys(names) if n]
+    return (len(names), ", ".join(names))
 
 
 # ---------------------------------------------------------------------------
@@ -776,7 +815,8 @@ def report_when(insights: dict, *, width: int = 20, glyphs: str = "blocks") -> d
             tokens = _num(bucket.get("tokens"))
             days.append(
                 {
-                    "day": WEEKDAY_ORDER[index] if index < 7 else str(index),
+                    "day": _weekday_name(bucket, index),
+                    "weekday": bucket.get("weekday", index),
                     "bar": _bar(tokens, peak, width=width, glyphs=glyphs),
                     "tokens": fmt_tokens(tokens),
                     "share": _share(tokens, totals),
@@ -784,12 +824,14 @@ def report_when(insights: dict, *, width: int = 20, glyphs: str = "blocks") -> d
                 }
             )
     night = [int(h) for h in (hourly.get("night_hours") or []) if str(h).isdigit()]
+    peak_hour = _hour_label(hourly.get("peak_hour"))
+    peak_weekday = _peak_weekday(weekday.get("peak_weekday"), days)
     return {
         "available": bool(hours or days),
         "hours": hours,
         "weekdays": days,
-        "peak_hour": hourly.get("peak_hour"),
-        "peak_weekday": weekday.get("peak_weekday"),
+        "peak_hour": peak_hour,
+        "peak_weekday": peak_weekday,
         "night_share": hourly.get("night_share"),
         "night_label": _night_label(night),
         "timezone": insights.get("timezone") or "server local time",
@@ -799,14 +841,65 @@ def report_when(insights: dict, *, width: int = 20, glyphs: str = "blocks") -> d
     }
 
 
+def _weekday_name(bucket: dict, index: int) -> str:
+    """The producer's own weekday name ("Monday"), else an abbreviation."""
+    name = str(bucket.get("name") or "").strip()
+    if name:
+        return name
+    return WEEKDAY_ORDER[index] if index < len(WEEKDAY_ORDER) else str(index)
+
+
+def _hour_label(value: object) -> str | None:
+    """0-23 or "09:00" in, "09:00" out; None stays None (nothing was measured)."""
+    if value is None or value == "":
+        return None
+    text = str(value)
+    if ":" in text:
+        return text
+    return f"{int(text):02d}:00" if text.isdigit() else text
+
+
+def _peak_weekday(value: object, days: list[dict]) -> str | None:
+    """Resolve the facet's weekday INDEX to the same name the rows print."""
+    if value is None or value == "":
+        return None
+    text = str(value)
+    if not text.isdigit():
+        return text
+    index = int(text)
+    for day in days:
+        key = day.get("weekday")
+        if isinstance(key, int) and key == index:
+            return day["day"]
+    if 0 <= index < len(WEEKDAY_ORDER):
+        return WEEKDAY_ORDER[index]
+    return text
+
+
 def _night_label(hours: list[int]) -> str:
+    """Label the server's night hours as the run they actually form.
+
+    ``night_hours`` is a SET of clock hours, and it usually wraps midnight
+    ([0, 1, 22, 23]). min/max of that set is 0..23, which reads as a whole-day
+    window, so the run is found instead: the largest gap around the clock face
+    is where the night is NOT, so the run starts just after it.
+    """
     if not hours:
         return "night hours as the server defines them"
-    lo = min(hours)
-    hi = max(hours)
-    if lo > hi:  # wraps midnight, e.g. [22, 23, 0, 1]
-        return f"{lo:02d}:00-{(hi + 1) % 24:02d}:00"
-    return f"{lo:02d}:00-{(hi + 1) % 24:02d}:00"
+    ordered = sorted({int(h) % 24 for h in hours})
+    if len(ordered) == 1:
+        start = end = ordered[0]
+    else:
+        widest = -1
+        gap_before = 0
+        for index in range(len(ordered)):
+            nxt = ordered[(index + 1) % len(ordered)]
+            gap = (nxt - ordered[index]) % 24 or 24
+            if gap > widest:
+                widest, gap_before = gap, index
+        start = ordered[(gap_before + 1) % len(ordered)]
+        end = ordered[gap_before]
+    return f"{start:02d}:00-{(end + 1) % 24:02d}:00"
 
 
 def report_projects(
@@ -1113,12 +1206,16 @@ def speed_hour_rows(payload: dict, *, lens: str = "stream") -> dict:
         arrays = payload if isinstance(payload.get("combined"), list) else (payload.get("hours") or {})
         values = (arrays or {}).get("combined") or []
         calls = (arrays or {}).get("calls") or []
+        par = (arrays or {}).get("parallelism") or []
         rows = [
             {
                 "hour": f"{h:02d}:00",
                 "rate": _rate(values[h] if h < len(values) else None),
                 "gap": not (h < len(values) and values[h] is not None),
                 "calls": fmt_int(calls[h]) if h < len(calls) else MISSING,
+                # The server measured the overlap for these hours too; it is the
+                # only per-hour figure the merged arrays carry besides the rate.
+                "parallelism": _parallelism(par[h]) if h < len(par) else MISSING,
             }
             for h in range(24)
         ]

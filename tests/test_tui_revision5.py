@@ -26,6 +26,7 @@ textual = pytest.importorskip("textual", reason="the TUI tests need textual")
 from textual.widgets import Button, DataTable, Input, Static  # noqa: E402
 
 import tokdash.tui.app as app_mod  # noqa: E402
+from tokdash.sessions import SESSION_TOOLS  # noqa: E402
 from tokdash.tui.app import TokdashApp, fit_columns  # noqa: E402
 from tokdash.tui.data import FetchOutcome  # noqa: E402
 
@@ -965,19 +966,35 @@ def test_sessions_and_speed_keep_separate_source_selections(api):
 
     async def body(app, pilot):
         api.failing_sources = ()
-        _sessions_body(app, pilot, ("codex",))
+        # Both selections are made the way a reader makes them: h, then the
+        # chooser. Setting the two fields by hand would prove the model holds two
+        # values and say nothing about whether either control can be reached.
+        app.action_show_pane("sessions")
+        await settle(pilot, 3)
+        await pilot.press("h")
+        await settle(pilot, 1)
+        await pilot.press("down")  # the first supported source
+        await pilot.press("enter")
         await settle(pilot, 4)
-        assert app._sn_sources == ("codex",)
-        app._sp_source = "claude"
+        sessions_choice = app._sn_sources
+        assert sessions_choice == (SESSION_TOOLS[0],), sessions_choice
         app.action_show_pane("speed")
+        await settle(pilot, 3)
+        await pilot.press("h")
+        await settle(pilot, 1)
+        await pilot.press("down")  # "All measured sources"
+        await pilot.press("down")  # codex, which has rows
+        await pilot.press("down")  # kimi, which has NONE -- and is still offered
+        await pilot.press("enter")
         await settle(pilot, 4)
+        assert app._sp_source == "kimi", app._sp_source
         sent = api.last("speed")
-        assert sent[2]["source"] == "claude", sent
-        assert "source claude" in visible(app, "#sp-note")
+        assert sent[2]["source"] == "kimi", sent
+        assert "source kimi" in visible(app, "#sp-note"), visible(app, "#sp-note")
         # Back to Sessions: its fan-out is untouched by Speed's filter.
         app.action_show_pane("sessions")
         await settle(pilot, 3)
-        assert app._sn_sources == ("codex",)
+        assert app._sn_sources == sessions_choice
         assert "1 of 1 source ·" in visible(app, "#sn-note"), visible(app, "#sn-note")
 
     run(api, body)
@@ -1006,22 +1023,34 @@ def test_stats_names_its_own_window_and_ignores_the_shared_range(api):
 
 
 def test_stats_year_picker_walks_the_ladder_and_asks_for_that_year(api):
+    """The key drives the ladder both ways, and every rung asks for its own year.
+
+    The year the reader is STANDING IN used to be unreachable: 'p' stepped from
+    the trailing window straight into last year and every press after that went
+    further back, with nothing to come back with.
+    """
+
     async def body(app, pilot):
         app.action_show_pane("stats")
         await settle(pilot, 3)
-        ladder = []
+        ladder, heads = [], []
         for _ in range(4):
-            app.action_stats_year()
+            await pilot.press("p")
             await settle(pilot, 2)
             ladder.append(app._stats_win.request())
-        assert ladder == [2025, 2024, 2023, 2022], ladder
-        assert api.last("stats")[1][0] == 2022
-        assert "2022  (2022-01-01 .. 2022-12-31)" in visible(app, "#st-window")
-        # Forward walks back up and comes to rest on the trailing rung: a year
-        # the reader has not lived through is not a window.
+            heads.append(visible(app, "#st-window"))
+        assert ladder == [2026, 2025, 2024, 2023], ladder
+        assert api.last("stats")[1][0] == 2023
+        # The in-progress year is named for the days it can actually answer.
+        assert "2026 to date" in heads[0], heads[0]
+        assert "2023  (2023-01-01 .. 2023-12-31)" in heads[3], heads[3]
+        # 'P' walks back up and comes to rest on the trailing rung: a year the
+        # reader has not lived through is not a window.
         for _ in range(6):
-            app._stats_win = app._stats_win.step(1, app._today)
+            await pilot.press("P")
+            await settle(pilot, 2)
         assert app._stats_win.request() is None
+        assert "Trailing 365 Days" in visible(app, "#st-window")
 
     run(api, body)
 
@@ -1202,14 +1231,20 @@ def test_build_progress_from_the_job_events_reaches_the_note(api):
         app.action_show_pane("speed")
         await settle(pilot, 4)
         assert len(api.called("speed")) == 1
-        app._on_speed_event({"state": "building", "completed_inputs": 3,
-                             "total_inputs": 9})
+        # What following a queued build actually looks like: the pane knows the
+        # job it subscribed for and the load generation that asked (an event
+        # from an older build is dropped, not painted).
+        app._sp_following = True
+        app._sp_follow_job = "job-9"
+        app._sp_follow_gen = app._gen
+        app._on_speed_event({"id": "job-9", "state": "building",
+                             "completed_inputs": 3, "total_inputs": 9})
         await settle(pilot, 2)
         note = visible(app, "#sp-note")
         assert "building 3/9" in note, note     # the numbers the server sent
         assert "last-good rows shown" in note, note
         assert len(api.called("speed")) == 1, api.called("speed")  # progress is free
-        app._on_speed_event({"state": "error"})
+        app._on_speed_event({"id": "job-9", "state": "error"})
         await settle(pilot, 2)
         assert "build failed" in visible(app, "#sp-note")
 
@@ -1329,21 +1364,30 @@ def test_report_keeps_the_two_scans_denominators_apart(api):
     async def body(app, pilot):
         app.action_show_pane("report")
         await settle(pilot, 4)
+        # The summary names the usage scan as the headline's denominator.
+        summary = visible(app, "#rp-body")
+        assert "Headline totals are the usage scan" in summary, summary
         press(app, "rp-tab-projects")
         await settle(pilot, 3)
         text = visible(app, "#rp-body")
-        assert "attributed share of 900.0K tokens (analytics scan)" in text, text
+        # Attribution divides the ANALYTICS scan, named above the rows it ranks.
+        assert "shares divide the analytics scan total 900.0K" in text, text
         assert "tokdash" in text and "500.0K" in text, text
-        assert "Unattributed" in text and "200.0K" in text, text
+        assert "unattributed" in text and "200.0K" in text, text
         # The two scans do not add up, and the page says so instead of hiding it.
         assert "differs from the scan total by +100,000 tokens" in text, text
-        assert "Headline totals are the usage scan" in text, text
 
     run(api, body)
 
 
 def test_report_when_uses_the_full_hour_grid_and_the_named_weekday(api):
-    """24 hourly buckets and 7 weekday buckets, read with their own keys."""
+    """The WHOLE facet: 24 hours, 7 named weekdays, and the share denominator.
+
+    The piped report prints the three busiest hours and one weekday because a
+    report is a summary. A PANE is where the rest of the facet lives, so the
+    claim this test has to actually carry is that the quiet end of the day and
+    the other six weekdays are reachable here -- not just the peak line.
+    """
 
     async def body(app, pilot):
         app.action_show_pane("report")
@@ -1357,6 +1401,14 @@ def test_report_when_uses_the_full_hour_grid_and_the_named_weekday(api):
         # as an empty facet and print a dash where Monday belongs.
         assert "busiest weekday Monday" in text, text
         assert "night share" in text, text
+        # Every hour of the clock, including the ones nobody clicked on.
+        for hour in range(24):
+            assert f"{hour:02d}:00" in text, (hour, text)
+        for day in ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+                    "Saturday", "Sunday"):
+            assert day in text, (day, text)
+        # Shares divide the analytics scan total, named above the rows.
+        assert "analytics scan total" in text, text
 
     run(api, body)
 
@@ -1815,6 +1867,12 @@ def test_the_annual_calendar_pages_only_over_the_months_it_asked_for(api):
     async def body(app, pilot):
         app.action_show_pane("stats")
         await settle(pilot, 4)
+        # Two rungs now: trailing 365 days, then the calendar year in progress,
+        # then the year this test wants. (It used to be one press straight past
+        # the year the reader is standing in.)
+        await pilot.press("p")
+        await settle(pilot, 4)
+        assert app._stats_win.request() == TODAY.year, app._stats_win
         await pilot.press("p")
         await settle(pilot, 4)
         assert app._stats_win.request() == year, app._stats_win
@@ -1885,7 +1943,12 @@ def test_the_hour_view_names_the_clock_it_is_using(api):
 
 
 def test_a_turn_row_keeps_a_gap_between_the_clock_and_the_model(api):
-    """The timestamp field was exactly 19 wide, so the model ran into it."""
+    """The timestamp field was exactly 19 wide, so the model ran into it.
+
+    The turns live in their own table now, so the collision this guards against
+    is a table one: the clock and the model are separate cells, and neither can
+    eat the other's width.
+    """
 
     async def body(app, pilot):
         app.action_show_pane("sessions")
@@ -1893,9 +1956,15 @@ def test_a_turn_row_keeps_a_gap_between_the_clock_and_the_model(api):
         app.query_one("#sn-table").focus()
         await pilot.press("enter")
         await settle(pilot, 5)
-        detail = visible(app, "#sn-detail")
-        assert "11:00:00 " in detail, detail
-        assert "11:00:00claude" not in detail, detail
+        turns = app.query_one("#sn-turns", DataTable)
+        rows = rows_of(turns)
+        assert rows, "the turns table painted nothing"
+        row = rows[0]
+        assert any(cell.endswith("11:00:00") for cell in row), row
+        assert any(cell == "claude-opus-4-7" for cell in row), row
+        shown = visible(app, "#sn-turns")
+        assert "11:00:00" in shown and "claude-opus-4-7" in shown, shown
+        assert "11:00:00claude" not in shown, shown
 
     run(api, body, size=(100, 30))
 

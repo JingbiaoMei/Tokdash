@@ -17,6 +17,7 @@ Two files per case in output/tui-rev5-captures/:
 from __future__ import annotations
 
 import asyncio
+import copy
 import os
 import sys
 from pathlib import Path
@@ -39,9 +40,14 @@ import tokdash.tui.app as app_mod  # noqa: E402
 from tokdash.tui.app import TokdashApp  # noqa: E402
 
 
+FAKE: fx.FakeApi | None = None  # the current frame's fake, for cases that edit it
+
+
 def install_fakes() -> fx.FakeApi:
     """Answer every read from the fixtures, exactly as the suite does."""
+    global FAKE
     fake = fx.FakeApi()
+    FAKE = fake
     seams = {
         "fetch_usage": ("usage", lambda *a, **k: fake.usage),
         "fetch_active_time": ("active", lambda *a, **k: fake.active),
@@ -255,6 +261,74 @@ async def view_picker(app, pilot):
     await fx.settle(pilot, 2)
 
 
+# ---- the workflows the review found broken, now that they work -------------
+
+async def sessions_sources(app, pilot):
+    """``h`` opens a chooser over every supported source, marked where it is."""
+    await sessions(app, pilot)
+    await pilot.press("h")
+    await fx.settle(pilot, 2)
+
+
+async def session_turns(app, pilot):
+    """Whole-session detail: every turn, and the arrows reach the last one."""
+    detail = copy.deepcopy(fx.SESSION_DETAIL)
+    detail["turns"] = [
+        dict(detail["turns"][0], turn_index=index, model=f"unique-model-{index}")
+        for index in range(1, 21)
+    ]
+    FAKE.session_detail = detail
+    await session_detail(app, pilot)
+    for _ in range(19):  # Pilot has no repeat= in this Textual
+        await pilot.press("down")
+    await fx.settle(pilot, 3)
+
+
+async def quota_detail(app, pilot):
+    """Enter on a meter names the account behind it and what that account says."""
+    await quota(app, pilot)
+    table = app.query_one("#quota-table")
+    table.focus()
+    rows = [table.get_row_at(row) for row in range(table.row_count)]
+    target = next(
+        (i for i, row in enumerate(rows) if any("academic" in str(c) for c in row)), 0
+    )
+    table.move_cursor(row=target)
+    await pilot.press("enter")
+    await fx.settle(pilot, 2)
+    app.query_one("#quota-detail").scroll_visible()
+    await fx.settle(pilot, 2)
+
+
+async def report_projects_cost(app, pilot):
+    """``s`` re-ranks the same list; the cost leader moves to the top."""
+    await report_projects(app, pilot)
+    await pilot.press("s")
+    await fx.settle(pilot, 3)
+
+
+async def stats_this_year(app, pilot):
+    """One ``p`` from the trailing window to the calendar year in progress."""
+    app.action_show_pane("stats")
+    await fx.settle(pilot, 4)
+    await pilot.press("p")
+    await fx.settle(pilot, 4)
+
+
+async def speed_whole_request(app, pilot):
+    """``x`` widens the timing set and the note says which set is in force."""
+    await speed(app, pilot)
+    await pilot.press("x")
+    await fx.settle(pilot, 3)
+
+
+async def speed_combined_hour(app, pilot):
+    """Hour of day for a MERGED model: its own 24 hours, not the time buckets."""
+    await speed_combined(app, pilot)
+    app.query_one("#sp-mode-hour").press()
+    await fx.settle(pilot, 4)
+
+
 CASES = [
     # name, size, body, initial period, monochrome
     ("01-overview-today-120x36", (120, 36), None, "today", False),
@@ -290,6 +364,16 @@ CASES = [
     ("31-overview-year-120x36", (120, 36), None, "year", False),
     ("32-help-panel-100x30", (100, 30), help_panel, "today", False),
     ("33-view-picker-80x24", (80, 24), view_picker, "today", False),
+    ("34-sessions-sources-100x30", (100, 30), sessions_sources, "today", False),
+    ("35-session-turns-100x30", (100, 30), session_turns, "today", False),
+    ("36-session-turns-80x24", (80, 24), session_turns, "today", False),
+    ("37-quota-account-detail-100x30", (100, 30), quota_detail, "today", False),
+    ("38-report-projects-by-cost-100x30", (100, 30), report_projects_cost, "today", False),
+    ("39-report-when-80x24", (80, 24), report_when, "today", False),
+    ("40-stats-this-year-100x30", (100, 30), stats_this_year, "today", False),
+    ("41-speed-whole-request-100x30", (100, 30), speed_whole_request, "today", False),
+    ("42-speed-combined-hour-100x30", (100, 30), speed_combined_hour, "today", False),
+    ("43-overview-month-120x36", (120, 36), None, "month", False),
 ]
 
 

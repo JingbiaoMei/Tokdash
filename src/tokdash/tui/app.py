@@ -608,6 +608,12 @@ class TokdashApp(App):
         self._sp_hours: dict | None = None
         self._sp_key: tuple | None = None      # exact key, per-stream lens
         self._sp_model: str | None = None      # merged model, combined lens
+        # ``_sp_key`` / ``_sp_model`` are what the reader ASKED FOR. The two flags
+        # below say whether the table has caught up: a series read in flight keeps
+        # the PREVIOUS payload in its slot, so naming the request over those rows
+        # would attribute one model's throughput to another.
+        self._sp_series_pending = False
+        self._sp_series_error = ""  # a series read that failed, keeping its rows
         # Every source the timing scan knows about, seen so far -- kept apart
         # from the rows the CURRENT filter displays, so the chooser cannot
         # forget a source just because something else is on screen.
@@ -1199,6 +1205,9 @@ class TokdashApp(App):
         cache_only wins server-side and a caller that meant to rebuild would get
         the old snapshot back."""
         gen = self._gen
+        # This read carries the series too, so any earlier series debt is paid.
+        self._sp_series_pending = False
+        self._sp_series_error = ""
         self._begin_load("speed", gen)
         scope = self._request()
         outcomes: list[FetchOutcome] = []
@@ -1295,25 +1304,74 @@ class TokdashApp(App):
         return key, (self._speed_key_label(key) if key else "")
 
     def _speed_selection_label(self) -> str:
-        """The exact key or merged model the Trend / Hour table is charting.
+        """The series the ROWS on screen were measured for -- not the last pick.
 
-        Falls back to the selection the loader actually took when the reader has
-        not picked one, so the note describes the rows on screen rather than an
-        empty "nothing chosen".
+        Hour-of-day answers for ONE selection, and its payload says which:
+        ``selected_key`` is written by the read that produced these rows. Reading
+        ``_sp_model`` / ``_sp_key`` instead named the request while the previous
+        answer was still on screen, so a slow or failed series read put model
+        one's rates under model two's heading -- and any repaint (a resize, a
+        build-progress tick) could show it.
         """
         if self._sp_mode == "trend":
             return self._speed_trend_selection()[1]
-        if self._sp_lens == "combined":
-            model = self._sp_model or next(
-                (str(entry.get("model"))
-                 for entry in ((self._sp_trend or {}).get("model_series")
-                               or (self._sp_hours or {}).get("model_series") or [])
-                 if entry.get("model")),
-                None,
+        if self._sp_mode == "hour":
+            key = (self._sp_hours or {}).get("selected_key") or {}
+            if not key:
+                return ""
+            if self._sp_lens == "combined":
+                model = key.get("model")
+                return f"merged model {model}" if model else ""
+            return self._speed_key_label(
+                (key.get("source"), key.get("model"),
+                 key.get("measurement_kind"), key.get("token_basis"))
             )
-            return f"merged model {model}" if model else ""
-        key = self._sp_key or self._default_speed_key()
-        return self._speed_key_label(key) if key else ""
+        return ""
+
+    def _speed_requested_label(self) -> str:
+        """What the reader last chose, landed or not."""
+        if self._sp_lens == "combined":
+            return f"merged model {self._sp_model}" if self._sp_model else ""
+        return self._speed_key_label(self._sp_key) if self._sp_key else ""
+
+    def _speed_series_state(self) -> tuple[str, bool]:
+        """A note about the series read the rows have not caught up with.
+
+        Returns ``(text, is_error)``; no text means the heading and the rows
+        already agree. The wording stays DELIBERATELY anonymous: the figures under
+        this line are still the PREVIOUS selection's, so naming the series that was
+        asked for here would print its name above another model's rates, which is
+        the very misattribution this line exists to warn about. What the reader
+        picked goes in the detail under the table, where those rows are no longer
+        beneath the name. Saying nothing at all is what let a failed read leave the
+        pane looking finished.
+        """
+        wanted = self._speed_requested_label()
+        if not wanted or wanted == self._speed_selection_label():
+            return "", False
+        if self._sp_series_error:
+            return ("selected series could not be read (" + self._sp_series_error
+                    + ") · rows below are the last good series · r Retry", True)
+        if self._sp_series_pending:
+            return ("selected series is still loading · "
+                    "rows below are the previous series", True)
+        return "", False
+
+    def _speed_series_warning_lines(self) -> list[list[Run]]:
+        """The detail pane's version of that warning, which DOES name the pick.
+
+        The note above the table cannot: it sits over rows that belong to another
+        series. The detail sits under them, so it can say what is missing and how
+        to ask for it again.
+        """
+        _text, bad = self._speed_series_state()
+        wanted = self._speed_requested_label()
+        if not bad or not wanted:
+            return []
+        if self._sp_series_error:
+            return [[Run(f"requested {wanted}: read failed ({self._sp_series_error}) · "
+                         "r Retry", "warn")]]
+        return [[Run(f"requested {wanted} · its read is still on its way", "warn")]]
 
     def _default_speed_key(self) -> tuple | None:
         keys = views.speed_trend_rows(self._sp_trend or {}).get("keys") or []
@@ -2094,6 +2152,9 @@ class TokdashApp(App):
         else:
             self._sp_key = tuple(value)
         self._gen += 1
+        # The rows on screen are still the previous series until this read lands.
+        self._sp_series_pending = True
+        self._sp_series_error = ""
         if self._sp_mode == "hour":
             self._load_hours_start()
         else:
@@ -2126,7 +2187,18 @@ class TokdashApp(App):
         gen = self._gen
 
         async def _run() -> None:
-            await self._load_hours(gen)
+            self._sp_series_error = ""
+            try:
+                await self._load_hours(gen)
+            except Exception as exc:  # noqa: BLE001 — a failed series is a note
+                if gen == self._gen:
+                    self._sp_series_pending = False
+                    self._sp_series_error = _series_error_text(exc)
+                    self._paint_speed()
+                return
+            if gen == self._gen:
+                self._sp_series_pending = False
+                self._paint_speed()  # the note loses its "still loading" clause
 
         # Its OWN group. An exclusive worker with no group lands in Textual's
         # "default" group, where it cancels every ungrouped worker -- including
@@ -2138,7 +2210,18 @@ class TokdashApp(App):
         gen = self._gen
 
         async def _run() -> None:
-            await self._load_trend(gen)
+            self._sp_series_error = ""
+            try:
+                await self._load_trend(gen)
+            except Exception as exc:  # noqa: BLE001 — a failed series is a note
+                if gen == self._gen:
+                    self._sp_series_pending = False
+                    self._sp_series_error = _series_error_text(exc)
+                    self._paint_speed()
+                return
+            if gen == self._gen:
+                self._sp_series_pending = False
+                self._paint_speed()
 
         self.run_worker(_run(), group="speed-series", exclusive=True, exit_on_error=False)
 
@@ -2375,10 +2458,19 @@ class TokdashApp(App):
         lines.append([
             Run(f"measured {row['measured']} of {row['eligible']} eligible calls · coverage {row['coverage']}", "muted"),
         ])
-        lines.append([
-            Run("rate = summed tokens over summed duration; coverage is measured/eligible calls, "
-                "not continuous days observed", "muted"),
-        ])
+        # The two lenses divide by DIFFERENT things, and Enter is where that gets
+        # read. A merged rate divides the same tokens by the UNION of the busy
+        # intervals, so two overlapping one-second responses of 100 tokens are
+        # 200 tok/s combined and 100 tok/s per stream; saying "summed duration"
+        # over a combined rate claims the second number while showing the first.
+        lines.append([Run(
+            "combined = summed tokens over the UNION of busy time · responses in flight at the "
+            "same moment share that time, so this is wall-clock throughput, not a per-response rate"
+            if self._sp_lens == "combined" else
+            "per stream = summed tokens over the SUMMED response durations · each response is "
+            "divided by its own time, whatever else was in flight", "muted")])
+        lines.append([Run(
+            "coverage is measured/eligible calls, not continuous days observed", "muted")])
         detail.update(emit_markup(lines))
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
@@ -3446,14 +3538,20 @@ class TokdashApp(App):
                           else "decode windows (excludes the initial wait)"),
             f"cache {state}",
         ]
+        series_note, series_bad = "", False
         if self._sp_mode in ("trend", "hour"):
             # Which ONE thing the table below measures. Both views answer for a
             # single comparison key or merged model, and that identity belongs
             # above the rows: a 24-row hour table fills the pane, so a caption
             # underneath it left a screen full of rates with no name attached.
+            # It names the LOADED series; the next clause owns the gap between
+            # that and whatever the reader has asked for since.
             selection = self._speed_selection_label()
             if selection:
                 note_bits.insert(1, f"measuring {selection}")
+            series_note, series_bad = self._speed_series_state()
+            if series_note:
+                note_bits.insert(2 if selection else 1, series_note)
         if self._sp_job_note:
             note_bits.append(self._sp_job_note)
         hidden = payload.get("hidden_request_windows") or []
@@ -3466,7 +3564,8 @@ class TokdashApp(App):
                 + ", ".join(f"{s.get('source')} ({s.get('status')})" for s in status[:4])
             )
         self.query_one("#sp-note", Static).update(
-            emit_markup([[Run(" · ".join(note_bits), "warn" if self._sp_job_note else "muted")]])
+            emit_markup([[Run(" · ".join(note_bits),
+                              "warn" if (self._sp_job_note or series_bad) else "muted")]])
         )
         if self._sp_mode == "trend" and self._sp_trend is not None:
             self._paint_speed_trend(wide)
@@ -3553,11 +3652,13 @@ class TokdashApp(App):
             ], key=row["key"])
         detail = self.query_one("#sp-detail", Static)
         detail.display = True
-        detail.update(emit_markup([
+        lines = [
             [Run(f"series {trend['selected'] or 'none'} · {trend['note']}", "muted")],
             [Run(f"buckets offered: {', '.join(trend['offered']) or 'none'} · b changes resolution · k chooses the series", "muted")],
             [Run(f"latest measured point: {trend['latest']} · {trend['spread_note']}", "muted")],
-        ]))
+        ]
+        lines += self._speed_series_warning_lines()
+        detail.update(emit_markup(lines))
 
     def _paint_speed_hours(self) -> None:
         table = self.query_one("#sp-table", DataTable)
@@ -3612,6 +3713,7 @@ class TokdashApp(App):
                 [Run(f"days with measurements: {hours.get('days_with_measurements', EM_DASH)} · "
                      "an hour that measured nothing is a gap, not a zero", "muted")],
             ]
+        lines += self._speed_series_warning_lines()
         detail.update(emit_markup(lines))
 
     def _paint_quota(self) -> None:
@@ -4052,6 +4154,20 @@ def _calendar_text(
                     out.append("   ")
             out.append("\n")
     return out
+
+
+def _series_error_text(exc: BaseException) -> str:
+    """One clause naming why a series read failed, for a note rather than a crash.
+
+    A superseded read is not a failed one: an exclusive worker group cancels the
+    load that a newer choice replaced, and a red line there would blame the reader
+    for the refresh they just asked for. An empty string means "do not report".
+    """
+    err = getattr(exc, "error", exc)
+    if isinstance(err, (WorkerCancelled, asyncio.CancelledError)):
+        return ""
+    text = " ".join(str(err).split()) or type(err).__name__
+    return text if len(text) <= 120 else text[:117] + "..."
 
 
 def _report_warning(name: str, exc: Exception) -> str:

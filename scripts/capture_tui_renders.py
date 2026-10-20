@@ -387,6 +387,76 @@ async def speed_hour_detail(app, pilot):
     await fx.settle(pilot, 2)
 
 
+async def _second_merged_model():
+    """A second merged series, so a series PICK is something the reader can do."""
+    other = copy.deepcopy(fx.SPEED_TREND["model_series"][0])
+    other.update(model="claude-opus-4-7", combined=[233.0, 244.0], calls=[7, 8],
+                 parallelism=[2.5, 2.5],
+                 hours={"combined": [77.0] * 24, "calls": [7] * 24,
+                        "parallelism": [1.1] * 24})
+    FAKE.speed_trend["model_series"].append(other)
+
+
+async def speed_hour_series_pending(app, pilot):
+    """A series read that is still out there: the rows keep the OLD name.
+
+    The heading used to follow the pick, so a slow answer put model two's name
+    over model one's rates. The wait is now said out loud, above rows that still
+    belong to the series they belonged to.
+    """
+    import threading
+    await _second_merged_model()
+    hold = threading.Event()
+    await speed_combined(app, pilot)
+    app.query_one("#sp-mode-hour").press()
+    await fx.settle(pilot, 4)
+    def hold_series(**kwargs):
+        # Returns None so the fixture still answers once the wait expires; the
+        # frame is taken while the thread is parked, which is the point.
+        if kwargs.get("view") in ("trend", "time-of-day"):
+            hold.wait(3)
+        return None
+
+    FAKE.hooks["speed"] = hold_series
+    await pilot.press("k")
+    await fx.settle(pilot, 2)
+    await pilot.press("down")
+    await pilot.press("enter")
+    await fx.settle(pilot, 2)
+    # A repaint is what makes the stale state visible, so force one the way a
+    # reader does by dragging the terminal: the note must admit the wait.
+    await pilot.resize_terminal(100, 31)
+    await pilot.resize_terminal(100, 30)
+    await fx.settle(pilot, 2)
+
+
+async def speed_hour_series_failed(app, pilot):
+    """A series read that FAILED: the pane says so and offers r, not a new name."""
+    await _second_merged_model()
+    await speed_combined(app, pilot)
+    app.query_one("#sp-mode-hour").press()
+    await fx.settle(pilot, 4)
+    FAKE.hooks["speed"] = lambda **kwargs: (
+        RuntimeError("capture: the series reader did not answer")
+        if kwargs.get("view") in ("trend", "time-of-day") else None
+    )
+    await pilot.press("k")
+    await fx.settle(pilot, 2)
+    await pilot.press("down")
+    await pilot.press("enter")
+    await fx.settle(pilot, 3)
+
+
+async def speed_combined_detail(app, pilot):
+    """Enter on a merged row: its rate divides by the UNION of busy time."""
+    await speed_combined(app, pilot)
+    table = app.query_one("#sp-table")
+    table.focus()
+    table.move_cursor(row=0)
+    await pilot.press("enter")
+    await fx.settle(pilot, 2)
+
+
 CASES = [
     # name, size, body, initial period, monochrome
     ("01-overview-today-120x36", (120, 36), None, "today", False),
@@ -438,6 +508,9 @@ CASES = [
     ("47-speed-trend-detail-100x30", (100, 30), speed_trend_detail, "today", False),
     ("48-speed-trend-second-model-100x30", (100, 30), speed_trend_second_model, "today", False),
     ("49-speed-hour-detail-80x24", (80, 24), speed_hour_detail, "today", False),
+    ("50-speed-hour-series-pending-100x30", (100, 30), speed_hour_series_pending, "today", False),
+    ("51-speed-hour-series-failed-100x30", (100, 30), speed_hour_series_failed, "today", False),
+    ("52-speed-combined-detail-100x30", (100, 30), speed_combined_detail, "today", False),
 ]
 
 

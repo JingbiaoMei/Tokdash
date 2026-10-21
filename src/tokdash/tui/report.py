@@ -73,8 +73,12 @@ _NAME_CAP = 22
 # window["days"] claim says (defense-in-depth against a malformed range block).
 _DAILY_MAX_ROWS = 31
 
+# "series" is the colour of a drawn SERIES (the activity bars, the Speed picture):
+# the web design draws both in the lavender of the token KPI, not the cyan of an
+# accent. The piped report never draws a picture, so the ANSI lane borrows the
+# engine's only cool colour rather than inventing a second palette here.
 _ANSI_STYLES = {"ok": _ok, "bad": _bad, "warn": _warn, "bold": _bold,
-                "accent": _accent, "header": _bold}
+                "accent": _accent, "header": _bold, "series": _accent}
 # "muted"/None render plain in ANSI (the engine has no dim code); markup has one.
 # "header" is the section heading. The piped report keeps it bold (the engine has
 # no colour helper for a piped stdout), and the TUI pane paints it in the
@@ -82,7 +86,8 @@ _ANSI_STYLES = {"ok": _ok, "bad": _bad, "warn": _warn, "bold": _bold,
 # with a quiet heading and the surface tone under them, not with a filled band
 # across the pane, which reads as one giant selection.
 _MARKUP_STYLES = {"ok": "green", "bad": "red", "warn": "yellow", "bold": "bold",
-                  "accent": "cyan", "muted": "dim", "header": "bold #c5d2e3"}
+                  "accent": "cyan", "muted": "dim", "header": "bold #c5d2e3",
+                  "series": "#a8b1ff"}
 
 
 #: The report's sections, in the order the piped report emits them. The TUI's

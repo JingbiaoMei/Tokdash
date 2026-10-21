@@ -118,8 +118,11 @@ def test_sorting_while_a_new_window_loads_shows_no_figures_yet(api):
             app.action_begin_search()
             await settle(pilot, 1)
             assert table.row_count == 0, (app._win.describe(), rows_of(table))
-            assert TODAY.isoformat() not in visible(app, "#ov-range")
-            assert "2026-10-17" in visible(app, "#range-dates")
+            # One strip prints the window for every dated pane, so the stale
+            # date has nowhere left to sit next to the new one.
+            strip = visible(app, "#range-dates")
+            assert TODAY.isoformat() not in strip, strip
+            assert "2026-10-17" in strip, strip
         finally:
             gate.set()
             await settle(pilot, 2)
@@ -805,21 +808,30 @@ def test_each_source_keeps_its_own_colour_in_the_tables(api):
         app.action_show_pane("overview")
         await settle(pilot, 2)
         table = app.query_one("#ov-table", DataTable)
+        edge = app_mod._BADGE_EDGE
+        # Revision 5's badge puts the tint on TWO runs -- the accent edge and the
+        # label -- so the law is read off the cell's runs, and a source is only
+        # badged when the edge and the word carry the same colour.
         styles = {
-            cell.plain: str(cell.style)
+            cell.plain.removeprefix(edge): " ".join(
+                [str(cell.style)] + [str(span.style) for span in cell.spans]
+            )
             for cell in table.get_row_at(0) + table.get_row_at(1)
             if hasattr(cell, "plain")
         }
         assert "bold #79dfbd" in styles.get("Codex", ""), styles
         assert "bold #f2bd78" in styles.get("Claude Code", ""), styles
+        assert styles["Codex"].count("#79dfbd") == 2, styles   # edge AND label
+        assert styles["Codex"] != styles["Claude Code"], styles
 
         app.action_show_pane("sessions")
         await settle(pilot, 2)
         sessions = app.query_one("#sn-table", DataTable)
         first = sessions.get_row_at(0)
         assert any(
-            getattr(cell, "plain", "") in {"Codex", "Claude Code"}
+            getattr(cell, "plain", "").removeprefix(edge) in {"Codex", "Claude Code"}
             and "#" in str(getattr(cell, "style", ""))
+            + " ".join(str(span.style) for span in getattr(cell, "spans", ()))
             for cell in first
         ), first
 

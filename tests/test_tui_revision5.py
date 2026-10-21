@@ -619,7 +619,17 @@ def visible(app, selector: str) -> str:
 
 
 def rows_of(table: DataTable) -> list[list[str]]:
-    return [[str(cell) for cell in table.get_row_at(row)] for row in range(table.row_count)]
+    """Every row of a table as plain strings.
+
+    A source cell is a badge (app._source_cell): the harness's own tint on an
+    accent edge, then the label. The edge is decoration over the same word, so
+    it comes off here and a test can ask what a row SAYS. The decoration is
+    guarded separately, in test_each_source_keeps_its_own_colour_in_the_tables.
+    """
+    edge = app_mod._BADGE_EDGE
+    return [[str(cell).removeprefix(edge)
+             for cell in table.get_row_at(row)]
+            for row in range(table.row_count)]
 
 
 def headers_of(table: DataTable) -> list[str]:
@@ -845,8 +855,9 @@ def test_a_late_reply_cannot_be_painted_under_new_dates(api):
         yesterday = (TODAY - datetime.timedelta(days=1)).isoformat()
         assert app._win.date_from.isoformat() == yesterday
         assert app._ov_usage["range"]["from"] == yesterday, app._ov_usage["range"]
-        assert yesterday in visible(app, "#ov-range")
-        assert TODAY.isoformat() not in visible(app, "#ov-range")
+        strip = visible(app, "#range-dates")  # the ONE shared window label
+        assert yesterday in strip, strip
+        assert TODAY.isoformat() not in strip, strip
 
     run(api, body)
 
@@ -1119,7 +1130,7 @@ def test_enter_on_a_day_moves_the_shared_window_and_opens_the_overview(api):
         assert app._active_pane() == "overview"
         assert app._win.custom and app._win.date_from == app._win.date_to
         assert app._win.date_from.isoformat() == wanted, (app._win, wanted)
-        assert wanted in visible(app, "#ov-range")
+        assert wanted in visible(app, "#range-dates")
         # Overview then asks for exactly that one day.
         sent = api.last("usage")  # fetch_usage(period, date_from, date_to, refresh=)
         assert (sent[1][1], sent[1][2]) == (wanted, wanted), sent
@@ -2037,7 +2048,7 @@ def test_a_word_too_long_for_its_column_looks_cut(api):
         assert "…" in painted, painted
         assert "respon " not in painted, painted
 
-    run(api, body, size=(100, 30))
+    run(api, body, size=(80, 24))
 
 # --------------------------------------------------------------------------- #
 # card captions: a crop that lands mid-word reads as a broken build
@@ -2085,3 +2096,137 @@ def test_the_monochrome_cards_still_separate_their_figures():
     painted = "\n".join(_card_lines(cards, 118, mono=True))
     for label in ("TOKENS", "COST (USD)", "MESSAGES", "EST. AGENT TIME", "CACHE HIT", "MOST USED MODEL"):
         assert label in painted, label
+
+
+# --------------------------------------------------------------------------- #
+# round 5 (visual parity pass): the room a table's own scrollbar takes, and the
+# sentences that may not be cut to buy a row
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("size", [(120, 36), (100, 30), (80, 24)])
+def test_a_scrolling_table_never_pays_for_its_scrollbar_with_a_column(api, size):
+    """A vertical scrollbar arrives AFTER the columns are fitted.
+
+    Sizing the columns to the full pane and then growing the bar takes a cell from
+    the right-hand column, and the figure sitting there loses its last character
+    with nothing on screen to say so. The fit keeps that cell, so the table scrolls
+    sideways never.
+    """
+    async def body(app, pilot):
+        app.action_show_pane("speed")
+        await settle(pilot, 3)
+        press(app, "sp-mode-hour")
+        await settle(pilot, 3)
+        table = app.query_one("#sp-table", DataTable)
+        assert table.row_count > 0
+        # A vertical scrollbar arrives after the fit and takes a cell from the
+        # right; the table answers with a HORIZONTAL one when the fit did not
+        # keep that cell, and a sideways-scrolling numeric column is a figure the
+        # reader has to guess at. Rows the viewport scrolled out of are not
+        # missing -- the sideways bar is the thing that must never appear.
+        assert not table.show_horizontal_scrollbar, (size, visible(app, "#sp-table"))
+        last = len(table.columns) - 1
+        # One row of the content region is the header, the rest is the viewport.
+        top = int(table.scroll_y)
+        window = max(1, int(table.content_region.height) - 1)
+        for row in range(top, min(top + window, table.row_count)):
+            value = str(table.get_row_at(row)[last])
+            if value and value != "\u2014":
+                assert value in visible(app, "#sp-table"), (size, row, value)
+        # And the row under the cursor is always inside what the widget drew.
+        table.move_cursor(row=min(3, table.row_count - 1))
+        await settle(pilot, 1)
+        label = str(table.get_row_at(table.cursor_row)[0])
+        assert label in visible(app, "#sp-table"), (size, label)
+
+    run(api, body, size=size)
+
+
+@pytest.mark.parametrize("size", [(120, 36), (100, 30), (80, 24)])
+def test_an_opened_row_keeps_the_sentence_naming_its_denominator(api, size):
+    """Enter is asked because of that sentence; the row's height never eats it.
+
+    The two lenses divide by different things, and a caption packed to three rows
+    used to deliver "summed tokens over the" and stop -- a rate standing on screen
+    with no denominator, which is the one thing this view may not do.
+    """
+    async def body(app, pilot):
+        app.action_show_pane("speed")
+        await settle(pilot, 3)
+        press(app, "sp-lens-combined")
+        await settle(pilot, 2)
+        table = app.query_one("#sp-table", DataTable)
+        table.focus()
+        await pilot.press("enter")
+        await settle(pilot, 2)
+        detail = " ".join(visible(app, "#sp-detail").split())
+        assert "UNION of busy time" in detail, (size, detail)
+
+    run(api, body, size=size)
+
+
+def test_the_speed_strip_wraps_instead_of_losing_a_fact(api):
+    """The strip packs, and packing is not deleting.
+
+    At eighty columns the series line and the source filter do not share a row, so
+    the strip takes a second one. Dropping the filter instead left a pane claiming
+    "all measured" while a filter was on screen -- two places to read the same
+    fact, and only one of them updated.
+    """
+    async def body(app, pilot):
+        app.action_show_pane("speed")
+        await settle(pilot, 3)
+        strip = app.query_one("#sp-note", Static)
+        note = " ".join(visible(app, "#sp-note").split())
+        # The fixture's speed payload names a harness with no measurement, so the
+        # strip has a filter fact, a warning fact and a cache fact to place.
+        assert "source all measured" in note, note
+        assert "no measured speed: kimi" in note, note
+        assert "cache ready" in note, note
+        # None of it may be replaced by a tally of what gave way.
+        assert "widen to read" not in note, note
+        assert strip.region.height >= 1, strip.region
+
+    run(api, body, size=(80, 24))
+
+
+# --------------------------------------------------------------------------- #
+# round 5 (visual parity, second pass): the picture's own labels
+# --------------------------------------------------------------------------- #
+
+def test_a_squeezed_chart_still_names_the_ends_of_its_axis():
+    """Twenty-four hours at eighty columns leaves two cells per column.
+
+    Keys that do not fit their own column are dropped rather than cut, which is
+    right -- "00:" is not a shortened hour -- but a series with no ends at all is
+    a shape the reader cannot place in time. The first and last key get the whole
+    row instead.
+    """
+    from tokdash.tui.charts import column_chart
+
+    entries = [{"label": f"{h:02d}:00", "value": float(h % 5 + 1), "text": ""}
+               for h in range(24)]
+    drawn = column_chart(entries, width=76, height=3, style="series", unit="tok/s")
+    axis = drawn["lines"][-1]
+    painted = "".join(run.text for run in axis)
+    assert painted.strip().startswith("00:00"), repr(painted)
+    assert painted.strip().endswith("23:00"), repr(painted)
+
+
+@pytest.mark.parametrize("size", [(120, 36), (100, 30)])
+def test_a_caption_row_never_ends_in_the_middle_of_a_fact(api, size):
+    """A number split across two rows reads as two wrong numbers.
+
+    "peak 612.0K tokens · 1" over "bucket measured 0 tokens" is what packing the
+    facts as ONE string does: the row breaks at the column, not at the fact.
+    """
+    async def body(app, pilot):
+        band = app.query_one("#ov-activity")
+        lines = str(band.render()).splitlines()
+        tail = [ln for ln in lines if "\u00b7" in ln]
+        assert tail, lines
+        for line in tail:
+            assert not line.rstrip().endswith(("\u00b7", "1", "0")), (size, line)
+        assert "widen to read" not in "\n".join(lines), lines
+
+    run(api, body, size=size)

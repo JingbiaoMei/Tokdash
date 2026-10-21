@@ -425,7 +425,7 @@ def activity_strip(
     buckets = list(sparkline["buckets"])
     peak = max((_num(b.get("tokens")) for b in buckets), default=0.0)
     rows = []
-    for bucket in buckets[-max_rows:] if max_rows else buckets:
+    for bucket in buckets:
         tokens = _num(bucket.get("tokens"))
         rows.append(
             {
@@ -435,14 +435,21 @@ def activity_strip(
                 "cost": fmt_cost_row(bucket.get("cost")),
                 "messages": fmt_int(bucket.get("messages")),
                 "zero": tokens == 0,
+                # The chart draws EVERY bucket the route returned. Truncating the
+                # picture to the rows a pane can show would hide measurements,
+                # so the strip below keeps its row budget and the chart does not.
+                "value": tokens,
+                "chart_key": chart_key(bucket.get("key")),
             }
         )
+    shown = rows[-max_rows:] if max_rows else rows
     span = f"{buckets[0].get('key')} .. {buckets[-1].get('key')}" if buckets else MISSING
     return {
         "available": True,
         "granularity": granularity,
         "unit": unit,
-        "rows": rows,
+        "rows": shown,
+        "all_rows": rows,
         "bucket_count": len(buckets),
         "span": span,
         "note": f"{len(buckets)} {unit} buckets · {span} · server local time",
@@ -984,6 +991,67 @@ TOKEN_BASIS_LABELS = {
     "output_including_reasoning": "output + reasoning",
     "": "unspecified",
 }
+# The same two facts in the room a TABLE column has. Which clock and which tokens
+# is a row's identity, so the column is never dropped and never cut in half --
+# it is spelled smaller. "response / out+reason" says the same measurement as
+# "response window / output + reasoning"; the row's detail (enter) prints the
+# long form, and so does every wide-enough table.
+TIMING_KIND_SHORT = {
+    "server_decode": "decode",
+    "post_first_token": "first token",
+    "response_window": "response",
+    "request_window": "whole req",
+}
+TOKEN_BASIS_SHORT = {
+    "output_only": "out",
+    "output_including_reasoning": "out+reason",
+    "": "unspecified",
+}
+
+
+def chart_key(key: object) -> str:
+    """A bucket key shortened to fit ONE chart column, never to a wrong date.
+
+    The table beside a chart always prints the key in full; the axis underneath
+    the bars only has to say WHICH column is which. A response's keys are ISO:
+    "2026-10-12T09" (hour), "2026-10-12" (day), "2026-10" (month). The hour form
+    keeps the date because an hourly trend runs across days, and "09" alone would
+    put nine different Tuesdays under the same tick.
+    """
+    raw = str(key or "")
+    if "T" in raw:
+        day, _, hour = raw.partition("T")
+        return f"{day[5:]} {hour[:2]}" if len(day) == 10 else raw
+    if len(raw) == 10:
+        return raw[5:]
+    return raw
+
+
+def chart_entries(rows: list[dict], value_key: str, *, label_key: str = "chart_key",
+                  text_key: str | None = None) -> list[dict]:
+    """The chart's own entries for rows this module already built.
+
+    ``None`` rides through as ``None``: an unmeasured bucket has to reach the
+    renderer as a gap, and a 0.0 there would draw a bar the server never measured.
+    """
+    return [
+        {
+            "label": str(row.get(label_key) or row.get("key") or row.get("hour") or ""),
+            "value": row.get(value_key),
+            "text": str(row.get(text_key) or "") if text_key else "",
+        }
+        for row in rows
+    ]
+
+
+def _rate_value(value: object) -> float | None:
+    """The number behind a rate cell, or None when the server measured nothing."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _rate(value: object) -> str:
@@ -1020,6 +1088,8 @@ def speed_rows(payload: dict, *, lens: str = "stream", search: str = "") -> dict
                     "model": name,
                     "sources": ",".join(entry.get("sources") or []) or MISSING,
                     "timing": _kinds(entry.get("measurement_kinds")),
+                    "timing_short": _kinds(entry.get("measurement_kinds"), short=True),
+                    "timing_kind": _kinds(entry.get("measurement_kinds"), short=True),
                     "rate": _rate(entry.get("combined_tok_per_s")),
                     "rate_sort": _num(entry.get("combined_tok_per_s")),
                     "measured": fmt_int(entry.get("speed_calls")),
@@ -1043,7 +1113,14 @@ def speed_rows(payload: dict, *, lens: str = "stream", search: str = "") -> dict
                     "harness": source,
                     "timing": _kinds([entry.get("measurement_kind")])
                     + " / "
-                    + TOKEN_BASIS_LABELS.get(str(entry.get("token_basis") or ""), str(entry.get("token_basis"))),
+                    + _basis(entry.get("token_basis")),
+                    "timing_short": _kinds([entry.get("measurement_kind")], short=True)
+                    + " / "
+                    + _basis(entry.get("token_basis"), short=True),
+                    # NARROW: which clock, without the token basis. The basis is
+                    # still in the row's detail; a column cannot hold four ideas
+                    # in eighty columns and pretend nothing was lost.
+                    "timing_kind": _kinds([entry.get("measurement_kind")], short=True),
                     "rate": _rate(entry.get("output_tok_per_s")),
                     "rate_sort": _num(entry.get("output_tok_per_s")),
                     "combined": _rate(entry.get("combined_tok_per_s")),
@@ -1067,12 +1144,19 @@ def speed_rows(payload: dict, *, lens: str = "stream", search: str = "") -> dict
     }
 
 
-def _kinds(kinds: object) -> str:
+def _kinds(kinds: object, *, short: bool = False) -> str:
     if not kinds:
         return MISSING
     if isinstance(kinds, str):
         kinds = [kinds]
-    return ", ".join(TIMING_KIND_LABELS.get(str(k), str(k)) for k in kinds if k)
+    table = TIMING_KIND_SHORT if short else TIMING_KIND_LABELS
+    return ", ".join(table.get(str(k), str(k)) for k in kinds if k)
+
+
+def _basis(basis: object, *, short: bool = False) -> str:
+    text = str(basis or "")
+    table = TOKEN_BASIS_SHORT if short else TOKEN_BASIS_LABELS
+    return table.get(text, text)
 
 
 def _coverage(coverage: object) -> str:
@@ -1156,6 +1240,13 @@ def speed_trend_rows(payload: dict, *, key: tuple | None = None, lens: str = "st
                 "span": f"{bucket.get('from')} .. {bucket.get('to')}",
                 "per_stream": _rate(stream_rate),
                 "combined": _rate(comb_rate),
+                # The FORMATTED cell above is for the table; these are for the
+                # bars. A chart that re-reads a rounded string cannot tell an
+                # unmeasured bucket from a measured zero, and would draw a stub
+                # where the server said nothing at all.
+                "per_stream_value": _rate_value(stream_rate),
+                "combined_value": _rate_value(comb_rate),
+                "chart_key": chart_key(bucket.get("key") or bucket.get("from")),
                 "gap": (comb_rate is None and stream_rate is None),
                 "calls": fmt_int(calls[index]) if index < len(calls) else MISSING,
                 "parallelism": _parallelism(parallelism[index]) if index < len(parallelism) else MISSING,
@@ -1211,6 +1302,7 @@ def speed_hour_rows(payload: dict, *, lens: str = "stream") -> dict:
             {
                 "hour": f"{h:02d}:00",
                 "rate": _rate(values[h] if h < len(values) else None),
+                "rate_value": _rate_value(values[h] if h < len(values) else None),
                 "gap": not (h < len(values) and values[h] is not None),
                 "calls": fmt_int(calls[h]) if h < len(calls) else MISSING,
                 # The server measured the overlap for these hours too; it is the
@@ -1239,6 +1331,7 @@ def speed_hour_rows(payload: dict, *, lens: str = "stream") -> dict:
         {
             "hour": f"{int(b.get('hour', i)):02d}:00",
             "rate": _rate(b.get("output_tok_per_s")),
+            "rate_value": _rate_value(b.get("output_tok_per_s")),
             "gap": b.get("output_tok_per_s") is None,
             "calls": fmt_int(b.get("speed_calls")),
             "eligible": fmt_int(b.get("eligible_calls")),

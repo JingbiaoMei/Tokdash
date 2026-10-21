@@ -145,6 +145,179 @@ def day_bars(
 
 
 # ---------------------------------------------------------------------------
+# columns: the terminal-scale bar chart Overview's activity and Speed's series
+# ---------------------------------------------------------------------------
+#
+# The picture exists to answer one question a table answers badly: WHERE is the
+# series empty? A terminal has no pixels for that, so the geometry carries it,
+# and the two empty-looking states must never share a drawing:
+#
+#   * a MISSING value (the server timed nothing in that bucket) leaves the
+#     column BLANK for every level, including the baseline;
+#   * a MEASURED zero draws ONE stub cell on the baseline and nothing above it.
+#
+# Both states arrive as separate entries (None versus 0.0) from the caller,
+# which reads them off the payload. Nothing here invents a bucket, merges two,
+# or rescales a rate: the columns are the buckets the route returned.
+
+_BLOCK_FULL = "\u2588"
+_BLOCK_RAMP = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587"
+_ASCII_FULL = "#"
+_ASCII_RAMP = ".:-=+"
+# Wide enough to read as a shape, narrow enough that a month of daily buckets
+# still gets a column each at 80 columns. The air between columns is what makes
+# a blank one read as a gap rather than as a very short bar.
+_MAX_COLUMN = 9
+_GAP = 1
+
+
+def column_chart(
+    entries: list[dict],
+    *,
+    width: int,
+    height: int = 6,
+    glyphs: str = "blocks",
+    style: str = "accent",
+    label: str = "",
+    unit: str = "",
+) -> dict:
+    """One column per bucket, drawn from the values the route returned.
+
+    ``entries`` is ``[{"label": str, "value": float|None, "text": str}]`` --
+    bucket keys and already-formatted figures. This renderer never recomputes a
+    rate, never merges a bucket and never fills a gap with a zero.
+
+    ``text`` rides above its column only when EVERY label fits the column it
+    belongs to: a truncated "12…" over a bar is a wrong number wearing the
+    bar's authority, and the table beside the chart always carries the exact
+    figure. The axis keeps the first and the last key whatever the squeeze, plus
+    as many in between as their own columns can hold.
+
+    Returns ``{"available", "lines", "columns", "column_width", "used_width",
+    "span", "peak", "peak_text", "measured", "gaps", "note"}``; the caller
+    escapes and paints the runs.
+    """
+    rows = [e for e in (entries or []) if isinstance(e, dict)]
+    width = max(8, int(width))
+    height = max(2, int(height))
+    if not rows:
+        return {"available": False, "lines": [], "columns": 0,
+                "note": "no buckets in this response"}
+
+    values = [float(e["value"]) if e.get("value") is not None else None for e in rows]
+    texts = [str(e.get("text") or "") for e in rows]
+    keys = [str(e.get("label") or "") for e in rows]
+    count = len(rows)
+    gap = _GAP if count > 1 else 0
+    col_w = max(1, min(_MAX_COLUMN, (width - gap * (count - 1)) // count))
+    used = count * col_w + gap * (count - 1)
+    full, ramp = ((_BLOCK_FULL, _BLOCK_RAMP) if glyphs != "ascii"
+                  else (_ASCII_FULL, _ASCII_RAMP))
+    peak = max((v for v in values if v is not None), default=0.0)
+    measured = sum(1 for v in values if v is not None)
+    gaps = count - measured
+    # A measured zero is a MEASUREMENT (the bucket answered, and answered none);
+    # a gap is the absence of one. The picture draws them differently, and the
+    # caption has to say the difference in words as well or a stub on the
+    # baseline reads as "no data" to the reader it means the opposite for.
+    zeros = sum(1 for v in values if v is not None and v <= 0)
+    lines: list[list[Run]] = []
+
+    # Labels first: a label that would be cut is a label that lies, so the whole
+    # row is dropped rather than thinned to the columns that happen to be short.
+    label_row = bool(texts) and all(len(t) <= col_w for t in texts if t) and any(texts)
+    if label_row:
+        line: list[Run] = []
+        for index, text in enumerate(texts):
+            if index:
+                line.append(Run(" " * gap))
+            left = (col_w - len(text)) // 2
+            line.append(Run(" " * left + text + " " * (col_w - left - len(text)), "muted"))
+        lines.append(line)
+
+    # Top level down to the baseline. A column is FULL for every level it clears,
+    # shows one ramp glyph for the level it only partly reaches, and shows
+    # nothing at all where nothing was measured.
+    for level in range(height, 0, -1):
+        line = []
+        for index, value in enumerate(values):
+            if index:
+                line.append(Run(" " * gap))
+            if value is None:
+                line.append(Run(" " * col_w))
+                continue
+            if value <= 0:
+                # Measured zero: one cell, and only on the baseline.
+                line.append(Run(ramp[0] * col_w if level == 1 else " " * col_w, "warn"))
+                continue
+            reach = (value / peak * height) if peak > 0 else 0.0
+            if reach >= level:
+                line.append(Run(full * col_w, style))
+            elif level - reach < 1:
+                step = int(round((reach - (level - 1)) * (len(ramp) - 1)))
+                line.append(Run(ramp[max(0, min(len(ramp) - 1, step))] * col_w, style))
+            else:
+                line.append(Run(" " * col_w))
+        lines.append(line)
+
+    # The axis: first and last whenever they FIT (a chart you cannot read the
+    # ends of is decoration), then every key once the columns are wide enough to
+    # hold one each -- a tick every third bar is a guess about which bar is
+    # which. A key that does not fit its own column is DROPPED, never cut: "10-"
+    # is not a shortened date, it is a wrong one with the chart's authority. The
+    # caption under the chart always spells the full span out.
+    marks = {0, count - 1}
+    if count <= max(2, width // 12):
+        marks.update(range(count))
+    axis: list[Run] = []
+    for index in range(count):
+        if index:
+            axis.append(Run(" " * gap))
+        key = keys[index] if index in marks else ""
+        keep = key if len(key) <= col_w else ""
+        left = (col_w - len(keep)) // 2
+        axis.append(Run(" " * left + keep + " " * (col_w - left - len(keep)), "muted"))
+    if not any(str(run.text).strip() for run in axis):
+        # Nothing fits a column (24 hours at eighty columns leaves two cells
+        # each). The ENDS still have the whole row to sit in, and a picture with
+        # no ends at all is a shape the reader cannot place in time.
+        first, last = str(keys[0] or ""), str(keys[-1] or "")
+        if count > 1 and first and last and len(first) + len(last) + 4 <= used:
+            axis = [Run(first, "muted"),
+                    Run(" " * (used - len(first) - len(last)), "muted"),
+                    Run(last, "muted")]
+        else:
+            axis = [Run("", "muted")]
+    lines.append(axis)
+
+    top = max(
+        ((i, v) for i, v in enumerate(values) if v is not None),
+        key=lambda pair: pair[1],
+        default=(0, 0.0),
+    )
+    peak_text = texts[top[0]] if texts and top[0] < len(texts) else ""
+    note = unit and (f"{measured} of {count} buckets measured \u00b7 peak {peak_text} {unit}") or (
+        f"{measured} of {count} buckets measured"
+    )
+    return {
+        "available": True,
+        "lines": lines,
+        "columns": count,
+        "column_width": col_w,
+        "used_width": used,
+        "span": (keys[0], keys[-1]) if count > 1 else (keys[0], keys[0]),
+        "peak": peak,
+        "peak_text": peak_text,
+        "peak_key": keys[top[0]] if count else "",
+        "measured": measured,
+        "gaps": gaps,
+        "zeros": zeros,
+        "label": label,
+        "note": note,
+    }
+
+
+# ---------------------------------------------------------------------------
 # month view: Monday-first calendar heat grid
 # ---------------------------------------------------------------------------
 

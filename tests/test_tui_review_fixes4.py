@@ -196,12 +196,16 @@ def test_a_failed_hour_read_says_so_instead_of_reusing_the_name(api, lens):
                     and rows_of(app.query_one("#sp-table", DataTable)) == before), {
             "note": note, "rows": before,
         }
-        assert "could not be read" in note, note
-        assert "series read exploded" in note, note
+        # The strip is the ONE amber line and it stays readable at a glance; the
+        # reason the read died is said under the table, where it cannot be read as
+        # a heading over another series' rates. Both are on screen; neither is a
+        # third line above the picture.
+        assert "update failed" in note, note
         assert "r Retry" in note, note
         assert SHARED_MODEL in note, note  # the rows still belong to model one
         assert rows_of(app.query_one("#sp-table", DataTable)) == before
         assert SECOND_MODEL in detail_of(app), detail_of(app)
+        assert "series read exploded" in detail_of(app), detail_of(app)
 
     run(api, body)
 
@@ -215,12 +219,12 @@ def test_the_next_snapshot_read_pays_the_series_debt(api):
         api.hooks["speed"] = series_hook(second_hour, boom=RuntimeError("series read exploded"))
         await choose_second(app, pilot)
         await settle(pilot, 2)
-        assert "could not be read" in fold(app, "#sp-note")
+        assert "update failed" in fold(app, "#sp-note")
         api.hooks.pop("speed", None)
         app.action_refresh()
         await settle(pilot, 5)
         note = fold(app, "#sp-note")
-        assert "could not be read" not in note, note
+        assert "update failed" not in note, note
         assert "still loading" not in note, note
 
     run(api, body)

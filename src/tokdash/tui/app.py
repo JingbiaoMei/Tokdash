@@ -44,7 +44,7 @@ from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Container, Horizontal, Vertical
 from textual.events import Key, Resize
 from textual.screen import ModalScreen
 from textual.worker import WorkerCancelled
@@ -59,6 +59,7 @@ from textual.widgets import (
     Static,
     TabbedContent,
     TabPane,
+    Tabs,
 )
 
 from ..api import REPORT_FACETS, CacheBackpressureError, _local_today
@@ -96,7 +97,7 @@ from .formatting import (
     tool_label,
     tool_tint,
 )
-from .charts import quota_detail_rows, quota_table
+from .charts import column_chart, quota_detail_rows, quota_table
 from .ranges import (
     ALL_PERIOD,
     PRESETS,
@@ -123,6 +124,20 @@ STALE_REREAD_SECONDS = 12.0
 SESSION_FANOUT = 3
 
 PANI = ("overview", "sessions", "stats", "report", "speed", "quota", "pricing")
+# Each pane's ONE status strip: the place it says "this is pending / partial /
+# failed / still building". A pane gets exactly one, so a reader who wants to
+# know whether the figures are trustworthy never has to scan the page.
+PANE_ALERT = {
+    "overview": "#ov-note",
+    "sessions": "#sn-note",
+    "stats": "#st-window",
+    "speed": "#sp-note",
+    "quota": "#quota-note",
+    "pricing": "#pr-note",
+}
+# What each pane's figures COVER, worded so it never repeats the dates the
+# range strip above already prints. Stats keeps its own window text: the strip
+# is hidden there, so this is the one and only place those dates appear.
 PANE_TITLES = {
     "overview": "Overview",
     "sessions": "Sessions",
@@ -174,6 +189,10 @@ def _num_cell(value: str) -> Text:
     return Text(value, justify="right")
 
 
+#: The badge's edge: a half block in the source's own colour, set on the chip.
+_BADGE_EDGE = "▌"
+
+
 def _source_cell(tool: object, label: object = None) -> Text:
     """A source name in its own palette colour.
 
@@ -185,7 +204,31 @@ def _source_cell(tool: object, label: object = None) -> Text:
     Monochrome filter for NO_COLOR), leaving the same words.
     """
     text = str(label or tool or EM_DASH)
-    return Text(text, style=f"bold {tool_tint(tool)}")
+    tint = tool_tint(tool)
+    if _safe_glyphs() == "ascii":
+        # Half blocks do not exist here; the coloured word still carries it.
+        return Text(text, style=f"bold {tint}")
+    # The approved design marks each source with a badge. A table cell has no
+    # badge, so it borrows the two things that make one legible: an accent edge
+    # and a chip of background. Colour alone left a column of tints that a
+    # reader had to read word by word to tell apart.
+    return Text.assemble(
+        (_BADGE_EDGE, f"bold {tint} on #1a2331"),
+        (text, f"bold {tint} on #1a2331"),
+    )
+
+
+def _source_text(tool: object, label: object = None) -> str:
+    """What `_source_cell` will occupy, as a plain string.
+
+    The column fit sizes a column from the text it is told to expect. Handed the
+    bare label it reserves the label's width, the badge then adds its edge, and
+    the cell arrives "claude,code..." -- a value clipped by its own decoration.
+    """
+    text = str(label or tool or EM_DASH)
+    if _safe_glyphs() == "ascii":
+        return text
+    return f"{_BADGE_EDGE}{text}"
 
 
 def _clamp_report_width(raw: int) -> int:
@@ -371,8 +414,22 @@ class TokdashApp(App):
     CSS = """
     App { background: #0d1118; color: #e3eaf3; }
     Header { background: #121924; color: #b9a7ff; }
-    Footer { background: #121924; color: #a0adbf; }
-    #status { height: 1; background: #121924; color: #a0adbf; padding: 0 1; }
+    /* The pane's own strip below is the ONE footer row the design asks for: it
+       names the keys this pane answers and how fresh its figures are. Textual's
+       Footer repeats three of those keys in a second band, so it is off and the
+       strip carries q / r / ? itself. */
+    Footer { display: none; }
+
+    /* One quiet strip at the foot of the screen: the keys THIS pane answers, then
+       what the data cost to get. It sits at the bottom on purpose -- at the top it
+       competed with the page it described, and its longest member (the database
+       line) is a diagnostic, not a headline. */
+    /* Height auto, never a fixed 1: at eighty columns the pane's keys, the cache
+       age and the database line do not share a row, and a strip that overflows
+       the screen does not wrap -- it is CUT, losing whichever half the terminal
+       did not have room for. Two rows costs the page one line; a truncated strip
+       costs the reader the freshness of the numbers they are about to act on. */
+    #status { height: auto; max-height: 2; background: #121924; color: #7f8da3; padding: 0 1; }
 
     /* The shared scope strip: surface fill, no outlines (revision 5). */
     #rangebar { height: auto; background: #121924; padding: 0 1 0 1; }
@@ -398,14 +455,57 @@ class TokdashApp(App):
     Tab.-active { background: #b9a7ff; color: #12121a; text-style: bold; }
     TabPane { background: #0d1118; padding: 0 1; height: 1fr; overflow-y: auto; }
 
-    /* Section separation is spacing + surface tone; the only rule left in a
-       table is the header separator. */
+    /* THE SECTION ORDER, one law for every pane: navigation (the tabs) -> range
+       (the strip under them) -> page title and scope -> view controls -> content.
+       Separation is spacing and surface tone; what is left with a rule is a table
+       header, a search box, and the outline that says where the keyboard is. */
+    /* The page head: what this page is, and what its numbers cover. It gets a
+       blank row above it because it is the boundary between the machinery at the
+       top of the screen (tabs, range) and the page itself. */
+    .head { height: 2; padding: 1 0 0 0; }
+    .head-title { width: auto; color: #dce6f2; text-style: bold; }
+    .head-scope { width: 1fr; text-align: right; color: #7f8da3; padding: 0 0 0 2; }
+    .tools { height: auto; padding: 0; margin-top: 1; }
+    .tools .fill { width: 1fr; background: transparent; }
     Section { margin-top: 1; }
     Static { background: transparent; }
     .label { color: #8fa0b8; }
 
+    /* A content surface: the navy panel for a summary, a chart or a table. The
+       padding keeps a figure off the panel edge; the margin-top is the ONE blank
+       row between major sections. */
+    .surface { background: #121924; padding: 1 2 0 2; margin-top: 1; }
+    /* The ONE status strip a pane owns -- pending, failed, partial, building. The
+       strip says there is news; the colour of the words says how bad it is. */
+    .alert { background: #171e29; padding: 0 1; margin-top: 1; }
+
+    /* A scrollbar is part of the panel it belongs to, not an announcement. The
+       palette reserves its bright tones for the keyboard's position and for a
+       figure; Textual's default primary-coloured thumb turned every tall table
+       into a strip of cyan two rows wide. */
+    ScrollBar { background: #121924; color: #31405a; }
+    ScrollBar:hover { color: #44566f; }
+    /* The thumb colours live on the SCROLLABLE widget, not on ScrollBar: with
+       only the rules above every pane still drew Textual's default bright thumb
+       down its right edge, two cells wide, over the last column of the table
+       underneath it. */
+    TabPane {
+        scrollbar-color: #31405a;
+        scrollbar-background: #121924;
+    }
+    TabPane:hover { scrollbar-color: #44566f; }
+
     DataTable {
         height: auto; background: #121924; border: none; padding: 0 1;
+        margin-top: 1;
+        scrollbar-color: #31405a;
+        scrollbar-background: #121924;
+    }
+    DataTable:hover { scrollbar-color: #44566f; }
+    /* A caption under a table explains the figures above it; it is not one. */
+    #ov-detail, #sn-detail, #st-day, #sp-detail, #quota-detail, #rp-hints {
+        color: #7f8da3;
+        margin-top: 1;
     }
     DataTable > .datatable--header {
         background: #121924; color: #8fa0b8; text-style: bold;
@@ -441,12 +541,62 @@ class TokdashApp(App):
        one scrollable pane, whichever one lands lower is the one whose tail sits
        under the clip, and a clipped table does not know it is clipped. */
     #sn-table { max-height: 45%; }
-    /* Speed obeys the same law, and needs it more than the others: its hour
-       view is 24 rows of its own, and it has a note above AND a caption below,
-       so any height the note does not keep gets taken back from the pane. Bounded
-       here, the table scrolls itself, the cursor drags the view with it, and the
-       caption underneath stays on screen instead of sliding off the bottom. */
-    #sp-table { max-height: 55%; }
+    /* Speed's hour view is 24 rows of its own and its trend view can be a month
+       of them, with a strip above and a caption below, so the table gets the
+       room that is LEFT rather than the room its rows would like. Given that, it
+       scrolls itself: the cursor drags the view, the rows below the fold stay
+       reachable, and the caption underneath never slides off the bottom. A table
+       sized by its rows instead walks straight out of the terminal, and a table
+       clipped by the terminal does not know it has been clipped.
+
+       The chart rides BESIDE the table when the pane can give both their own
+       columns, and ABOVE it when it cannot. The same widgets move -- #sp-table
+       keeps its cursor, its fitted columns and its scroll position -- because a
+       second table for the wide layout would be a second source of truth. */
+    /* Speed is the ONE pane that does not scroll, because it is the one pane with
+       a 1fr child: a scrollable pane hands a flexible table all the leftover
+       space and then lays the caption BELOW the viewport, so the row that
+       explains the figures sits under the status strip and nobody can reach it
+       (measured: the caption's region started one row past the pane's last
+       visible line). With the scroll off, the fixed rows above take what they
+       need and the table takes exactly the rest. */
+    #pane-speed { overflow-y: hidden; }
+    /* Height is set by _speed_size_series, in rows, from the pane's own ledger:
+       a min-height here would be a second authority spending the same rows, and
+       the rows it took came off the caption below. */
+    /* The panel the picture and the rows sit on. It carries the fill so the two
+       of them read as ONE surface with a gutter of tone between them, and a
+       short table (seven buckets beside a tall picture) leaves navy behind it
+       rather than a hole punched down to the status strip. */
+    #sp-series { width: 1fr; height: 1fr; layout: vertical; background: #121924; }
+    #sp-series.-split { layout: horizontal; }
+    /* The chart is drawn to a width computed from the pane, so its box takes its
+       own content width instead of a share of a layout it cannot measure. */
+    #sp-chart { width: auto; height: auto; padding: 0 3 0 0; }
+    /* Stacked (not beside the table), the picture sits one row above the header.
+       The ledger reserves that row in _speed_series_budget, so the margin is the
+       spend -- not a row stolen from the caption below the box. */
+    #sp-chart.-stacked { margin-bottom: 1; }
+    /* The table takes what the picture leaves, and its floor has to be small
+       enough to survive being left very little: with a floor of seven rows the
+       container's children added up to MORE than the container, and a vertical
+       layout honours its children -- the table landed below the pane, below the
+       status strip, past the screen. Four rows (header plus three) is a table a
+       reader can still arrow through; a table off the screen is not a table. */
+    #sp-series #sp-table { width: 1fr; height: 1fr; min-height: 4; margin-top: 0; }
+    /* At 24 rows the blank row between sections is a row the TABLE lost, so the
+       air gives way and the page order does not. One flag, set by _apply_density,
+       moves the whole screen -- a layout that thinned itself widget by widget
+       would leave the page reading differently at every size. */
+    #tabs.-compact .head { height: 1; padding: 0; }
+    #tabs.-compact .tools, #tabs.-compact .alert, #tabs.-compact .surface,
+    #tabs.-compact DataTable, #tabs.-compact .head { margin-top: 0; }
+    #tabs.-compact #ov-detail, #tabs.-compact #sn-detail, #tabs.-compact #st-day,
+    #tabs.-compact #sp-detail, #tabs.-compact #quota-detail,
+    #tabs.-compact #rp-hints { margin-top: 0; }
+    /* BESIDE the table, the chart's caption is that row's bottom edge, so the
+       table starts at the same top line rather than one row lower. */
+    #sp-series.-split #sp-table { margin-top: 0; }
     /* The two tables that share their pane with a note and (for quota) a detail
        block obey it too, for the same reason and at a size that keeps those
        neighbours on screen. A pricing database is a few hundred models wide:
@@ -460,20 +610,26 @@ class TokdashApp(App):
        table to the bottom. Toolbars are one row tall, always. */
     .toggle { height: auto; }
     #controls { height: auto; background: transparent; padding: 0; }
-    #controls Button, .toggle Button {
+    #controls Button, .toggle Button, .tools Button {
         width: auto; min-width: 0;
         background: #1b2534; color: #a0adbf; border: none; padding: 0 1;
         margin: 0 1 0 0; text-style: none;
     }
     /* -active is Textual's 200 ms press flash. -selected is ours: the only
        thing that says which preset, subview or lens is in force. */
-    #controls Button.-active, .toggle Button.-active,
-    #controls Button.-selected, .toggle Button.-selected {
+    #controls Button.-active, .toggle Button.-active, .tools Button.-active,
+    #controls Button.-selected, .toggle Button.-selected, .tools Button.-selected {
         background: #b9a7ff; color: #12121a; text-style: bold;
     }
-    #controls Button:focus, .toggle Button:focus {
+    #controls Button:focus, .toggle Button:focus, .tools Button:focus {
         background: #253044; color: #e3eaf3; text-style: bold underline;
     }
+    /* A picker BUTTON is a labelled VALUE, not a command: it reads "Series:
+       gpt-5.1-codex" because a bare "Series" button cannot say what is selected,
+       and a control that hides the current series hides the thing the reader is
+       most likely checking. */
+    .picker { background: #16202e; }
+    .picker.-off { color: #6c7a90; }
 
     #view-picker { padding: 1 2; background: #121924; border: round #344157; width: 60; height: auto; }
     #view-picker-title { color: #b9a7ff; text-style: bold; }
@@ -481,7 +637,8 @@ class TokdashApp(App):
     ListItem:focus { background: #263141; }
     ListItem > Static { background: transparent; color: #cdd8e6; }
     ListItem:focus > Static { background: #263141; }
-    """
+"""
+
 
     BINDINGS = [
         # F-keys are the stable view keys; 1/2/3 stay as legacy shortcuts for the
@@ -564,7 +721,30 @@ class TokdashApp(App):
         # under the scope that produced it; see _scope_ok.
         self._payload_scope: dict[str, tuple | None] = dict.fromkeys(PANI, None)
         self._db_line: str | None = None
+        self._fit_pending = False  # a pane re-fit is already queued
+        # Rows #sp-series was holding when the Speed picture was last drawn, and
+        # the height of the picture that went in. The first paint of a pane runs
+        # before Textual has any geometry, so the picture is sized from an
+        # estimate; _fit_panes compares these against the settled frame and
+        # repaints once when the estimate was wrong. See _speed_series_rows.
+        self._sp_series_painted = (-1,)
+        self._sp_chart_rows = 0
+        # Does the mode now on screen draw a picture beside/above its rows?
+        self._sp_chart_wanted = False
+        self._sp_chart_budget = 0
+        # Same ledger for Overview's activity picture: the basis it was sized on.
+        self._activity_painted = (-1,)
         self._polling = False
+        # Which row's detail #sp-detail is holding ("comparison" | "bucket" |
+        # "hour", or None for the view's own caption). A pane repaints on a
+        # snapshot update, a resize and the row-ledger refit; without this, every
+        # one of those repaints replaced the opened row's explanation with the
+        # view caption, which reads as the row having been forgotten.
+        self._sp_detail_kind: str | None = None
+        self._sp_detail_key: object = None
+        # Rows the caption under the Speed box was ALLOCATED by the last paint
+        # (or asked for by an Enter that has not been paid for yet).
+        self._sp_detail_wanted = 0
         # Overview
         self._ov_usage: dict | None = None
         self._ov_active: dict | None = None
@@ -597,6 +777,9 @@ class TokdashApp(App):
         self._rp_insights_failed = False
         self._rp_section = "summary"
         self._rp_project_sort = "tokens"
+        # Rows are the scarce dimension: 24 of them is a different page from 36,
+        # and _apply_density decides which of the two this terminal is on.
+        self._compact = False
         # Speed
         self._sp_mode = "across"
         self._sp_lens = "stream"
@@ -649,40 +832,77 @@ class TokdashApp(App):
 
     # ------------------------------------------------------------------ UI --
 
+    @staticmethod
+    def _build_rangebar() -> Horizontal:
+        """The one range strip every dated pane shares, built for its slot.
+
+        Presets are shortcuts, so they come first; the exact inclusive dates are
+        the truth, so they are the last thing on the row and the last thing a
+        narrow terminal gives up (see _visible_presets).
+        """
+        return Horizontal(
+            *[
+                Button(preset.short, id=f"range-{preset.key}", variant="default")
+                for preset in PRESETS
+            ],
+            Button("More...", id="range-more", variant="default"),
+            Static("", id="range-dates"),
+            Input(placeholder="YYYY-MM-DD .. YYYY-MM-DD", id="range-dates-input"),
+            id="rangebar",
+        )
+
+
     def compose(self) -> ComposeResult:
+        # THE FRAME, top to bottom: brand, navigation, range, one page, keys.
+        # The range strip is re-parented under the tab row in on_mount, because
+        # Textual's TabbedContent owns both the tab row and the panes -- a strip
+        # yielded here lands ABOVE the navigation it belongs under.
         yield Header()
-        yield Static("", id="status")
-        with Horizontal(id="rangebar"):
-            for preset in PRESETS:
-                yield Button(preset.short, id=f"range-{preset.key}", variant="default")
-            yield Button("More...", id="range-more", variant="default")
-            yield Static("", id="range-dates")
-            yield Input(placeholder="YYYY-MM-DD .. YYYY-MM-DD", id="range-dates-input")
+        # The shared range strip is NOT composed here. TabbedContent turns any
+        # child that is not a TabPane into a pane of its own -- which is how a
+        # range strip ends up with a blank tab of its own -- so on_mount builds it
+        # and mounts it into the tab widget's child list, in the one gap it
+        # belongs in: under the tabs, above the page.
         with TabbedContent(initial="pane-overview", id="tabs"):
             with TabPane("Overview", id="pane-overview"):
-                yield Static("", id="ov-range")
-                yield Static("", id="ov-note")
-                yield Static("", id="ov-cards")
+                # Page title and scope: ONE line, and it never repeats the dates
+                # the strip above already shows. The alert strip under it is the
+                # only place this pane says anything is wrong.
+                with Horizontal(id="ov-head", classes="head"):
+                    yield Static("Overview", id="ov-title", classes="head-title")
+                    yield Static("", id="ov-scope", classes="head-scope")
+                yield Static("", id="ov-note", classes="alert")
                 with Horizontal(id="ov-subview", classes="toggle"):
                     yield Button("Harnesses", id="ov-tab-harnesses")
                     yield Button("Models", id="ov-tab-models")
+                    yield Static("", id="ov-sort", classes="head-scope")
                 yield Input(placeholder="filter names", id="ov-search")
+                yield Static("", id="ov-cards")
                 yield DataTable(id="ov-table", cursor_type="row", zebra_stripes=False)
                 yield Static("", id="ov-detail")
-                yield Static("", id="ov-activity")
+                yield Static("", id="ov-activity", classes="surface")
             with TabPane("Sessions", id="pane-sessions"):
-                yield Static("", id="sn-note")
+                with Horizontal(id="sn-head", classes="head"):
+                    yield Static("Session explorer", id="sn-title", classes="head-title")
+                    yield Static("", id="sn-scope", classes="head-scope")
+                yield Static("", id="sn-note", classes="alert")
                 yield Input(placeholder="search project, id, model", id="sn-search")
                 yield DataTable(id="sn-table", cursor_type="row", zebra_stripes=False)
                 yield Static("", id="sn-detail")
                 yield DataTable(id="sn-turns", cursor_type="row", zebra_stripes=False)
             with TabPane("Stats", id="pane-stats"):
-                yield Static("", id="st-window")
+                with Horizontal(id="st-head", classes="head"):
+                    yield Static("Year in review", id="st-title", classes="head-title")
+                    yield Static("", id="st-scope", classes="head-scope")
+                yield Static("", id="st-window", classes="alert")
                 yield Static("", id="st-summary")
                 yield Static("", id="st-calendar")
                 yield DataTable(id="st-days", cursor_type="row", zebra_stripes=False)
                 yield Static("", id="st-day")
             with TabPane("Report", id="pane-report"):
+                with Horizontal(id="rp-head", classes="head"):
+                    yield Static("Report", id="rp-title", classes="head-title")
+                    yield Static("", id="rp-scope", classes="head-scope")
                 with Horizontal(id="rp-sections", classes="toggle"):
                     yield Button("Summary", id="rp-tab-summary")
                     yield Button("When", id="rp-tab-when")
@@ -690,25 +910,49 @@ class TokdashApp(App):
                 yield Static("", id="rp-hints")
                 yield Static("", id="rp-body")
             with TabPane("Speed", id="pane-speed"):
-                with Horizontal(id="sp-controls", classes="toggle"):
+                with Horizontal(id="sp-head", classes="head"):
+                    yield Static("Model output speed", id="sp-title", classes="head-title")
+                    yield Static("", id="sp-scope", classes="head-scope")
+                yield Static("", id="sp-note", classes="alert")
+                # MODE left, LENS right. They answer different questions -- which
+                # view, and which population -- and six buttons in one undivided
+                # row read as one group of six.
+                with Horizontal(id="sp-controls", classes="tools"):
                     yield Button("Across models", id="sp-mode-across")
                     yield Button("Trend", id="sp-mode-trend")
                     yield Button("Hour of day", id="sp-mode-hour")
+                    yield Static("", id="sp-controls-fill", classes="fill")
                     yield Button("Per stream", id="sp-lens-stream")
                     yield Button("Combined", id="sp-lens-combined")
-                    yield Button("Whole-request timing", id="sp-windows")
-                yield Static("", id="sp-note")
-                yield DataTable(id="sp-table", cursor_type="row", zebra_stripes=False)
+                # The three selectors a reader could otherwise only reach blind on
+                # a keypress, each labelled with the value it holds, and the
+                # timing preference drawn as the on/off box it is.
+                with Horizontal(id="sp-selectors", classes="tools"):
+                    yield Button("Source", id="sp-pick-source", classes="picker")
+                    yield Button("Series", id="sp-pick-series", classes="picker")
+                    yield Button("Bucket", id="sp-pick-bucket", classes="picker")
+                    yield Static("", id="sp-selectors-fill", classes="fill")
+                    yield Button("Include whole-request timing", id="sp-windows", classes="picker")
+                with Container(id="sp-series"):
+                    yield Static("", id="sp-chart")
+                    yield DataTable(id="sp-table", cursor_type="row", zebra_stripes=False)
                 yield Static("", id="sp-detail")
             with TabPane("Quota", id="pane-quota"):
-                yield Static("", id="quota-note")
+                with Horizontal(id="quota-head", classes="head"):
+                    yield Static("Quota", id="quota-title", classes="head-title")
+                    yield Static("", id="quota-scope", classes="head-scope")
+                yield Static("", id="quota-note", classes="alert")
                 yield DataTable(id="quota-table", cursor_type="row", zebra_stripes=False)
                 yield Static("", id="quota-detail")
                 yield Static("", id="quota-credits")
             with TabPane("Pricing", id="pane-pricing"):
-                yield Static("", id="pr-note")
+                with Horizontal(id="pr-head", classes="head"):
+                    yield Static("Pricing database", id="pr-title", classes="head-title")
+                    yield Static("", id="pr-scope", classes="head-scope")
+                yield Static("", id="pr-note", classes="alert")
                 yield Input(placeholder="search model or alias", id="pr-search")
                 yield DataTable(id="pr-table", cursor_type="row", zebra_stripes=False)
+        yield Static("", id="status")
         yield Footer()
 
     # --------------------------------------------------------------- headers --
@@ -728,7 +972,12 @@ class TokdashApp(App):
             else:
                 table.add_column(label, width=width, key=label)
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
+        # The range strip goes in before anything can read from it. Its slot is
+        # inside the tab widget -- under the tab row, above the panes -- and the
+        # mount must finish before the strip can be painted or hidden.
+        tabs = self.query_one("#tabs", TabbedContent)
+        await tabs.mount(self._build_rangebar(), after=tabs.query_one(Tabs))
         if not hasattr(sys.stdout, "encoding"):
             try:  # hand the real terminal's encoding back to the driver's shim
                 sys.stdout.encoding = _STDOUT_ENCODING
@@ -769,8 +1018,21 @@ class TokdashApp(App):
             widget = self.query_one(wid, Static)
             widget.update("")
             widget.display = False
+        # A strip with nothing to say is a blank tinted band across the page, so
+        # it is hidden rather than merely empty.
+        for wid in ("#ov-note", "#sn-note", "#st-window", "#quota-note", "#pr-note",
+                    "#sp-note", "#ov-activity", "#sp-chart"):
+            widget = self.query_one(wid, Static)
+            widget.update("")
+            widget.display = False
         self.set_interval(1.0, self._tick_status)
         self._refresh_db_line()
+        # Navigation, THEN the range it applies to, THEN the page. Textual's
+        # TabbedContent owns the tab row and the panes together, so the shared
+        # strip is re-parented into the gap between them rather than drawn above
+        # the navigation -- which is also the order a figure gets resolved in:
+        # which view, which window, which page.
+        self._apply_density()
         self._paint_rangebar()
         self._sync_toggle_states()
         # Claim the initial pane here so the TabActivated hook that fires for it
@@ -1350,11 +1612,15 @@ class TokdashApp(App):
         if not wanted or wanted == self._speed_selection_label():
             return "", False
         if self._sp_series_error:
-            return ("selected series could not be read (" + self._sp_series_error
-                    + ") · rows below are the last good series · r Retry", True)
+            # The technical error is NOT here: one strip line has to be readable
+            # at a glance, and the sentence under the table -- where the rows that
+            # belong to another series no longer sit -- carries the reason and the
+            # name that was asked for.
+            return ("series update failed · rows below are the previous series"
+                    " · r Retry", True)
         if self._sp_series_pending:
-            return ("selected series is still loading · "
-                    "rows below are the previous series", True)
+            return ("series still loading · rows below are the previous series",
+                    True)
         return "", False
 
     def _speed_series_warning_lines(self) -> list[list[Run]]:
@@ -1622,39 +1888,51 @@ class TokdashApp(App):
         new one: the moment a load starts the pane clears to a dim notice. First
         run (and an error-stated pane) keep the longer skeleton copy instead."""
         notice = (
-            emit_markup([[Run("computing…", "muted")]])
+            [[Run("computing…", "muted")]]
             if self._state[pane] == "ok"
             else _SKELETON
         )
+        # _set_alert takes run-lines; a Static takes markup. The Report body IS a
+        # Static, and handing it the list raised VisualError INSIDE _begin_load --
+        # which killed the reload before it issued a read, left the pane counting
+        # a load that would never end, and left the previous document on screen.
+        notice_markup = notice if isinstance(notice, str) else emit_markup(notice)
+        # The head keeps naming the page and what it covers while the numbers are
+        # on their way -- only the figures go. The strip goes through _set_alert
+        # because a strip hidden for the healthy case has to be UN-hidden by
+        # whoever puts text into it.
+        self._paint_scope(pane)
+        if pane != "report":
+            # Report is a document rather than a table with a caption: its body
+            # carries its own state line, so it gets no strip above it.
+            self._set_alert(pane, notice)
         if pane == "overview":
-            self.query_one("#ov-range", Static).update(notice)
             self.query_one("#ov-cards", Static).update("")
-            self.query_one("#ov-activity", Static).update("")
+            activity = self.query_one("#ov-activity", Static)
+            activity.update("")
+            activity.display = False
+            self._activity_painted = (-1,)
             self.query_one("#ov-table", DataTable).clear()
             self.query_one("#ov-detail", Static).display = False
         elif pane == "sessions":
-            self.query_one("#sn-note", Static).update(notice)
             self.query_one("#sn-table", DataTable).clear()
         elif pane == "stats":
-            self.query_one("#st-window", Static).update(notice)
             self.query_one("#st-summary", Static).update("")
             self.query_one("#st-calendar", Static).update("")
             self.query_one("#st-days", DataTable).clear()
         elif pane == "report":
-            self.query_one("#rp-body", Static).update(notice)
+            self.query_one("#rp-body", Static).update(notice_markup)
         elif pane == "speed":
-            self.query_one("#sp-note", Static).update(notice)
             self.query_one("#sp-table", DataTable).clear()
+            self.query_one("#sp-chart", Static).display = False
             self.query_one("#sp-detail", Static).display = False
         elif pane == "pricing":
-            self.query_one("#pr-note", Static).update(notice)
             self.query_one("#pr-table", DataTable).clear()
         else:
             # The credits section and the account detail are painted by the
             # same load, so they clear with the table: a reload that left the
             # last grants standing would show a second window's figures under
             # the "computing" notice.
-            self.query_one("#quota-note", Static).update(notice)
             self.query_one("#quota-table", DataTable).clear()
             self.query_one("#quota-credits", Static).display = False
             detail = self.query_one("#quota-detail", Static)
@@ -1784,21 +2062,20 @@ class TokdashApp(App):
             self.exit(return_code=1)
             return
         if isinstance(err, CacheBackpressureError):
-            msg = "busy computing — press r"
+            # Its own sentence, with its own instruction: back-pressure is not a
+            # fault and "error: busy computing" blames the reader for a full
+            # queue they did not cause.
+            line = Text("busy computing — press r", style="bold red")
         else:
-            msg = f"error: {err}"
-        line = "[red]" + msg.replace("[", "\\[") + "[/]"
+            line = (Text("error: ", style="bold red")
+                    + Text(str(err).replace("[", "\\["), style="red"))
         self._state[pane] = "error"
-        target = {
-            "overview": "#ov-range",
-            "sessions": "#sn-note",
-            "stats": "#st-window",
-            "report": "#rp-body",
-            "speed": "#sp-note",
-            "quota": "#quota-note",
-            "pricing": "#pr-note",
-        }[pane]
-        self.query_one(target, Static).update(line)
+        if pane == "report":
+            # Report's body IS the document; a strip over a blank page would leave
+            # the reader hunting for the failure.
+            self.query_one("#rp-body", Static).update(line)
+        else:
+            self._set_alert(pane, line)
         self._update_status()
 
     # ------------------------------------------------------------- status --
@@ -1807,34 +2084,142 @@ class TokdashApp(App):
         active = self.query_one("#tabs", TabbedContent).active or "pane-overview"
         return active.replace("pane-", "")
 
+    #: The keys THIS pane answers, in the order a reader meets the controls.
+    #: They sit at the foot of the screen because they are instructions, not
+    #: data: nothing here may compete with a figure or cost a table a row.
+    PANE_KEYS = {
+        "overview": "/ search · s sort · enter open · esc close · [ ] range · c dates",
+        "sessions": "/ search · s sort · h sources · enter whole session · [ ] range",
+        "stats": "p year · P next year · ← → month · enter day opens overview",
+        "report": "← → section · s sorts projects · [ ] range",
+        # Speed's selectors are on screen LABELED with what they hold, but a
+        # keyboard-only reader still needs the letter each one answers to, and
+        # this is the one row that is always visible while they are looking at it.
+        "speed": "h source · k series · b bucket · x timing · enter detail · [ ] range",
+        "quota": "u poll now · enter account detail",
+        "pricing": "/ search · read-only",
+    }
+
     def _update_status(self) -> None:
+        """The foot of the screen: this pane's keys, then what its data cost.
+
+        Series identity, window and warnings belong to the pane above, beside the
+        figures they describe. This row answers a different question -- what can I
+        press, and how fresh is this. It is the one place on the screen where text
+        may not be cut off by the terminal's width, because every member of it is
+        true information the reader cannot re-derive: on a narrow terminal it
+        becomes two rows instead of losing its tail.
+        """
         pane = self._active_pane()
-        range_keys = " · [ ] range · c custom"
-        hints = {
-            "overview": "/ search · s sort · enter open · Esc close" + range_keys,
-            "sessions": "/ search · s sort · h sources · enter whole session" + range_keys,
-            "stats": "p year · enter day opens Overview",
-            "report": "s sorts projects" + range_keys,
-            "speed": "k series · b bucket · h source · enter details" + range_keys,
-            "quota": "u poll · enter account detail",
-            "pricing": "/ search · read-only",
-        }
-        # Overview repeats its window inside the pane, so only Overview pays for
-        # it twice on the status line. The others spend the room on the keys and
-        # the cache state, which the strip above cannot say.
-        scope = (
-            self._win.describe() if pane == "overview"
-            else self._stats_win.describe(self._today) if pane == "stats"
-            else "current snapshots" if pane in ("quota", "pricing")
-            else ""
-        )
-        parts = [PANE_TITLES[pane], scope, hints[pane],
-                 self._cache_str.get(pane, "cache —"), self._ensure_db_line()]
-        line = " · ".join(escape(part) for part in parts if part)
+        keys = self.PANE_KEYS[pane]
         started = self._load_started.get(pane)
-        if started is not None:
-            line += f" · computing… {int(time.monotonic() - started)}s"
-        self.query_one("#status", Static).update(line)
+        computing = (
+            f"computing… {int(time.monotonic() - started)}s" if started is not None else ""
+        )
+        cache = self._cache_str.get(pane, "cache —")
+        # The WHOLE database line: where the store is, how big it is, or the
+        # name of the variable that turned it off. It is the only place on the
+        # screen that answers "which database are these numbers from", and the
+        # short form of it could read "ready" before the read had landed.
+        db = self._ensure_db_line()
+        room = max(0, self._pane_screen_width())
+        tail_keys = f"{keys} · r reload · ? keys · q quit"
+        # The keys that are the same on every pane ride along with the keys
+        # that are not, but only while the row can hold them: at 80 columns a
+        # global tail pushed the freshness line off a two-row strip, which is
+        # the one piece of footer a reader cannot get anywhere else.
+        line = "  ".join(
+            escape(part)
+            for part in (tail_keys if cell_len(tail_keys) <= room else keys,
+                        computing, cache, db) if part)
+        status = self.query_one("#status", Static)
+        if cell_len(line) <= room:
+            status.update(line)
+        else:
+            # Too wide for one row: the keys keep the first row whole and the
+            # data cost gets the second, in the order a reader needs it -- is
+            # it still computing, how old is it, where did it come from. A
+            # member leaves only when the second row cannot hold them, and
+            # then it is the least actionable one that goes.
+            first = tail_keys if cell_len(tail_keys) <= room else keys
+            for parts in ((computing, cache, db), (computing, cache),
+                          (cache, db), (computing,), (cache,), ()):  # noqa: B007
+                second = "  ".join(escape(part) for part in parts if part)
+                if cell_len(second) <= room:
+                    break
+            status.update(Text.from_markup(f"{escape(first)}\n{second}"))
+        # The strip's height is now decided, and the panes are sized against the
+        # space left below the frame -- so this is the moment to hand them back
+        # any row the frame was drawing over.
+        self._fit_panes()
+
+    def _fit_panes(self) -> None:
+        """Hand every pane back the rows the frame was drawing over.
+
+        A TabPane is measured against its container, not against the widgets
+        mounted above it inside that container -- the tab strip, and the shared
+        range strip this app re-parents into the tab widget. The pane it draws
+        therefore reaches one or two rows PAST the space the screen kept for it,
+        and the status strip paints over the difference. Losing a row silently
+        would be bad enough; the real damage is that the pane believes its
+        viewport is that much taller, so a table clipped by the screen does not
+        know it is clipped and never scrolls the hidden rows into view.
+
+        Measured rather than hard-coded: the range strip is hidden on the three
+        panes that own their own window (Stats, Quota, Pricing), so the overlap
+        belongs to the frame as it stands, not to the widget tree.
+        """
+        limit = self.query_one("#status", Static).region.y
+        if limit <= 0:
+            return  # nothing is laid out yet; a resize or the next paint retries
+        changed = False
+        for pane in self.query(TabPane):
+            if pane.region.height == 0:
+                continue  # an inactive pane has no geometry to measure
+            # An EXPLICIT height, not padding: padding leaves the pane's own box
+            # where it was and only moves its contents, so the next measurement
+            # would disagree with the last and the two would chase each other.
+            # A set height is honoured to the row, which makes the second call
+            # compute exactly what the first one set.
+            room = max(1, limit - pane.region.y)
+            if pane.region.height != room:
+                pane.styles.height = f"{room}"
+                changed = True
+        if changed and not self._fit_pending:
+            # The strip's own height is only known once the frame has been laid
+            # out with the text just written into it, so the first measurement
+            # can be one row out. One more pass after the refresh sees the
+            # settled frame; the second pass changes nothing, so it stops.
+            self._fit_pending = True
+            self.call_after_refresh(self._fit_after_refresh)
+
+    def _speed_series_stale(self) -> bool:
+        """Has Speed's series box changed size since the picture was drawn?
+
+        Guarded by the number the paint recorded, so the repaint that fixes it
+        settles rather than chasing itself: the second reading equals the first.
+        """
+        if self._active_pane() != "speed":
+            return False
+        stamp = self._speed_series_stamp()
+        return self._sp_series_painted != (-1,) and stamp != self._sp_series_painted
+
+    def _refit_speed_series(self) -> None:
+        """Size the picture against the box the layout actually gave it.
+
+        Runs on the refresh after the paint that had to guess, and stops as soon
+        as the box agrees with the picture: the repaint records the same number
+        it just read, so the second pass finds nothing to do. Waiting for the
+        status tick instead would leave the pane showing a picture that overflows
+        its container -- and the rows it stole are the table's -- for up to a
+        second after every mode change, resize and reload.
+        """
+        if self._active_pane() == "speed" and self._speed_series_stale():
+            self._repaint_pane("speed")
+
+    def _fit_after_refresh(self) -> None:
+        self._fit_pending = False
+        self._fit_panes()
 
     def _tick_status(self) -> None:
         if self._load_started:
@@ -2006,12 +2391,24 @@ class TokdashApp(App):
             )
             self.push_screen(ChoicePicker("Sources to read", options, active), self._on_sources)
         elif pane == "speed":
-            options = [("All measured sources", "")]
-            options += [(f"only {source}", source) for source in self._speed_inventory()]
-            self.push_screen(
-                ChoicePicker("Source to measure", options, self._sp_source or ""),
-                self._on_speed_source,
-            )
+            # The same chooser Sessions uses, over the scan's OWN inventory. A
+            # blind cycle was the earlier answer and it stranded readers two
+            # options deep: once a filter is in place the response answers for
+            # ONE source, so a walk built from what is on screen can only
+            # alternate between that source and All. The list is also the only
+            # place that shows the sources that were never measured at all.
+            self._choose_speed_source()
+
+    def _choose_speed_source(self) -> None:
+        """``h``, or the labelled Source button: the whole list, in one pick."""
+        if self._active_pane() != "speed":
+            return
+        options = [("All measured sources", "")]
+        options += [(f"only {source}", source) for source in self._speed_inventory()]
+        self.push_screen(
+            ChoicePicker("Source to measure", options, self._sp_source or ""),
+            self._on_speed_source,
+        )
 
     def _on_sources(self, value: object) -> None:
         if value is None:
@@ -2105,6 +2502,29 @@ class TokdashApp(App):
                 seen.add(key)
                 keys.append(key)
         return keys
+
+    def _speed_selection_model_label(self) -> str:
+        """Model (and timing word) of the series the ROWS measured, for the picker.
+
+        Read from the loaded payload through `_speed_selection_label`'s own
+        selection, so a delayed or failed series read cannot name the model that
+        was merely asked for.
+        """
+        if self._sp_mode == "trend":
+            key = self._speed_trend_selection()[0]
+            if isinstance(key, (tuple, list)):
+                key = (list(key) + [None] * 4)[1]  # the model of the key
+        elif self._sp_mode == "hour":
+            sel = (self._sp_hours or {}).get("selected_key") or {}
+            model = sel.get("model")
+            kind = sel.get("measurement_kind")
+            if not model:
+                return ""
+            kind = views.TIMING_KIND_LABELS.get(str(kind), str(kind)) if kind else ""
+            return f"{model} / {kind.split(' ')[0]}" if kind else str(model)
+        else:
+            return ""
+        return str(key) if key else ""
 
     @staticmethod
     def _speed_key_label(key: object) -> str:
@@ -2278,6 +2698,8 @@ class TokdashApp(App):
             # back on the list rather than on whatever the hidden table was.
             self.query_one("#sn-table", DataTable).focus()
         elif pane == "speed":
+            self._sp_detail_kind = None
+            self._sp_detail_key = None
             self.query_one("#sp-detail", Static).display = False
         elif pane == "quota":
             self._quota_detail = None
@@ -2341,18 +2763,183 @@ class TokdashApp(App):
         else:
             self._show_speed_comparison(str(key))
 
-    def _show_speed_bucket(self, key: str) -> None:
-        """One Trend bucket: the series, its window, and the overlap it measured."""
+    def _reveal_cursor(self, table: DataTable) -> None:
+        """Scroll the row under the cursor back into the table's own viewport.
+
+        The detail a row opens is written UNDER the table, and Speed's pane does
+        not scroll, so the rows the detail adds come off the bottom of the
+        table's viewport -- which is exactly where the row the reader is standing
+        on sits. Asked for synchronously the scroll would run against the layout
+        that has not happened yet, so it runs once the new rows are counted.
+        """
+        def reveal() -> None:
+            if table.row_count:
+                # The cursor stays where it is; the widget's own scroll is what
+                # moves, dragging the viewport back onto the visible row.
+                table.move_cursor(row=table.cursor_row)
+
+        self.call_after_refresh(reveal)
+
+    def _speed_detail_rows(self, lines: list[list[Run]], *, cap: int = 0) -> list[list[Run]]:
+        """Fit the explanation of an opened row into the rows this terminal has.
+
+        Every line written here is a row taken from the picture and the table
+        above it, and at 24 rows the arithmetic runs out fast -- which is how a
+        table ended up drawn below the screen. The facts are PACKED onto fewer
+        rows, never dropped: the denominator sentence is the reason Enter was
+        pressed. A line that is carrying a warning keeps its own row, because a
+        warning that shares a line with prose is a warning nobody reads.
+        """
+        room = self._text_width("#sp-detail", fallback=self._pane_width("speed") - 2)
+
+        def wrap(line: list[Run], limit: int, style: str) -> list[list[Run]]:
+            """One authored line, in as many rows as its width asks for.
+
+            The RUNS are the units of the break, not the words: an authored line
+            is "what the number is divided by", " · what overlaps", " · what does
+            not exist", and a row that ends "count once · no" is a sentence
+            broken at the column rather than at the thought. A run wider than the
+            surface is the one thing that still gets word-wrapped.
+            """
+            # The LINE decides its own emphasis when it authored one. Forcing the
+            # first row of every write to the header tone made the standing
+            # caption -- three muted facts under the table -- arrive in the same
+            # voice as the identity of a row the reader had opened.
+            use = ("warn" if any(run.style == "warn" for run in line)
+                   else style if not any(run.style for run in line)
+                   else next((run.style for run in line
+                              if run.style in ("warn", "header")), "muted"))
+            units: list[Run] = [piece for run in line if run.text
+                                for piece in (Run(part, use)
+                                              for part in _wrapped(run.text, room))]
+            rows: list[list[Run]] = []
+            current: list[Run] = []
+            used = 0
+            for unit in units:
+                width = cell_len(unit.text)
+                if current and used + width > room:
+                    rows.append(current)
+                    current, used = [unit], width
+                else:
+                    current.append(unit)
+                    used += width
+            if current:
+                rows.append(current)
+            return rows or [[Run("", use)]]
+
+        head = lines[:2]  # the row's identity, then its figures
+        rest = lines[2:]
+        quiet = [line for line in rest if not any(run.style == "warn" for run in line)]
+        loud = [line for line in rest if any(run.style == "warn" for run in line)]
+        out: list[list[Run]] = []
+        for index, line in enumerate(head):
+            out += wrap(line, 2, "header" if index == 0 else "muted")
+        for line in loud:
+            out += wrap(line, 2, "warn")
+        # Four rows of prose under a table is a second pane, and every one of
+        # them is a row taken from the picture and the rows above. The opened
+        # row's own facts come first; the rest is packed, and what cannot be
+        # packed is already in the strip above or on the row itself.
+        limit = cap or (3 if self._compact else 4)
+        # The most rows this block may spend. An opened row is allowed past the
+        # standing caption's budget (see below) and the ledger subtracts whatever
+        # it takes, so the cost lands on the table above rather than on the
+        # status strip's row.
+        ceiling = limit if not cap else limit + (2 if self._compact else 4)
+        budget = max(1, limit - len(out))
+        parts = ["".join(run.text for run in line) for line in quiet]
+        # Packed with no limit of its own: the row count is decided here, in one
+        # place, and only in whole facts. A limit inside the packer cut a fact in
+        # half and said nothing about the half it took.
+        packed = _fact_rows(parts, room, limit=len(parts) * 4, tail=False)
+        if cap and len(packed) > budget:
+            # The standing caption and the detail an OPENED row asks for do not
+            # share a budget. The caption is a footnote and pays for itself out of
+            # the picture's rows; the detail is the reason Enter was pressed, and
+            # halving it is how "summed tokens over the UNION of busy time"
+            # arrived as "summed tokens over the" -- a rate left standing with no
+            # denominator, in the one view that may not have one.
+            budget = min(len(packed), max(budget, ceiling - len(out)))
+        out += [[Run(part, "muted")] for part in packed[:budget]]
+        return out[:ceiling]
+
+    #: Rows the opened-row explanation may spend. The painter and the sizing
+    #: pass must agree on this number, or the table is measured against a
+    #: caption of a height it never got.
+    _SPEED_DETAIL_CAP: int = 6
+
+    def _write_speed_detail(self, lines: list[list[Run]]) -> None:
+        """Paint the opened row's detail, then put the pane back in balance.
+
+        The detail sits BELOW the series box, so the rows it takes are taken from
+        the box: measured after the write, the picture is redrawn for the height
+        that is left rather than the one there was before Enter was pressed.
+        """
         detail = self.query_one("#sp-detail", Static)
+        rows = self._speed_detail_rows(lines, cap=self._SPEED_DETAIL_CAP)
         detail.display = True
+        detail.styles.height = str(len(rows))
+        detail.update(emit_markup(rows))
+        # Enter spends rows the box was sized without: the refit on the next
+        # refresh re-divides the pane, and this is the number it divides against.
+        self._sp_detail_wanted = len(rows)
+        self.call_after_refresh(self._refit_speed_series)
+        self._reveal_cursor(self.query_one("#sp-table", DataTable))
+
+    def _held_key(self, table: DataTable) -> object:
+        """The row key the cursor is on, before a repaint wipes it.
+
+        Rebuilding a table is how a pane repaints, and a rebuild parks the cursor
+        on row zero: the reader arrows down twenty buckets, the snapshot finishes
+        building, and they are back at the top with no warning. The key is what
+        survives the rebuild, so the key is what gets held.
+        """
+        return _row_key_at(table, table.cursor_row)
+
+    def _show_speed_bucket(self, key: str) -> None:
+        """Open one Trend bucket, and remember that THIS row is what is open."""
+        self._sp_detail_kind = "bucket"
+        self._sp_detail_key = key
+        lines = self._speed_bucket_lines(key)
+        if lines is None:
+            self._speed_detail_gone(key, "bucket")
+            return
+        self._write_speed_detail(lines)
+
+    def _speed_detail_gone(self, key: object, what: str) -> None:
+        """The opened row left the snapshot between the keypress and the paint."""
+        self._sp_detail_kind = None
+        self._sp_detail_key = None
+        self._write_speed_detail([[
+            Run(f"selected {key} · {what} is no longer in this snapshot", "warn")
+        ]])
+
+    def _speed_open_detail(self) -> list[list[Run]] | None:
+        """The open row's explanation, re-derived from the payload in hand.
+
+        Speed repaints on a snapshot update, a resize and the row-ledger refit.
+        Each of those used to write the VIEW's caption over the row the reader had
+        opened -- the figures stayed, the explanation of what they were divided by
+        vanished, and at the next repaint an open row could even be reported as
+        missing. The open row is state, so it is repainted as state.
+        """
+        if self._sp_detail_kind is None:
+            return None
+        if self._sp_detail_kind == "bucket":
+            return self._speed_bucket_lines(str(self._sp_detail_key))
+        if self._sp_detail_kind == "hour":
+            return self._speed_hour_lines(str(self._sp_detail_key))
+        if self._sp_detail_kind == "comparison":
+            return self._speed_comparison_lines(str(self._sp_detail_key))
+        return None
+
+    def _speed_bucket_lines(self, key: str) -> list[list[Run]] | None:
+        """One Trend bucket: the series, its window, and the overlap it measured."""
         series, label = self._speed_trend_selection()
         trend = views.speed_trend_rows(self._sp_trend or {}, key=series, lens=self._sp_lens)
         row = next((r for r in trend["rows"] if r["key"] == key), None)
         if row is None:
-            detail.update(emit_markup([[
-                Run(f"selected {key} · bucket is no longer in this snapshot", "warn")
-            ]]))
-            return
+            return None
         rate = row["per_stream"] if self._sp_lens == "stream" else row["combined"]
         # The bucket's OWN key leads: at day resolution two adjacent buckets share
         # a window, so a detail that named only the window could not say which
@@ -2378,20 +2965,25 @@ class TokdashApp(App):
         lines.append([Run(
             "one bucket of the series named above · b changes the resolution, k the series",
             "muted")])
-        detail.update(emit_markup(lines))
+        return lines
 
     def _show_speed_hour(self, hour: str) -> None:
+        """Open one hour of the day, and remember that THIS row is what is open."""
+        self._sp_detail_kind = "hour"
+        self._sp_detail_key = hour
+        lines = self._speed_hour_lines(hour)
+        if lines is None:
+            self._speed_detail_gone(hour, "hour")
+            return
+        self._write_speed_detail(lines)
+
+    def _speed_hour_lines(self, hour: str) -> list[list[Run]] | None:
         """One hour of the day: the rate, the responses behind it, and its reach."""
-        detail = self.query_one("#sp-detail", Static)
-        detail.display = True
         combined = self._sp_lens == "combined"
         hours = views.speed_hour_rows(self._sp_hours or {}, lens=self._sp_lens)
         row = next((r for r in hours["rows"] if r["hour"] == hour), None)
         if row is None:
-            detail.update(emit_markup([[
-                Run(f"selected {hour} · hour is no longer in this snapshot", "warn")
-            ]]))
-            return
+            return None
         key = hours.get("selected_key") or {}
         if combined:
             who = " ".join(
@@ -2422,7 +3014,7 @@ class TokdashApp(App):
             ]
         lines.append(cells)
         lines.append([Run(hours["note"], "muted")])
-        detail.update(emit_markup(lines))
+        return lines
 
     def _show_speed_comparison(self, key: str) -> None:
         """One Across-models row: what the rate was divided by.
@@ -2431,16 +3023,25 @@ class TokdashApp(App):
         how much of the window it actually covers, so Enter shows those rather
         than repeating the number the table already shows.
         """
-        source, model, timing = (key.split("|") + ["", ""])[:3]
+        self._sp_detail_kind = "comparison"
+        self._sp_detail_key = key
+        lines = self._speed_comparison_lines(key)
+        if lines is None:
+            # The snapshot moved under the cursor between the keypress and here.
+            source, model, _timing = (key.split("|") + ["", ""])[:3]
+            self._speed_detail_gone(model or key, "row")
+            return
+        self._write_speed_detail(lines)
+
+    def _speed_comparison_lines(self, key: str) -> list[list[Run]] | None:
+        """Build one Across-models row's explanation, or say the row is gone."""
+        source, _model, _timing = (key.split("|") + ["", ""])[:3]
         rows = views.speed_rows(
             self._sp_payload or {}, lens=self._sp_lens
         )["rows"]
         row = next((r for r in rows if f"{r.get('harness') or r.get('sources')}|{r['model']}|{r['timing']}" == key), None)
-        detail = self.query_one("#sp-detail", Static)
-        detail.display = True
         if row is None:
-            detail.update(emit_markup([[Run(f"selected {model} · row is no longer in this snapshot", "warn")]]))
-            return  # the snapshot moved under the cursor between paint and keypress
+            return None
         lines = [[Run(f"{row['model']} · {row['timing']}", "header")]]
         if self._sp_lens == "stream":
             lines.append([
@@ -2471,7 +3072,7 @@ class TokdashApp(App):
             "divided by its own time, whatever else was in flight", "muted")])
         lines.append([Run(
             "coverage is measured/eligible calls, not continuous days observed", "muted")])
-        detail.update(emit_markup(lines))
+        return lines
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         # Enter/Space on a row is the same action as the enter binding, but the
@@ -2518,6 +3119,15 @@ class TokdashApp(App):
             self._sync_toggle_states()
             self._restart_speed()  # re-read the snapshot for the new view
             return
+        if button_id == "sp-pick-source":
+            self._choose_speed_source()
+            return
+        if button_id == "sp-pick-series":
+            self.action_choose_series()
+            return
+        if button_id == "sp-pick-bucket":
+            self.action_cycle_bucket()
+            return
         if button_id == "sp-windows":
             # The button and the x key are one control; a test that drives only
             # the key cannot see that the button on screen did nothing.
@@ -2541,12 +3151,24 @@ class TokdashApp(App):
             ("sp-mode-hour", self._sp_mode == "hour"),
             ("sp-lens-stream", self._sp_lens == "stream"),
             ("sp-lens-combined", self._sp_lens == "combined"),
+            # The whole-request setting is an ON/OFF preference, not a fourth
+            # lens: it changes WHICH measurements are in the population, so it
+            # reads as a ticked box and never as a pressed tab.
             ("sp-windows", self._sp_include_windows),
         ):
             try:
                 self.query_one(f"#{key}", Button).set_class(active, "-selected")
             except Exception:  # noqa: BLE001 — before compose, nothing to sync
                 pass
+        # A checkbox needs a check mark: -selected is a PRESSED look, which on a
+        # preference says "this tab is open" rather than "this box is ticked".
+        try:
+            self.query_one("#sp-windows", Button).label = (
+                "Include whole-request timing"
+                if not self._sp_include_windows else "☑ Include whole-request timing"
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     def on_input_changed(self, event: Input.Changed) -> None:
         box_id = event.input.id or ""
@@ -2602,7 +3224,9 @@ class TokdashApp(App):
         stand for the rest of the session -- the squeeze a narrow terminal
         caused would outlive the narrow terminal.
         """
+        self._apply_density()
         self._paint_rangebar()
+        self._fit_panes()  # the strip's share of the screen just changed shape
         pane = self._active_pane()
         if self._state[pane] == "ok":
             self._repaint_pane(pane)
@@ -2679,10 +3303,29 @@ class TokdashApp(App):
         width = self.query_one(f"#pane-{pane_id}").content_region.width
         return width if width > 0 else 80
 
+    def _text_width(self, selector: str, *, fallback: int = 80) -> int:
+        """Cells a widget actually has for its own text.
+
+        A line packed to the PANE's width instead of the WIDGET's is a line that
+        wraps by exactly that widget's padding. In a frame of fixed rows that is
+        not cosmetic: the wrapped half is a row the page loses, and the row it
+        loses is always the one at the bottom -- the caption, the explanation,
+        the last table line.
+        """
+        for widget in self.query(selector):
+            if widget.region.width:
+                return max(8, widget.content_size.width)
+        return fallback
+
     def _pane_screen_width(self) -> int:
         """Cells available to a full-width strip (the rangebar), never 0."""
         width = self.screen.size.width if self.screen is not None else 0
         return width if width > 0 else 80
+
+    def _pane_screen_height(self) -> int:
+        """Rows the app was given. Rows it did NOT get are the ones that clip."""
+        height = self.screen.size.height if self.screen is not None else 0
+        return height if height > 0 else 24
 
     def _mono(self) -> bool:
         return bool(self.no_color)
@@ -2737,7 +3380,11 @@ class TokdashApp(App):
         """Highlight the preset that names the CURRENT window, and print the exact
         inclusive dates beside it. A shifted window matches no button, which is
         the point: the dates are the truth, the buttons are shortcuts."""
-        bar = self.query_one("#rangebar")
+        if not self.query("#rangebar"):
+            # The first resize can arrive before on_mount has put the strip in its
+            # slot; a strip that is not on screen yet has nothing to highlight.
+            return
+        bar = self.query_one("#rangebar", Horizontal)
         bar.display = self._active_pane() in RANGE_PANES
         if not bar.display:
             return
@@ -2791,18 +3438,33 @@ class TokdashApp(App):
             self._paint_pending("overview")
             return
         usage = self._ov_usage or {}
-        note = self.query_one("#ov-note", Static)
-        status = views.status_note(
-            usage, self._ov_active, usage_status=self._cache_status.get("overview", "hit")
+        self._paint_scope("overview")
+        self._set_alert(
+            "overview",
+            views.status_note(
+                usage, self._ov_active, usage_status=self._cache_status.get("overview", "hit")
+            ),
         )
-        note.display = bool(status)
-        if status:
-            note.update(emit_markup([[Run(status, "warn")]]))
         cards = views.kpi_cards(usage, self._ov_active, window=self._win.describe())
         width = self._pane_width("overview")
+        # Six across pays for itself below 116 too. Three across spends SEVEN
+        # rows of a 30-row screen on the headline band, and the rows it took
+        # came off the table and the activity picture underneath; sixteen cells
+        # per card is enough for the longest label here (EST. AGENT TIME) and
+        # the shortest of the detail lines, which is what the narrow wording is
+        # for.
         per_row = 6 if width >= 116 else 3 if width >= 76 else 2
         self.query_one("#ov-cards", Static).update(_card_block(cards, per_row, width, self._mono()))
-        self._paint_range()
+        # The sort lives here, next to the table it reorders, rather than in a
+        # paragraph under it: "s" is invisible until the reader knows what it does.
+        sort_note = self.query_one("#ov-sort", Static)
+        if self._ov_subview == "models":
+            sort_note.display = True
+            label = dict(views.MODEL_SORTS).get(self._ov_sort, self._ov_sort)
+            sort_note.update(escape(f"sorted by {label} · s changes it"))
+        else:
+            sort_note.display = False
+            sort_note.update("")
         if self._ov_subview == "models":
             self._paint_models(usage, width)
         elif self._ov_selected is not None:
@@ -2811,14 +3473,73 @@ class TokdashApp(App):
             self._paint_harnesses(usage, width)
         self._paint_activity(usage)
 
-    def _paint_range(self) -> None:
-        text = f"{self._win.describe()}  ·  {PANE_TITLES['overview']}"
-        rng = (self._ov_usage or {}).get("range") or {}
-        if rng.get("recognized") is False:
-            text += "  (range not recognised by the server)"
-        self.query_one("#ov-range", Static).update(
-            emit_markup([[Run(text, "header")]])
-        )
+    def _set_alert(
+        self, pane: str, lines: list[list[Run]] | str | None, *, style: str = "warn"
+    ) -> None:
+        """Write (or clear) the pane's ONE status strip.
+
+        ``None``, "" or an empty line list HIDES it: an empty strip is a tinted
+        band across the page that says nothing, which is worse than no band.
+        """
+        body = None
+        if isinstance(lines, Text):
+            if str(lines).strip():
+                body = lines
+        elif isinstance(lines, str):
+            if lines.strip():
+                body = emit_markup([[Run(lines, style)]])
+        elif lines:
+            kept = [line for line in lines if line]
+            if kept:
+                body = emit_markup(kept)
+        widget = self.query_one(PANE_ALERT[pane], Static)
+        if body is None:
+            widget.display = False
+            widget.update("")
+            return
+        widget.display = True
+        widget.update(body)
+
+    def _paint_scope(self, pane: str) -> None:
+        """Print what this pane's numbers cover, in the page head.
+
+        Deliberately NOT the dates: the range strip one row above already names
+        the window, and the same text twice on a 24-row screen is one more thing
+        to check and one row of content lost. Stats is the exception because the
+        shared strip is hidden on that pane.
+        """
+        if pane == "overview":
+            if self._ov_subview == "models":
+                text = "Normalized models · every harness"
+            elif self._ov_selected:
+                label = TOOL_LABELS.get(self._ov_selected, self._ov_selected)
+                text = f"{label} · this source's models only"
+            else:
+                text = "All harnesses"
+        elif pane == "speed":
+            text = ("Combined output during busy clock time" if self._sp_lens == "combined"
+                    else "Output per measured stream-second")
+        elif pane == "sessions":
+            asked = len(self._sn_sources)
+            text = ("All session sources" if asked == len(SESSION_TOOLS)
+                    else f"{asked} of {len(SESSION_TOOLS)} session sources")
+        elif pane == "stats":
+            text = self._stats_win.describe(self._today)
+        elif pane == "report":
+            text = "All harnesses"
+        elif pane == "quota":
+            text = "Current snapshots · all providers"
+        else:
+            text = "Current effective rates"
+        widget_id = {
+            "overview": "#ov-scope", "sessions": "#sn-scope", "stats": "#st-scope",
+            "report": "#rp-scope", "speed": "#sp-scope", "quota": "#quota-scope",
+            "pricing": "#pr-scope",
+        }[pane]
+        try:
+            self.query_one(widget_id, Static).update(escape(text))
+        except Exception:  # noqa: BLE001 — head not composed yet (early paint)
+            pass
 
     @staticmethod
     def _shape(
@@ -2826,6 +3547,7 @@ class TokdashApp(App):
         spec: tuple[tuple[str, str, int, bool], ...],
         rows: list[tuple] | None = None,
         budget: int | None = None,
+        reserve: int = 0,
     ) -> None:
         """Rebuild a table's columns for the view it is showing right now.
 
@@ -2847,7 +3569,12 @@ class TokdashApp(App):
             (key, label, max(int(width), cell_len(label) + 1, need.get(key, 0) + 1), optional)
             for key, label, width, optional in spec
         ]
-        budget = _table_budget(table) if budget is None else budget
+        # ``reserve``: cells the viewport will lose AFTER the fit. A table taller
+        # than its box grows a vertical scrollbar, and that scrollbar takes a
+        # column the fit had already spent -- which is how a "Responses" column
+        # that measured perfectly on paper arrived on screen as "22".
+        budget = (_table_budget(table) - reserve) if budget is None else budget
+        budget = max(12, budget)
         table.clear(columns=True)
         for key, label, width in fit_columns(sized, budget):
             # A column narrower than its own label prints "Hour (server clock" --
@@ -2915,7 +3642,10 @@ class TokdashApp(App):
                      ("cache", "Cache", 8, True), ("hit", "Hit", 7, True),
                      ("msgs", "Msgs", 8, True)]
         spec.append(("time", "Est. time", 14, False))
-        self._shape(table, tuple(spec))
+        # reserve=1: the harness list is capped in height, and the vertical
+        # scrollbar it grows takes a column off the viewport AFTER the fit has
+        # spent it -- which is how "20h 35m" reached the screen as "20h 35".
+        self._shape(table, tuple(spec), reserve=1)
         selected = self._ov_selected
         for row in rows:
             self._add_row(table, [
@@ -2951,7 +3681,7 @@ class TokdashApp(App):
             spec += [("input", "Input", 8, True), ("output", "Output", 8, True),
                      ("cache", "Cache", 8, True), ("hit", "Hit", 7, True),
                      ("msgs", "Msgs", 8, True)]
-        self._shape(table, tuple(spec))
+        self._shape(table, tuple(spec), reserve=1)
         selected = self._ov_selected
         for row in result["rows"]:
             self._add_row(table, [
@@ -3011,28 +3741,166 @@ class TokdashApp(App):
         detail.update(emit_markup([[Run(scope, "muted")]]))
 
     def _paint_activity(self, usage: dict) -> None:
+        """The window's shape, drawn from the buckets THIS response carries.
+
+        ``usage.sparkline`` is global -- totals over the window, one series -- so
+        this is the only activity picture the payload supports, and there is no
+        per-harness version of it to draw. Past the resolver's bound a range
+        carries no buckets at all; the honest answer is then the sentence that
+        says so, not a line guessed from the totals.
+        """
         widget = self.query_one("#ov-activity", Static)
+        # Three cells of slack under the measured width: the caption is packed to
+        # this number and then drawn by a widget whose width the NEXT layout pass
+        # decides, and a caption packed to the frame being replaced loses its
+        # tail -- "peak 612.0K tokens ·" -- right where the peak was. The pane
+        # itself grows a vertical scrollbar once the table pushes past the fold,
+        # and that bar takes the column the caption was packed into.
+        room_width = max(24, self._text_width(
+            "#ov-activity", fallback=self._pane_width("overview") - 4) - 3)
         strip = views.activity_strip(
             usage.get("sparkline"),
-            width=max(8, min(28, self._pane_width("overview") // 5)),
+            width=max(8, min(28, room_width // 5)),
             glyphs=_safe_glyphs(),
-            max_rows=6 if self._pane_width("overview") >= 96 else 3,
+            max_rows=6 if room_width >= 96 else 3,
         )
+        widget.display = True
         if not strip["available"]:
-            widget.display = True
+            # One line, and it says why there is no picture: a range past the
+            # resolver's bound carries no buckets, and a blank box reads as a
+            # broken one.
+            self._activity_painted = self._activity_stamp(widget)
             widget.update(emit_markup([[Run(strip["note"], "muted")]]))
             return
-        lines = [[Run(f"Activity · {strip['note']}", "bold")]]
-        for row in strip["rows"]:
-            lines.append([
-                Run(f"{row['key']:<17}", "muted"),
-                Run(row["bar"], "accent"),
-                Run(f" {row['tokens']} tokens · {row['cost']} · {row['messages']} msgs"),
-            ])
-        widget.display = True
+        entries = views.chart_entries(strip["all_rows"], "value", text_key="tokens")
+        title = f"Token activity · {strip['bucket_count']} {strip['unit']} buckets"
+        room = self._rows_above_strip(widget)
+        self._activity_painted = self._activity_stamp(widget)
+        # Shorten the PICTURE before shortening anything that says a number, and
+        # stop at the first height whose WHOLE assembly -- title, the value over
+        # each column, the bars, the axis, the caption -- fits the rows the pane
+        # has left. A chart whose caption is below the fold is a picture without
+        # units; a chart whose columns are below the fold is a picture of nothing.
+        lines: list[list[Run]] = []
+        # Four rows held back, not three: title, axis and the caption's SECOND
+        # row. At three the caption arrived with a row missing and the packer
+        # spent it telling the reader to widen the window.
+        want = min(6, max(2, room - 4)) if room else 2
+        for height in range(want, 0, -1):
+            drawn = column_chart(
+                entries, width=max(24, room_width), height=height,
+                glyphs=_safe_glyphs(), style="series", unit="tokens",
+            )
+            if not drawn["available"]:
+                widget.display = False
+                widget.update("")
+                return
+            lines = [[Run(title, "bold")], *drawn["lines"]]
+            # The bucket keys go here in FULL: the axis under the bars has to fit
+            # a column, this line has the whole surface. Peak on the right when
+            # both fit on one line; when they do not, two lines that break between
+            # facts rather than inside one.
+            # Each fact on its own, so the packer breaks BETWEEN them: joined
+            # into one string, "peak 612.0K tokens · 1 bucket measured 0 tokens"
+            # is a single long fact and wraps at the column, arriving as
+            # "... tokens · 1" over "bucket measured 0 tokens".
+            # Ordered by what only this band can say: the span, how much of it
+            # was measured, the stubs on the baseline that are measurements of
+            # zero rather than gaps, and the peak. The peak is the fact the table
+            # can also read out, so it is the last to be paid for.
+            facts = [
+                f"{drawn['measured']} of {drawn['columns']} buckets measured",
+            ]
+            if drawn.get("zeros"):
+                facts.append(f"{drawn['zeros']} bucket"
+                             f"{'s' if drawn['zeros'] != 1 else ''} measured 0 tokens")
+            # The span LAST: the axis under the bars and the strip at the top of
+            # the screen both already say which days these are, so it is the fact
+            # that gives way when the band is down to one row.
+            facts.append(str(strip["note"]))
+            right = (f"peak {drawn['peak_text']} tokens at {drawn['peak_key']}"
+                     if drawn.get("peak_text") else "")
+            left = " · ".join(fact for fact in facts if fact)
+            if cell_len(left) + 3 + cell_len(right) <= room_width:
+                caption = [_two_ends(left, right, room_width)]
+            else:
+                caption = [fact for fact in facts + [right] if fact]
+            spare = room - len(lines)
+            if spare <= 0:
+                continue
+            # notice=False: the facts that gave way are already under the
+            # reader's cursor in the table above; a tally of them is a row of
+            # furniture in the one band that shows the numbers.
+            lines += [[Run(part, "muted")]
+                      for part in _packed(caption, room_width, limit=spare,
+                                          notice=False)]
+            if len(lines) <= room:
+                break
+        else:
+            widget.display = False
+            widget.update("")
+            return
         widget.update(emit_markup(lines))
+        # The band is drawn to the rows the pane is actually leaving, not to the
+        # rows the picture happened to need. A surface that stops where its text
+        # stops leaves a hole of page background under the chart, and the page
+        # reads as a strip of content floating above an empty terminal.
+        spare_room = self._rows_above_strip(widget)
+        if spare_room > len(lines):
+            widget.styles.height = str(max(5, spare_room))
+        else:
+            widget.styles.height = "auto"
+        # The rows this was sized against are the ones the PREVIOUS paint left
+        # behind; once the frame settles, redraw for the rows there really are.
+        self.call_after_refresh(self._refit_activity)
+
+    def _activity_stamp(self, widget: Static) -> tuple:
+        """What the last activity picture was divided against.
+
+        The pane's width decides how many bucket keys fit under the bars, the rows
+        under the strip decide how tall the picture may be, and the density flag
+        decides whether the sections above it carry a blank row. Anything else
+        that moves -- new data, a different subview -- is a real repaint anyway.
+        """
+        return (widget.region.width, self._rows_above_strip(widget), self._compact)
+
+    def _refit_activity(self) -> None:
+        """Size the activity picture against the rows the layout really gave it.
+
+        The first paint of a pane runs before Textual has any geometry, so the
+        picture is sized from a fallback; without this pass the estimate sticks,
+        and an over-tall picture pushes its own caption -- and at 24 rows the
+        table above it -- below the fold. It settles by construction: the repaint
+        records the number it just read, so the next look finds nothing to do.
+        """
+        if self._active_pane() != "overview":
+            return
+        widget = self.query_one("#ov-activity", Static)
+        if self._activity_painted == (-1,):
+            return
+        if self._activity_stamp(widget) != self._activity_painted:
+            self._repaint_pane("overview")
+
+    def _rows_above_strip(self, widget: Static) -> int:
+        """Rows between a widget's own top and the row the status strip owns.
+
+        The top is set by everything ABOVE the widget, never by its own height,
+        so sizing a chart from this number cannot feed back into itself.
+        """
+        limit = self.query_one("#status", Static).region.y
+        top = widget.region.y
+        if limit <= 0 or top <= 0:
+            return 12  # nothing is laid out yet: take the full-height default
+        # One row in hand: the pane ends the row BEFORE the strip begins, and a
+        # picture packed to the last row of its own box is a picture that puts
+        # the pane one row over its height -- which buys a vertical scrollbar,
+        # and a scrollbar takes a column off every table on the page.
+        return max(0, limit - top - 1)
 
     def _paint_sessions(self) -> None:
+        # The head names what the rows cover even when the body below has no rows
+        # yet, so an empty pane still says what an empty pane is empty OF.
+        self._paint_scope("sessions")
         if not self._scope_ok("sessions"):
             self._paint_pending("sessions")
             return
@@ -3072,7 +3940,7 @@ class TokdashApp(App):
         if wide:
             spec += [("last", "Last recorded", 20, True), ("model", "Main model", 22, True)]
         spec += [("tokens", "Tokens", 8, False), ("cost", "Cost", 10, False)]
-        self._shape(table, tuple(spec))
+        self._shape(table, tuple(spec), reserve=1)
         for row in result["rows"]:
             self._add_row(table, [
                 ("harness", _source_cell(row["tool"], row["harness"])),
@@ -3091,9 +3959,12 @@ class TokdashApp(App):
             turns.clear()
             return
         detail.display = True
+        # include_turns=False: #sn-turns below paints the same rows as a table
+        # with a keyboard cursor, and a Static list of them would push the
+        # timing block (and the table itself) out of the pane.
         detail.update(emit_markup(session_detail_lines(
             self._sn_detail, self._sn_detail_speed, self._sn_detail_note,
-            self._sn_detail_key, self._win, TOOL_LABELS,
+            self._sn_detail_key, self._win, TOOL_LABELS, include_turns=False,
         )))
         self._paint_turns()
 
@@ -3154,6 +4025,7 @@ class TokdashApp(App):
             )
 
     def _paint_stats(self) -> None:
+        self._paint_scope("stats")
         if not self._scope_ok("stats"):
             self._paint_pending("stats")
             return
@@ -3308,6 +4180,7 @@ class TokdashApp(App):
         )
 
     def _paint_report(self) -> None:
+        self._paint_scope("report")
         self._sync_toggle_states()
         if not self._scope_ok("report"):
             self._paint_pending("report")
@@ -3524,157 +4397,724 @@ class TokdashApp(App):
 
     def _paint_speed(self) -> None:
         self._sync_toggle_states()
+        self._paint_scope("speed")
         if not self._scope_ok("speed"):
             self._paint_pending("speed")
             return
         payload = self._sp_payload or {}
-        cache = payload.get("cache") or {}
-        state = str(cache.get("state") or "unknown")
-        wide = self._pane_width("speed") >= 100
-        note_bits = [
-            f"window {self._win.describe()}",
-            f"source {self._sp_source or 'all measured'}",
-            "timing " + ("whole request + decode windows" if self._sp_include_windows
-                          else "decode windows (excludes the initial wait)"),
-            f"cache {state}",
-        ]
-        series_note, series_bad = "", False
-        if self._sp_mode in ("trend", "hour"):
-            # Which ONE thing the table below measures. Both views answer for a
-            # single comparison key or merged model, and that identity belongs
-            # above the rows: a 24-row hour table fills the pane, so a caption
-            # underneath it left a screen full of rates with no name attached.
-            # It names the LOADED series; the next clause owns the gap between
-            # that and whatever the reader has asked for since.
-            selection = self._speed_selection_label()
-            if selection:
-                note_bits.insert(1, f"measuring {selection}")
-            series_note, series_bad = self._speed_series_state()
-            if series_note:
-                note_bits.insert(2 if selection else 1, series_note)
-        if self._sp_job_note:
-            note_bits.append(self._sp_job_note)
-        hidden = payload.get("hidden_request_windows") or []
-        if hidden:
-            note_bits.append(f"{len(hidden)} groups hidden by the timing filter")
-        status = payload.get("source_status") or []
-        if status:
-            note_bits.append(
-                "no measured speed: "
-                + ", ".join(f"{s.get('source')} ({s.get('status')})" for s in status[:4])
-            )
-        self.query_one("#sp-note", Static).update(
-            emit_markup([[Run(" · ".join(note_bits),
-                              "warn" if (self._sp_job_note or series_bad) else "muted")]])
-        )
+        self._paint_speed_selectors(payload)
+        self._set_alert("speed", self._speed_note_lines(payload))
         if self._sp_mode == "trend" and self._sp_trend is not None:
-            self._paint_speed_trend(wide)
+            self._paint_speed_trend()
             return
         if self._sp_mode == "hour" and self._sp_hours is not None:
             self._paint_speed_hours()
             return
+        self._paint_speed_chart_hidden()
+        self._sp_chart_wanted = False
         table = self.query_one("#sp-table", DataTable)
         result = views.speed_rows(payload, lens=self._sp_lens)
-        if self._sp_lens == "combined":
-            spec = [("model", "Model (merged)", 30, False),
-                    ("sources", "Sources", 16, True), ("timing", "Timing kinds", 24, True)]
+        width = self._pane_width("speed")
+        # A roomy pane spells the measurement out; a close one spells it
+        # smaller; none of them cuts it. "response window / outpu…" is not a
+        # shortened measurement, it is a truncated one wearing the table's
+        # authority, and the column is exactly as wide as its longest value
+        # anyway -- so the WORDING is the only dial that can make it fit.
+        if width >= 92:
+            method, method_width = "timing_short", 24
         else:
-            spec = [("model", "Model", 26, False)]
-            if wide:
-                spec += [("harness", "Harness", 12, True),
-                         ("timing", "Timing / basis", 26, True)]
-        spec += [("rate", "tok/s", 8, False), ("measured", "Measured", 10, True),
-                 ("eligible", "Eligible", 10, True), ("coverage", "Coverage", 9, False)]
-        self._shape(table, tuple(spec))
+            method, method_width = "timing_kind", 11
+        if self._sp_lens == "combined":
+            # The merged lens is the one place the FULL method label is kept:
+            # a row here stands for two or more methods at once, and "first
+            # token, respon" is a method that does not exist. When the column
+            # cannot hold the words, _clip_text crops them with a trace.
+            method, method_width = "timing", 24
+            spec = [("model", "Model (merged)", 30, False),
+                    ("sources", "Sources", 14, False),
+                    ("timing", "Timing kinds", method_width, False)]
+        else:
+            spec = [("model", "Model", 26, False),
+                    # Harness and timing are the row's IDENTITY, not decoration:
+                    # two rows both reading "gpt-5.1-codex" 88.4 / 41.0 are only
+                    # two different measurements while the screen says which. They
+                    # stay in the spec at every width, and the merged
+                    # measured/eligible column is what pays for them.
+                    # 10 for the longest name here plus 2 for the badge's edge
+                    # and its gap: without them "qwen_code" arrives "qwen_co…".
+                    ("harness", "Source", 12, False),
+                    ("timing", "Timing / basis", method_width, False)]
+        # The merged label is the one header worth shortening rather than
+        # clipping: a header printed "Measured / eligibl" is a header that has
+        # already lost the column it names, and both figures stay in the cell.
+        measured_label = ("Measured / eligible" if width >= 112 else "Meas./eligible")
+        # Coverage is the one figure here that is ARITHMETIC on another
+        # (measured over eligible), so it is the one that goes when the terminal
+        # cannot hold the row. It is last for the same reason: fit_columns drops
+        # optional columns from the right, and identity is not for sale.
+        spec += [("rate", "tok/s", 8, False),
+                 ("measured", measured_label, 15, False),
+                 ("coverage", "Coverage", 9, True)]
+        if width < 92:
+            spec = [col for col in spec if col[0] != "coverage"]
+        held = self._held_key(table)
+        # The rows go into the FIT as well as into the table. Sized from the
+        # spec alone, a column gets the width its author guessed and the fit
+        # takes it away again -- which is how "3,902 / 4,154" arrived as
+        # "3,902 / 4,15" with a horizontal scrollbar in its place.
+        self._shape(table, tuple(spec), rows=[
+            (row["model"],
+             _source_text(row.get("harness") or row.get("sources") or ""),
+             str(row[method]),
+             str(row["rate"]),
+             f"{row['measured']} / {row['eligible']}",
+             str(row["coverage"]))
+            for row in result["rows"]
+        ], reserve=1)
         for row in result["rows"]:
             self._add_row(table, [
                 ("model", escape(row["model"])),
                 ("harness", _source_cell(row.get("harness"), row.get("harness"))),
-                # The merged lens names EVERY source behind one model; the tint
-                # follows the first of them so the row is not a wall of grey.
                 ("sources", _source_cell(
                     str(row.get("sources") or "").split(",")[0] or None,
                     row.get("sources"),
                 )),
-                ("timing", escape(row["timing"])),
+                ("timing", escape(row[method])),
                 ("rate", _num_cell(row["rate"])),
-                ("measured", _num_cell(row["measured"])),
-                ("eligible", _num_cell(row["eligible"])),
+                ("measured", self._measured_cell(row)),
                 ("coverage", _num_cell(row["coverage"])),
             ], key=f"{row.get('harness') or row.get('sources')}|{row['model']}|{row['timing']}")
-        detail = self.query_one("#sp-detail", Static)
+        self._restore_cursor(table, held)
+        open_lines = self._speed_open_detail()
+        if open_lines is not None:
+            # The reader is standing on an open row; a repaint for a fresh
+            # snapshot, a resize or the row ledger keeps explaining THAT row --
+            # at the height the row ASKED for. Sized with the caption's budget
+            # instead, the repaint shrank the explanation back to three rows and
+            # the denominator sentence went missing again on the next tick.
+            self._speed_size_series(open_lines, opened=True)
+            self._reveal_cursor(table)
+            return
         available = payload.get("available_measurement_range")
         if not result["rows"]:
-            detail.display = True
-            detail.update(emit_markup([[
+            caption = [[
                 Run("no measured rows for this window", "warn"),
                 Run(" · try all sources"
-                    + (f" · measurements exist {available['from']} .. {available['to']}" if available else "")
+                    + (f" · measurements exist {available['from']} .. {available['to']}"
+                       if available else "")
                     + ("" if self._sp_include_windows
                        else " · or press x to include whole-request timing"),
                     "muted"),
-            ]]))
-            return
-        if self._sp_lens == "combined":
-            detail.display = True
-            detail.update(emit_markup([[
-                Run("combined = summed tokens over the UNION of busy time · no pooled per-stream rate exists for a merged model", "muted")
-            ]]))
+            ]]
+        elif self._sp_lens == "combined":
+            caption = [[Run("combined = summed tokens over the UNION of busy time "
+                           "the server measured", "muted"),
+                        Run(" · overlapping responses count once", "muted"),
+                        Run(" · no pooled per-stream rate exists for a merged model", "muted")]]
         else:
-            detail.display = True
-            detail.update(emit_markup([[
-                Run("one row per source / model / timing kind / token basis — separate methods stay separate rows", "muted")
-            ]]))
+            caption = [[Run("one row per source / model / timing kind / token basis", "muted"),
+                        Run(" — separate methods stay separate rows", "muted")]]
+        self._speed_size_series(caption)
+        self._reveal_cursor(table)
 
-    def _paint_speed_trend(self, wide: bool) -> None:
+    # -- Speed: the parts of the pane that are not the table ---------------
+
+
+
+    @staticmethod
+    def _measured_cell(row: dict) -> Text:
+        """Measured and eligible calls in ONE cell: "973 / 1,073".
+
+        The two figures only mean something together -- a rate from 12 of 1,000
+        calls is not the same measurement as one from 973 of them -- and side by
+        side in one cell they cost one column instead of two, which is what
+        buys the row its source and timing back at a hundred columns.
+        """
+        return Text(f"{row['measured']} / {row['eligible']}", justify="right", style="muted")
+
+    def _speed_note_lines(self, payload: dict) -> list[list[Run]]:
+        """The pane's ONE strip: what is wrong first, then the quiet facts.
+
+        Everything here is a fact the figures depend on -- which series the rows
+        measured, which sources answered, whether the snapshot is still being
+        built, what the timing filter is hiding. What it is NOT is the window:
+        the range strip one row above already prints those dates, and a figure
+        repeated in two places is two places that can disagree.
+
+        Amber marks the lines that mean "what is on screen is not what you asked
+        for". The rest is muted on the line below it, so a healthy pane with a
+        long list of qualifiers does not look like a warning.
+        """
+        cache = payload.get("cache") or {}
+        state = str(cache.get("state") or "unknown")
+        warn: list[str] = []
+        facts: list[str] = []
+        series_note, series_bad = "", False
+        if self._sp_mode in ("trend", "hour"):
+            # Which ONE thing the rows measure. Both views answer for a single
+            # comparison key or merged model, and it names the LOADED series --
+            # naming the last pick instead would print model two's name over
+            # model one's rates whenever a read was slow or failed.
+            selection = self._speed_selection_label()
+            if selection:
+                facts.append(f"measuring {selection}")
+            series_note, series_bad = self._speed_series_state()
+            if series_note:
+                (warn if series_bad else facts).append(series_note)
+        if self._sp_job_note:
+            warn.append(self._sp_job_note)
+        facts.append(f"source {self._sp_source or 'all measured'}")
+        # Moved ahead of the cache state: a group the timing filter is hiding is
+        # a fact about the ROWS, and "ready" is a fact about the plumbing.
+        # The box two rows below reads "[ ] Whole-request timing", so saying that
+        # again would cost the table a row to learn nothing. What the box CANNOT
+        # say is what the WIDENED set includes -- that is a different population
+        # of measurements, and it is said here the moment it is true.
+        if self._sp_include_windows:
+            facts.append("timing includes whole request (the initial wait counts)")
+        hidden = payload.get("hidden_request_windows") or []
+        if hidden:
+            facts.append(
+                f"{len(hidden)} group{'s' if len(hidden) != 1 else ''}"
+                f" hidden by the timing filter · press x"
+            )
+        status = payload.get("source_status") or []
+        if status:
+            facts.append(
+                "no measured speed: "
+                + ", ".join(f"{s.get('source')} ({s.get('status')})" for s in status[:4])
+            )
+        # LAST, because it is the one fact here about the plumbing rather than
+        # about the rows: when the strip has room for a single line, a group the
+        # timing filter is hiding beats a word that says "ready".
+        facts.append(f"cache {state}")
+        room = self._text_width("#sp-note", fallback=self._pane_width("speed") - 2)
+        # A short terminal cannot spare the rows: a third strip line is a row the
+        # TABLE loses, and once the pane needs to scroll its scrollbar takes a
+        # column off the table's right edge -- which is how a measured figure
+        # loses its last digit. Facts give way first; warnings keep their lines.
+        # Two rows is the most a pane may spend saying how its data was earned
+        # when the terminal is 24 rows tall: everything below the strip -- the
+        # picture, the rows, the explanation of the row that was opened -- is
+        # what the reader came for, and each of them loses a row to each of
+        # these.
+        # TWO rows, at every size, and they are the same two rows a review asked
+        # for: the first says what is on screen (or what went wrong with it), the
+        # second is the quiet context that the figures depend on. Anything the
+        # two cannot hold is the sentence UNDER the table and, on an open row,
+        # the detail -- not a third and fourth line above the picture.
+        lines: list[list[Run]] = []
+        if warn:
+            lines += [[Run(part, "warn")]
+                      for part in _fact_rows(warn, room, limit=2, tail=False)]
+        lines += [[Run(part, "muted")]
+                  for part in _fact_rows(facts, room, limit=2, tail=False)]
+        return lines
+
+    def _paint_speed_selectors(self, payload: dict) -> None:
+        """Label every control with the value it HOLDS, and grey out what cannot apply.
+
+        A button that reads "Series" cannot tell you what is selected, and what a
+        reader is most likely checking is exactly that. These are also the only
+        way to see a series choice at all: a picker opened by a blind keypress
+        leaves nothing behind once it closes.
+
+        The row cannot scroll sideways, so the budget is spent in order -- source,
+        bucket, the timing preference, and only then the series name, which is the
+        one label long enough to need cutting. A cut here shows itself as a cut.
+        """
+        lens = self._sp_lens
+        mode = self._sp_mode
+        # Model first. The button lives in a row that cannot scroll sideways, so
+        # a source-led label ("codex / gpt-5.1-codex / response window / output
+        # + reasoning") spends its whole budget on the part a reader has already
+        # got from the Source button two cells to the left, and the model -- the
+        # thing they are checking -- arrives as "codex / g…".
+        series_label = (self._speed_selection_model_label()
+                        or self._speed_selection_label()
+                        or self._speed_requested_label() or "not chosen")
+        bucket_shown = mode == "trend" or (mode == "hour" and lens == "combined")
+        source_label = (
+            f"Source: {TOOL_LABELS.get(self._sp_source, self._sp_source)}" if self._sp_source
+            else "Source: All sources"
+        )
+        timing_label = ("[x] Whole-request timing" if self._sp_include_windows
+                        else "[ ] Whole-request timing")
+        fixed = [source_label, f"Bucket: {self._sp_bucket}" if bucket_shown else "",
+                 timing_label]
+        # 3 cells per button: a space of label padding each side and a cell of
+        # margin. The row cannot scroll sideways, so the last button in it gets
+        # cut off instead -- which is why the sum here keeps a cell of slack
+        # rather than spending the pane down to its last column.
+        # A button costs its label plus four cells of padding and border, plus a
+        # cell of margin (measured, not guessed). The fill between the group and
+        # the preference is 1fr, so it gives way -- but only to zero, and a row
+        # that is still too wide cuts whatever sits at its right edge, which is
+        # the preference. Two cells of slack keep that from ever being close.
+        shown = [f for f in fixed if f]
+        room = (self._pane_width("speed") - 5 * (len(shown) + 1)
+                - sum(cell_len(f) for f in shown) - 2)
+        wanted = f"Series: {series_label}" if mode != "across" else "Series"
+        for wid, label, shown, usable in (
+            ("sp-pick-source", source_label, True, True),
+            ("sp-pick-series", _fit(wanted, max(14, room)),
+             mode != "across", bool(self._speed_key_inventory() or self._speed_model_inventory())),
+            ("sp-pick-bucket", f"Bucket: {self._sp_bucket}", bucket_shown, bucket_shown),
+            # A PREFERENCE, not a fourth lens: it changes which measurements are
+            # in the population. It reads as a ticked box for the same reason a
+            # filled tab would say "this view is open" about something that is
+            # not a view.
+            ("sp-windows", timing_label, True, True),
+        ):
+            button = self.query_one(f"#{wid}", Button)
+            button.display = shown
+            # A checkbox is drawn with brackets, and brackets are markup.
+            button.label = escape(label)
+            button.set_class(not (usable and shown), "-off")
+
+    def _paint_speed_chart_hidden(self) -> None:
+        chart = self.query_one("#sp-chart", Static)
+        chart.display = False
+        chart.update("")
+
+    def _speed_chart_geometry(self) -> tuple[bool, int]:
+        """(side_by_side, cells the chart may draw into).
+
+        Beside the table when the table still has room to name its own columns
+        after the chart takes its share; above it otherwise. The estimate is made
+        here rather than asked of the layout because the paint runs BEFORE the
+        layout pass that would answer: asking now returns the width of the
+        arrangement being replaced.
+        """
+        pane = self._pane_width("speed")
+        # 60 cells is what the table needs to name a bucket, its rate and the
+        # responses behind it; anything less and the picture would be bought with
+        # a table that cannot identify its own rows.
+        split = pane >= 104
+        return split, max(24, pane - (60 if split else 4))
+
+    #: Rows a table needs to be arrowed usefully: its header and three rows.
+    _SERIES_TABLE_MIN = 4
+    #: Rows a table needs before it is worth the rows a picture is asking for.
+    #: Header plus seven: a 24-hour table showing four hours is a scrollbar, and
+    #: a two-row bar chart is decoration, so below this the TABLE keeps the rows.
+    _SERIES_TABLE_READABLE = 8
+    #: Rows the picture wants when it can have them, and the floor below which it
+    #: is two stubs and a line rather than a picture. Under the floor the picture
+    #: gives its rows back: the note strip and the table say what a stub would.
+    _SERIES_CHART_WANT = 6
+    _SERIES_CHART_WANT_COMPACT = 6
+    #: Below this a "chart" is two stubs and a line rather than a picture: three
+    #: rows of bar is the least that shows a series rising and falling, and both
+    #: the note strip and the table already carry the figures a stub would.
+    _SERIES_CHART_MIN = 5
+
+    #: Rows the Speed page spends above the series box on a terminal that has
+    #  never been laid out: head, one strip line, two tool rows.
+    _SPEED_ABOVE_UNKNOWN = 5
+
+    def _speed_rows_above(self) -> int:
+        """Rows the page spends ABOVE the series box.
+
+        Read off where the box actually sits rather than counted by hand: the
+        head, the strip and the two tool rows are all laid out by the time Speed
+        paints, and none of them moves when the picture changes size -- unlike
+        the box itself, whose height is exactly what this paint is deciding.
+        """
+        box = self.query_one("#sp-series")
+        pane = self.query_one("#pane-speed")
+        if pane.region.height == 0 or box.region.y == 0:
+            return self._SPEED_ABOVE_UNKNOWN
+        return max(0, box.region.y - pane.region.y)
+
+    def _speed_series_budget(self, detail_rows: int, split: bool,
+                             chart: bool = True) -> tuple[int, int]:
+        """(rows for the table, rows for the picture) in the space the pane has left.
+
+        The pane is the only honest ledger. The strip above can be one line or
+        three, the detail below can be open or closed, and both take rows from
+        whatever is left -- so the rows are divided here, in the open, and the two
+        widgets are then GIVEN those heights instead of each asking the layout for
+        itself. Asking for itself is how a picture and a table once added up to
+        more rows than the screen had, and the table was drawn below the terminal
+        with a caption on top of it.
+
+        Beside the rows the table gets all of them: the picture spends the columns
+        it was given, not the height the table is standing in.
+        """
+        pane = self.query_one("#pane-speed")
+        want = self._SERIES_CHART_WANT_COMPACT if self._compact else self._SERIES_CHART_WANT
+        # The margin BELOW the box (the caption's own blank row) belongs to the
+        # caption, and a picture that was never drawn -- Across models has no
+        # picture -- reserves nothing. Both were once unpaid, and the row they
+        # took came off the bottom of the pane, where the caption and the status
+        # strip are drawn on top of each other.
+        left = max(0, pane.region.height - self._speed_rows_above() - max(0, detail_rows)
+                   - self._speed_detail_margin())
+        if not chart:
+            return max(self._SERIES_TABLE_MIN, left), 0
+        if split:
+            # Beside the rows the picture spends COLUMNS, not the rows the table
+            # is standing in, so the box's whole height is on offer to it. It
+            # draws what it can inside that (and its caption is packed into what
+            # the bars leave), which is what makes a seven-bucket series read as
+            # a chart rather than as a row of stubs over an empty panel.
+            return max(self._SERIES_TABLE_MIN, left), left
+        # Stacked, the two children share the box, and the row of air between the
+        # picture and the header is a row of the box like any other.
+        table = max(self._SERIES_TABLE_MIN, left - want - (1 if want else 0))
+        if table < self._SERIES_TABLE_READABLE and want:
+            # The picture is asking for rows the table needs more. It keeps what
+            # is spare above a readable table, and goes below -- a series the
+            # reader cannot arrow through is not a series.
+            table = max(self._SERIES_TABLE_MIN,
+                        min(left - 1 - self._SERIES_CHART_MIN,
+                            self._SERIES_TABLE_READABLE))
+        chart_rows = max(0, left - table - 1)
+        if chart_rows < self._SERIES_CHART_MIN:
+            chart_rows, table = 0, max(left, self._SERIES_TABLE_MIN)
+        return table, chart_rows
+
+    def _speed_detail_margin(self) -> int:
+        """The blank row the stylesheet puts above the caption line.
+
+        It is a row of the pane like any other. In dense mode the rule is off
+        (see #tabs.-compact), which is the only reason the same arithmetic serves
+        both a 36-row terminal and a 24-row one.
+        """
+        detail = self.query_one("#sp-detail", Static)
+        if not detail.display or self._compact:
+            return 0
+        return 1
+
+    def _speed_size_series(
+        self, detail_lines: list[list[Run]] | None, *, opened: bool = False
+    ) -> int:
+        """Rows below the table written, then the rows that are left divided.
+
+        Write what goes under the table, then divide the rows that are left; the
+        return value is the rows the picture may draw. The detail is written FIRST
+        because its height is one of the numbers in the division: opening a row
+        takes rows from the box above it, and a picture sized before that is
+        written is a picture that no longer fits.
+
+        `self._sp_chart_wanted` says whether THIS mode draws a picture at all.
+        Asking instead whether a caption was passed once cost Across models six
+        rows of screen for a chart that pane never draws.
+        """
+        detail = self.query_one("#sp-detail", Static)
+        if detail_lines is None:
+            detail_rows = self._sp_detail_wanted if detail.display else 0
+            detail.styles.height = "auto" if detail.display else "0"
+        else:
+            rows = self._speed_detail_rows(
+                detail_lines, cap=self._SPEED_DETAIL_CAP if opened else 0
+            )
+            detail_rows = len(rows)
+            # The height is PAID FOR, so it is also SET. Left on auto the widget
+            # answers to its own content, and one wrapped caption row -- the
+            # width it was packed at is the width of the frame being replaced --
+            # put the whole pane one row past the clip, footer drawn over the
+            # sentence that explains the figures.
+            detail.display = True
+            detail.styles.height = str(detail_rows)
+            detail.update(emit_markup(rows))
+        self._sp_detail_wanted = detail_rows
+        split, _cells = self._speed_chart_geometry()
+        table_rows, chart_rows = self._speed_series_budget(
+            detail_rows, split, chart=self._sp_chart_wanted)
+        self.call_after_refresh(self._refit_speed_series)
+        box = self.query_one("#sp-series")
+        table = self.query_one("#sp-table", DataTable)
+        # Explicit heights, not 1fr: the arithmetic above is the layout, and a
+        # second authority deciding the same two boxes is what the pane had before.
+        # A table is as tall as its rows. Sized at the budget it was GIVEN, ten
+        # rows of data in a thirty-row terminal left seven empty ones between the
+        # last figure and the sentence under it -- a hole in the middle of the
+        # page. The budget stays the ceiling (it is what keeps a 24-hour table on
+        # screen and scrolling) and the leftover air moves below the caption,
+        # where it belongs to the pane instead of punching through the content.
+        wanted = 1 + table.row_count if table.row_count else table_rows
+        table_used = max(self._SERIES_TABLE_MIN, min(table_rows, wanted))
+        # Stacked, the picture's own margin-bottom (#sp-chart.-stacked) is a row
+        # of the box like any other. It was left out of the box's height, so the
+        # table drew one row PAST its container and the caption painted over the
+        # last hour -- which is also why the row under the cursor sat below the
+        # table's own fold and the widget stopped scrolling for it.
+        box.styles.height = (f"{max(table_used, chart_rows)}" if split
+                             else f"{table_used + chart_rows + (1 if chart_rows else 0)}")
+        table.styles.height = f"{table_used}"
+        self._sp_table_used = table_used
+        self._sp_chart_budget = chart_rows
+        self._sp_series_painted = self._speed_series_stamp()
+        return chart_rows
+
+    #: Rows #sp-table was last GIVEN, so the picture can shrink the box to the
+    #: taller of the two without asking the ledger twice.
+    _sp_table_used: int = 0
+
+    def _speed_series_stamp(self) -> tuple:
+        """What the last division of the rows was based on."""
+        return (self._speed_rows_above(),
+                self._sp_detail_wanted,
+                self.query_one("#pane-speed").region.height,
+                self._compact,
+                self._speed_chart_geometry()[0],
+                # The columns are fitted to the table's OWN width, and in Trend
+                # and Hour that width changes when the picture moves beside them
+                # -- without it here, the fit kept the budget of the arrangement
+                # being replaced, and the table answered the new, narrower one
+                # with a horizontal scrollbar over its own last column.
+                self.query_one("#sp-table", DataTable).content_region.width)
+
+    def _apply_density(self) -> None:
+        """One blank row between sections is right at 36 rows and wrong at 24.
+
+        The air gives way all at once, by one flag, rather than one widget at a
+        time: the page keeps its order and its surfaces at every size, and loses
+        only the space between them. Toggling it on resize is what stops a window
+        dragged small from keeping a layout it outgrew.
+        """
+        compact = self._pane_screen_height() <= 31
+        tabs = self.query("#tabs")
+        if not tabs:
+            return
+        self._compact = compact
+        self.query_one("#tabs").set_class(compact, "-compact")
+
+    def _paint_speed_chart(
+        self, *, rows: int, title: str, bucket_note: str, entries: list[dict],
+        lens_note: str,
+    ) -> None:
+        """The picture of the buckets the route returned, beside or above the rows.
+
+        It exists for the one thing a table says badly: WHERE the series is empty.
+        A blank column is an unmeasured bucket, a stub on the baseline is a
+        measured zero, and the two must never look alike. The exact figures stay
+        in the table, which is why the value over a bar is dropped rather than
+        shortened when it does not fit its column.
+
+        BESIDE the table there is room to name the series twice, so the title
+        line stays. ABOVE it, every row comes out of the table's height, and the
+        strip over there has already said which series is being measured.
+        """
+        split, drawn_width = self._speed_chart_geometry()
+        # The box loses its own right padding to its text; the estimate is still
+        # made before the layout (the measured width would be the arrangement
+        # this paint is replacing), so the padding is subtracted rather than read.
+        width = max(16, drawn_width - 3)
+        chart = self.query_one("#sp-chart", Static)
+        self.query_one("#sp-series").set_class(split, "-split")
+        chart.set_class(not split, "-stacked")
+        budget = rows
+        if budget < self._SERIES_CHART_MIN:
+            # No honest picture fits here. Say nothing rather than drawing two
+            # stubs over the rows the exact figures need.
+            self._sp_chart_rows = 0
+            chart.display = False
+            chart.update("")
+            return
+        lines: list[list[Run]] = []
+        drawn: dict = {}
+
+        def caption_of(shape: dict) -> list[str]:
+            """The picture's own facts, once its columns are known.
+
+            Ordered by what only the picture can say: where the series is empty
+            and how much of it exists at all. The bucket size and the lens are
+            already on the strip above the table, so they are the facts that give
+            way when the caption is down to its last row."""
+            return [
+                "gaps are unmeasured",
+                f"{shape['measured']} of {shape['columns']} buckets measured",
+                # The peak names its bucket: "peak 88.4" over a picture of 24 of
+                # them is a figure the reader has to go and find.
+                f"peak {shape['peak_text']} tok/s at {shape['peak_key']}"
+                if shape["peak_text"] else "",
+                bucket_note,
+                lens_note,
+            ]
+
+        # Shorten the PICTURE before shortening anything that says a number:
+        # the bars show where the series is empty, and both the note strip and
+        # the table already carry the figures a caption would repeat. The loop
+        # ends at the first height whose whole assembly fits the box.
+        for height in range(
+            min(4 if self._compact else 12, max(2, budget - 2)), 1, -1
+        ):
+            drawn = column_chart(
+                entries, width=width, height=height,
+                # "series", the same lavender Overview's activity bars wear: the
+                # approved palette reserves this tone for "a measured series",
+                # and a second colour for the same kind of mark would leave the
+                # reader checking which blue meant what.
+                glyphs=_safe_glyphs(), style="series", unit="tok/s",
+            )
+            if not drawn["available"]:
+                self._sp_chart_rows = 0
+                chart.display = False
+                chart.update("")
+                return
+            lines = []
+            if split or not self._compact:
+                lines.append([Run(_fit(title, width), "bold")])
+            lines += drawn["lines"]
+            spare = budget - len(lines)
+            if spare > 0:
+                # No "N more lines" tally here: what gives way is the bucket size
+                # and the lens, both of which the strip above the table already
+                # prints, so the count would be noise about facts the reader is
+                # not missing.
+                lines += [[Run(part, "muted")]
+                          for part in _packed(caption_of(drawn), width,
+                                              limit=spare, notice=False)]
+            if len(lines) <= budget:
+                break
+        else:
+            self._sp_chart_rows = 0
+            chart.display = False
+            chart.update("")
+            return
+        self._sp_chart_rows = len(lines)
+        chart.display = True
+        chart.update(emit_markup(lines))
+        # The box was divided BEFORE the picture knew its own height: the bars
+        # stop at a cap, the captions stop at what the columns hold, and the rows
+        # they did not spend stayed inside the box as a navy gap under the last
+        # bar. Now that the height is known, the box takes it -- and only in split
+        # mode, where the picture rather than the table decides how tall the row
+        # of the page is.
+        if split and self._sp_table_used:
+            self.query_one("#sp-series").styles.height = str(
+                max(len(lines), self._sp_table_used))
+
+    def _speed_rate_label(self, table: DataTable, others: list[tuple], lens: str) -> str:
+        """The rate header, spelled out only when the table can pay for the words.
+
+        "tok/s per stream" names which denominator the column divided -- the one
+        thing a table of buckets cannot say for itself, and the difference between
+        two figures that otherwise look identical. It also costs eight cells more
+        than "tok/s", and those cells come out of the columns that identify a row:
+        beside the picture at 120 columns the spelled-out header pushed the
+        Responses-behind-the-rate column out of the table. So the spelling is
+        bought only when nothing has to be dropped to pay for it.
+        """
+        long = "tok/s per stream" if lens == "stream" else "tok/s combined"
+        # minus one: the vertical scrollbar these tables grow takes a column the
+        # fit has to leave room for.
+        budget = _table_budget(table) - 1
+
+        def kept(label: str) -> int:
+            spec = [("rate", label, max(8, cell_len(label) + 1), False), *others]
+            sized = [(key, text, max(int(width), cell_len(text) + 1), optional)
+                     for key, text, width, optional in spec]
+            return len(fit_columns(sized, budget))
+
+        return long if kept(long) == kept("tok/s") else "tok/s"
+
+    def _paint_speed_trend(self) -> None:
+        self._sp_chart_wanted = True
         table = self.query_one("#sp-table", DataTable)
         # The renderer and the note above it resolve the series together, so the
         # heading can name model two only when the rows measure model two.
         series, _label = self._speed_trend_selection()
         trend = views.speed_trend_rows(self._sp_trend or {}, key=series, lens=self._sp_lens)
-        spec = [("bucket", "Bucket", 16, False), ("span", "Window", 24, True)]
-        spec.append(("rate", "tok/s per stream", 8, False) if self._sp_lens == "stream"
-                    else ("rate", "tok/s combined", 8, False))
-        spec += [("calls", "Responses", 10, True), ("par", "Parallelism", 12, True)]
-        if self._sp_lens == "stream":
+        stream = self._sp_lens == "stream"
+        # The column budget depends on whether the picture stands BESIDE these
+        # rows or above them, and the paint runs before the layout that would
+        # answer, so the same estimate the box will use is taken here.
+        split_now = self._speed_chart_geometry()[0]
+        held = self._held_key(table)
+        # BESIDE the picture the table has roughly half the pane, and what it
+        # must never lose is the bucket, the rate the bars are drawn from and the
+        # number of responses behind it -- which is the preview's own three.
+        # "Window" repeats the bucket whenever a bucket IS a day, and its long
+        # span was the column that pushed the rate header off the screen.
+        # The span column costs 24 cells, and at 80 columns the table cannot pay
+        # for it AND its own vertical scrollbar: the fit sized the columns to a
+        # width the scrollbar then took back, and the rate arrived clipped. A
+        # wide-enough pane buys it back.
+        span_ok = self._pane_width("speed") >= 92
+        spec = [("bucket", "Bucket", 16, False)]
+        if span_ok:
+            spec.append(("span", "Window", 24, True))
+        spec += [("calls", "Responses", 10, not span_ok),
+                 ("par", "Parallelism", 12, True)]
+        if stream:
             spec += [("p10", "p10", 8, True), ("p90", "p90", 8, True)]
-        self._shape(table, tuple(spec))
+        # The rate goes SECOND, once the rest of the row is known: the header
+        # names the denominator ("per stream" / "combined") when the table can
+        # hold the words, and shortens to "tok/s" when the only thing they would
+        # cost is a column that identifies the row.
+        spec.insert(1, ("rate", self._speed_rate_label(table, spec, self._sp_lens),
+                        8, False))
+        self._shape(table, tuple(spec), rows=[
+            (row["key"], row["span"], row["per_stream"] if stream else row["combined"],
+             row["calls"], row["parallelism"], row["p10"], row["p90"])
+            for row in trend["rows"]
+        ], reserve=1)  # a month of day buckets outgrows any terminal
         for row in trend["rows"]:
             self._add_row(table, [
                 ("bucket", escape(row["key"])),
-                ("span", escape(row["span"] if wide else ("gap" if row["gap"] else ""))),
-                ("rate", _num_cell(row["per_stream"] if self._sp_lens == "stream"
-                                    else row["combined"])),
+                *([("span", escape(row["span"]))] if span_ok else []),
+                ("rate", _num_cell(row["per_stream"] if stream else row["combined"])),
                 ("calls", _num_cell(row["calls"])),
                 ("par", _num_cell(row["parallelism"])),
                 ("p10", _num_cell(row["p10"])),
                 ("p90", _num_cell(row["p90"])),
             ], key=row["key"])
-        detail = self.query_one("#sp-detail", Static)
-        detail.display = True
+        self._restore_cursor(table, held)
+        gran = str(trend.get("granularity") or "auto")
+        # The caption first: its height is part of the division below, so the
+        # picture can only be sized after it is known.
         lines = [
             [Run(f"series {trend['selected'] or 'none'} · {trend['note']}", "muted")],
-            [Run(f"buckets offered: {', '.join(trend['offered']) or 'none'} · b changes resolution · k chooses the series", "muted")],
-            [Run(f"latest measured point: {trend['latest']} · {trend['spread_note']}", "muted")],
+            [Run(f"latest measured point: {trend['latest']} · {trend['spread_note']}"
+                 f" · buckets offered: {', '.join(trend['offered']) or 'none'}", "muted")],
         ]
         lines += self._speed_series_warning_lines()
-        detail.update(emit_markup(lines))
+        open_lines = self._speed_open_detail()
+        rows = self._speed_size_series(
+            open_lines or lines, opened=open_lines is not None)
+        self._paint_speed_chart(
+            rows=rows,
+            title=f"{gran} buckets · {trend['selected'] or 'no series'}",
+            bucket_note=f"{gran} buckets",
+            entries=views.chart_entries(
+                trend["rows"],
+                "per_stream_value" if stream else "combined_value",
+                text_key=("per_stream" if stream else "combined"),
+            ),
+            lens_note=("output per measured stream-second" if stream
+                       else "combined output over the busy clock"),
+        )
+        self.call_after_refresh(self._refit_speed_series)
 
     def _paint_speed_hours(self) -> None:
+        self._sp_chart_wanted = True
         table = self.query_one("#sp-table", DataTable)
         hours = views.speed_hour_rows(self._sp_hours or {}, lens=self._sp_lens)
         combined = self._sp_lens == "combined"
+        held = self._held_key(table)
         spec = [
+            # The hour axis IS the identity column, so it never goes; the second
+            # column is the rate the bars are drawn from, and the third says how
+            # many responses stand behind it (an hour built from one response is
+            # not an hour of throughput).
             ("hour", "Hour (server clock)", 18, False),
-            ("rate", "tok/s", 8, False),
-            ("calls", "Responses", 10, True),
+            # Not optional: beside the picture this is the whole table, and an
+            # hour built from one response is not an hour of throughput.
+            ("calls", "Responses", 10, False),
         ]
-        # A merged model has no per-hour coverage dict to show, so the combined
-        # lens spends the last column on the overlap the server measured rather
-        # than holding up a Coverage column that could only ever print a dash.
         spec.append(("par", "Parallelism", 12, True) if combined
                     else ("coverage", "Coverage", 9, True))
-        self._shape(table, tuple(spec))
+        spec.insert(1, ("rate", self._speed_rate_label(table, spec, self._sp_lens),
+                        8, False))
+        self._shape(table, tuple(spec), rows=[
+            (row["hour"], row["rate"], row.get("calls", EM_DASH),
+             row.get("parallelism", EM_DASH) if combined else row.get("coverage", EM_DASH))
+            for row in hours["rows"]
+        ], reserve=1)  # 24 hours do not fit above a status strip
         for row in hours["rows"]:
             cells = [
                 ("hour", escape(row["hour"])),
@@ -3684,15 +5124,12 @@ class TokdashApp(App):
             cells.append(("par", _num_cell(row.get("parallelism", EM_DASH))) if combined
                          else ("coverage", _num_cell(row.get("coverage", EM_DASH))))
             self._add_row(table, cells, key=row["hour"])
-        detail = self.query_one("#sp-detail", Static)
-        detail.display = True
-        if self._sp_lens == "combined":
+        self._restore_cursor(table, held)
+        if combined:
             model = (hours.get("selected_key") or {}).get("model") or EM_DASH
             merged = " · ".join(
                 part for part in (
                     f"sources {', '.join(hours['sources'])}" if hours.get("sources") else "",
-                    # _kinds already returns the joined label; joining it again
-                    # spelled it out one character at a time.
                     "timing " + views._kinds(hours["kinds"]) if hours.get("kinds") else "",
                 ) if part
             )
@@ -3704,8 +5141,13 @@ class TokdashApp(App):
                 "an hour that measured nothing is a gap, not a zero", "muted")])
         else:
             key = hours.get("selected_key") or {}
+            # Every part of the key in the pane's own words. Printing the raw
+            # field value put "output_including_reasoning" on the screen under
+            # a table whose own rows say "out+reason" for the same thing.
             label = " / ".join(
-                views._kinds([v]) if k == "measurement_kind" else str(v)
+                views._kinds([v]) if k == "measurement_kind"
+                else views._basis(v) if k == "token_basis"
+                else str(v)
                 for k, v in key.items() if v
             )
             lines = [
@@ -3714,9 +5156,21 @@ class TokdashApp(App):
                      "an hour that measured nothing is a gap, not a zero", "muted")],
             ]
         lines += self._speed_series_warning_lines()
-        detail.update(emit_markup(lines))
+        open_lines = self._speed_open_detail()
+        rows = self._speed_size_series(
+            open_lines or lines, opened=open_lines is not None)
+        self._paint_speed_chart(
+            rows=rows,
+            title=f"Hour of day · {self._speed_selection_label() or 'no series'}",
+            bucket_note="hours use the server's local clock",
+            entries=views.chart_entries(hours["rows"], "rate_value", text_key="rate"),
+            lens_note=("combined output over the busy clock" if combined
+                       else "output per measured stream-second"),
+        )
+        self.call_after_refresh(self._refit_speed_series)
 
     def _paint_quota(self) -> None:
+        self._paint_scope("quota")
         banner, rows, note, credit_lines, row_keys = quota_table(
             self._quota_state_val or {},
             self._quota_history_val,
@@ -3734,7 +5188,7 @@ class TokdashApp(App):
         # like a value, not like a column that is too narrow. So the columns are
         # measured against the rows they are about to hold, and fit_columns drops
         # a whole optional column rather than cutting a word in half.
-        self._shape(table, QUOTA_COLUMNS, list(rows))
+        self._shape(table, QUOTA_COLUMNS, list(rows), reserve=1)
         self._quota_idents = {}
         for index, (row, identity) in enumerate(zip(rows, row_keys)):
             cells = list(row)
@@ -3767,6 +5221,7 @@ class TokdashApp(App):
             detail.update("")
 
     def _paint_pricing(self) -> None:
+        self._paint_scope("pricing")
         result = views.pricing_rows(self._pricing or {}, search=self._pr_search)
         note = (
             f"{result['count']} of {len((self._pricing or {}).get('data', {}).get('models') or {})} models · "
@@ -3782,7 +5237,7 @@ class TokdashApp(App):
             ("model", "Model", 40, False), ("input", "Input", 10, False),
             ("output", "Output", 10, False), ("cache_read", "Cache read", 10, True),
             ("cache_write", "Cache write", 11, True), ("aliases", "Aliases", 20, True),
-        ))
+        ), reserve=1)
         for row in result["rows"]:
             self._add_row(table, [
                 ("model", escape(row["model"])),
@@ -3813,9 +5268,18 @@ QUOTA_COLUMNS: tuple[tuple[str, str, int, bool], ...] = (
     ("trend", "24h", 12, True),
     ("status", "Status", 14, True),
 )
-# Card order matches views.kpi_cards; the colours are the approved preview's six
-# KPI tones, held constant so a figure keeps its colour across views.
-_CARD_COLORS = ("#c4a1ff", "#a8b1ff", "#86bdff", "#79dfbd", "#f2d07e", "#8cdeeb")
+# The approved preview's six KPI tones, keyed by the FIGURE rather than by
+# position: "sorted by cost" moves the columns, and a colour that moved with
+# them would stop meaning anything.
+_CARD_COLORS = {
+    "tokens": "#a8b1ff",
+    "cost": "#79dfbd",
+    "messages": "#c4a1ff",
+    "agent": "#86bdff",
+    "cache": "#8cdeeb",
+    "model": "#f2d07e",
+}
+_CARD_TINT_DEFAULT = "#a8b1ff"
 
 
 # A DataTable charges itself two cells of padding per column on top of the
@@ -3994,8 +5458,17 @@ def session_detail_lines(
     key: tuple[str, str],
     window: DateWindow,
     labels: dict,
+    *,
+    include_turns: bool = True,
 ) -> list[list[Run]]:
     """The whole-session panel: scope first, then turns, then timing.
+
+    ``include_turns`` keeps the promise this function's name makes: the text
+    form covers the WHOLE session, every turn in it, because a caller that has
+    no table widget has nothing else. The Sessions pane passes False -- the same
+    rows are on screen underneath as #sn-turns, where they can be arrowed, and
+    printing them twice would put the timing block past the bottom of the pane.
+    Either way nothing is truncated: there is no "last eight turns" here.
 
     The scope line is not decoration. ``/api/session`` has NO date parameter, so
     the turns below always cover the entire session even though the list was
@@ -4034,8 +5507,18 @@ def session_detail_lines(
     if total_turns:
         lines.append([
             Run(f"{fmt_int(total_turns)} turn{'' if total_turns == 1 else 's'} recorded", "muted"),
-            Run(" · listed below, oldest first · arrows walk them", "muted"),
+            Run(include_turns and ", oldest first"
+                or " · listed below, oldest first · arrows walk them", "muted"),
         ])
+        if include_turns:
+            for turn in views.session_detail_rows(detail):
+                lines.append([
+                    Run(f"  turn {turn['index']}", "muted"),
+                    Run(" \u00b7 ", "muted"), Run(turn["timestamp"]),
+                    Run(" \u00b7 ", "muted"), Run(turn["model"]),
+                    Run(" \u00b7 ", "muted"), Run(turn["tokens"]),
+                    Run(" \u00b7 ", "muted"), Run(turn["cost"]),
+                ])
     else:
         lines.append([Run("no turns recorded for this session", "muted")])
     if speed is None:
@@ -4076,7 +5559,11 @@ _RANGEBAR_PAD = 2
 # label gutter of its own on top of ours, and every button carries a 1-cell right
 # margin. Counting only what our own CSS asks for is what clipped the exact dates
 # at 100 columns, so the strip budgets the measured cell cost instead.
-_RANGE_DATES_PAD = 2
+# Two cells of its own padding, plus two of slack: the strip is right-aligned
+# and does not wrap, so a budget one cell short loses the LAST digit of the end
+# date rather than a shortcut button. The buttons are what should give, and they
+# only do so if the dates ask for more than the minimum.
+_RANGE_DATES_PAD = 4
 _BUTTON_CHROME = 5
 _MONTH_CELLS = 22  # seven 3-cell day blocks plus the label gutter
 _CAL_MONTH_LINES = 8  # month label, weekday header, up to six week rows
@@ -4181,6 +5668,117 @@ def _report_warning(name: str, exc: Exception) -> str:
     return f"{name} failed: {err}"  # emit_markup escapes any literal bracket
 
 
+def _wrapped(text: str, width: int) -> list[str]:
+    """One fact, broken at WORD boundaries when it is wider than the surface.
+
+    _packed breaks BETWEEN facts and never inside one, which is right up to the
+    point where a single fact -- "measuring codex / gpt-5.1-codex / response
+    window / output + reasoning" -- is longer than the pane. Left alone the
+    WIDGET wraps it at whatever column runs out, so a row the ledger paid for
+    costs two rows of screen, and the last line of the caption is the one that
+    falls off the bottom.
+    """
+    if not text:
+        return []
+    if width < 12 or cell_len(text) <= width:
+        return [text]
+    parts: list[str] = []
+    current = ""
+    for word in text.split(" "):
+        candidate = f"{current} {word}" if current else word
+        if current and cell_len(candidate) > width:
+            parts.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        parts.append(current)
+    return parts
+
+
+def _fact_rows(items: list[str], width: int, *, sep: str = " · ", limit: int = 3,
+               tail: bool = True) -> list[str]:
+    """Facts to rows: packed whole, and wrapped whole when a fact cannot be whole.
+
+    The row count is the contract -- the pane budgets its height on it -- so a
+    too-long fact is broken HERE, where the break is chosen, rather than by the
+    widget afterwards, where it is a surprise. Facts that no longer fit are
+    counted on a trailing line unless ``tail`` is off, which is what a ONE-line
+    strip needs: its overflow is not lost, it is the sentence under the table.
+    """
+    rows: list[str] = []
+    current = ""
+    for item in (i for i in items if i):
+        pieces = _wrapped(item, width)
+        for index, piece in enumerate(pieces):
+            candidate = f"{current}{sep}{piece}" if current else piece
+            # index > 0: a continuation of a fact already begun. It may not join
+            # another fact's line, or the sentence arrives with a middot in it.
+            if current and (index or cell_len(candidate) > width):
+                rows.append(current)
+                current = piece
+            else:
+                current = candidate
+    if current:
+        rows.append(current)
+    if len(rows) <= limit:
+        return rows
+    kept = rows[:max(0, limit - 1)]
+    missing = [i for i in items if i and not any(i in row for row in kept)]
+    if not missing:
+        return rows[:limit]
+    if not tail:
+        return kept or rows[:limit]
+    tail = f"{len(missing)} more detail line{'s' if len(missing) != 1 else ''} (widen to read)"
+    return kept + [tail]
+
+
+def _packed(items: list[str], width: int, *, sep: str = " · ",
+            limit: int = 3, notice: bool = True) -> list[str]:
+    """Pack whole facts into lines that break BETWEEN them, never inside one.
+
+    Wrapping left to the widget breaks wherever the column runs out, which is how
+    "kimi (timing_unavailable)" used to arrive as two lines that matched nothing
+    and read as two halves. Facts that no longer fit are counted on the last line
+    rather than dropped quietly: a qualifier that had to give way is a qualifier
+    the reader should know is missing.
+    """
+    kept = [item for item in items if item]
+    lines: list[str] = []
+    current = ""
+    skipped = 0
+    for index, item in enumerate(kept):
+        candidate = f"{current}{sep}{item}" if current else item
+        if current and cell_len(candidate) > width:
+            if len(lines) >= limit - 1:
+                skipped = len(kept) - index
+                break
+            lines.append(current)
+            current = item
+        else:
+            current = candidate
+    if skipped and notice:
+        tail = f"{skipped} more detail line{'s' if skipped != 1 else ''} (widen to read)"
+        current = f"{current}{sep}{tail}" if current else tail
+    if current:
+        lines.append(current)
+    return lines[:limit]
+
+
+def _two_ends(left: str, right: str, width: int) -> str:
+    """Left text, right text, one row -- or one honest " · " between them.
+
+    Right-alignment inside a Static is arithmetic, so the arithmetic is allowed
+    to fail: when the two halves cannot both fit, they sit next to each other
+    instead of the right-hand figure wrapping under the chart it describes.
+    """
+    room = max(0, width - 2)
+    gap = room - cell_len(left) - cell_len(right)
+    if gap >= 2:
+        return f"{left}{' ' * gap}{right}"
+    return f"{left} · {right}" if left and right else (left or right)
+
+
 def _card_block(cards: list[dict], per_row: int, pane_width: int, mono: bool) -> Text:
     """Six figures as coloured blocks, reflowed to the pane's real width.
 
@@ -4202,7 +5800,10 @@ def _card_block(cards: list[dict], per_row: int, pane_width: int, mono: bool) ->
         row = cards[start:start + per_row]
         for line_index in range(3):
             for column, card in enumerate(row):
-                tint = _CARD_COLORS[(start + column) % len(_CARD_COLORS)]
+                # Tint by WHAT the figure is, not by where it landed: cost is
+                # mint and tokens lavender in every pane and every row count, so
+                # a colour seen twice is the same kind of number twice.
+                tint = _CARD_COLORS.get(card.get("key"), _CARD_TINT_DEFAULT)
                 if line_index == 0:
                     text, style = _fit(str(card["label"]).upper(), inner), f"#8fa0b8 {surface}"
                 elif line_index == 1:

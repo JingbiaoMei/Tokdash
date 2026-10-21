@@ -334,8 +334,14 @@ def static_text(app, widget_id):
 def cell(c):
     """Plain text of one DataTable cell. Round 4 made most cells rich Text
     (the right-aligned numerics of app._num, the quota status color, the
-    Detail section pills); str cells (escaped names) pass through."""
-    return c.plain if isinstance(c, Text) else str(c)
+    Detail section pills); str cells (escaped names) pass through.
+
+    A source cell is a BADGE -- the harness's own tint on an accent edge plus
+    the label (app._source_cell) -- and the edge is presentation, so it is read
+    back off here. The badge's colour has its own test, which asserts on the
+    cell's spans rather than its plain text."""
+    text = c.plain if isinstance(c, Text) else str(c)
+    return text.removeprefix(app_mod._BADGE_EDGE)
 
 
 def headers_of(table):
@@ -372,12 +378,15 @@ def test_overview_paints_window_cards_and_status(monkeypatch):
 
     async def steps(pilot):
         assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
-        # The window line IS the section header. It prints the window the APP
-        # resolved (not the payload's echo of some other window), and the
-        # palette heading only arrives if it went through emit_markup -- a
-        # heading, not a filled band across the pane.
-        assert static_text(app, "ov-range") == \
-            "[bold #c5d2e3]2026-09-20  (1 day)  ·  Overview[/]"
+        # THE WINDOW PRINTS ONCE. The shared strip under the tabs owns the dates
+        # (the window the APP resolved, not the payload's echo of another
+        # window); the page head owns the page name. Repeating either one costs
+        # a row on a 24-row screen and buys a second place to disagree.
+        strip = static_text(app, "range-dates")
+        assert strip.startswith("2026-09-20"), strip
+        assert "Overview" not in strip
+        assert static_text(app, "ov-title") == "Overview"
+        assert static_text(app, "ov-scope") == "All harnesses"
         cards = str(app.query_one("#ov-cards").content)
         assert "12.4M" in cards and "$142.31" in cards and "4,820" in cards
         assert "1h 30m" in cards  # agent SUM, not the 1h clock union
@@ -420,8 +429,8 @@ def test_overview_paints_window_cards_and_status(monkeypatch):
         assert "cache hit" in status and DB_LINE in status
         assert "computing" not in status  # idle: no stuck spinner
         # The status line names the keys THIS pane answers to.
-        assert "/ search · s sort · enter open · Esc close" in status
-        assert "[ ] range · c custom" in status
+        assert "/ search · s sort · enter open · esc close" in status
+        assert "[ ] range · c dates" in status
         # Usage and active time load; stats is NOT the Overview's to ask for.
         assert calls.usage and calls.active
         assert calls.usage[0] == ("today", False)
@@ -440,11 +449,14 @@ def test_skeleton_copy_until_first_answer(monkeypatch):
         # A pane that has never painted says what a first scan costs; a pane
         # that only has to redraw says less. Both are set BEFORE the answer.
         assert "computing… first run scans session logs" in \
-            static_text(app, "ov-range")
+            static_text(app, "ov-note")
         gate.set()
         assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
-        assert "first run scans" not in static_text(app, "ov-range")
-        assert "2026-09-20" in static_text(app, "ov-range")
+        assert "first run scans" not in static_text(app, "ov-note")
+        # A healthy pane shows NO strip at all -- an empty tinted band is worse
+        # than none -- and the dates were never the strip's to print.
+        assert app.query_one("#ov-note").display is False
+        assert "2026-09-20" in static_text(app, "range-dates")
 
         gate.clear()
         await pilot.press("2")  # Report opens for the first time, still blocked
@@ -484,7 +496,7 @@ def test_reload_clears_painted_data_and_shows_computing(monkeypatch):
         gate.clear()  # the reload's fetches block
         await pilot.press("r")
         assert await wait_for(app, pilot, lambda: table.row_count == 0)
-        assert "[dim]computing…[/]" == static_text(app, "ov-range")
+        assert "[dim]computing…[/]" == static_text(app, "ov-note")
         assert str(app.query_one("#ov-cards").content) == ""
         assert static_text(app, "ov-activity") == ""
         assert app.query_one("#ov-detail").display is False
@@ -493,8 +505,9 @@ def test_reload_clears_painted_data_and_shows_computing(monkeypatch):
 
         gate.set()
         assert await wait_for(app, pilot, lambda: table.row_count > 0)
-        assert "2026-09-20" in static_text(app, "ov-range")
-        assert "computing…" not in static_text(app, "ov-range")
+        # The window lives on the ONE shared strip (revision 5), not per pane.
+        assert "2026-09-20" in static_text(app, "range-dates")
+        assert "computing…" not in static_text(app, "range-dates")
         assert str(app.query_one("#ov-cards").content) != ""
 
     drive(app, steps)
@@ -553,7 +566,7 @@ def test_the_status_line_names_the_keys_the_active_pane_answers_to(monkeypatch):
 
     async def steps(pilot):
         assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
-        assert "[ ] range · c custom" in static_text(app, "status")
+        assert "[ ] range · c dates" in static_text(app, "status")
 
         await pilot.press("2")
         assert await wait_for(app, pilot, lambda: app._state["report"] == "ok")
@@ -741,8 +754,8 @@ def test_overview_pane_recovers_after_other_pane_supersedes_it(monkeypatch):
         usage_before = len(calls.usage)
         await pilot.press("1")  # re-activation must re-issue the fetch
         assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
-        assert "first run scans" not in static_text(app, "ov-range")
-        assert "2026-09-20" in static_text(app, "ov-range")
+        assert "first run scans" not in static_text(app, "ov-note")
+        assert "2026-09-20" in static_text(app, "range-dates")
         assert len(calls.usage) > usage_before
 
     drive(app, steps)
@@ -774,7 +787,10 @@ def test_report_tab_lazy_loads_with_shared_seam(monkeypatch):
         assert calls.usage[-1] == ("today", False)
         assert calls.insights[0][0] == "year"
         assert calls.active[0][0] == "today"
-        assert "Report" in static_text(app, "status")
+        # The foot answers "what can I press here" -- the page name belongs to
+        # the head, and the report body spells the document out for itself.
+        assert static_text(app, "rp-title") == "Report"
+        assert "← → section" in static_text(app, "status")
 
     drive(app, steps)
 
@@ -1024,7 +1040,9 @@ def test_worker_error_is_pane_local_and_app_survives(monkeypatch):
 
     async def steps(pilot):
         assert await wait_for(app, pilot, lambda: app._state["overview"] == "error")
-        assert "error: boom" in static_text(app, "ov-range")
+        assert "error: boom" in static_text(app, "ov-note")
+        # ONE prefix, not "error: error: boom".
+        assert static_text(app, "ov-note").count("error:") == 1
         assert app.is_running  # app stays alive on ordinary worker errors
         await pilot.press("q")
 
@@ -1039,7 +1057,10 @@ def test_backpressure_is_busy_line_press_r(monkeypatch):
 
     async def steps(pilot):
         assert await wait_for(app, pilot, lambda: app._state["overview"] == "error")
-        assert "busy computing — press r" in static_text(app, "ov-range")
+        note = static_text(app, "ov-note")
+        assert "busy computing — press r" in note
+        # Back-pressure is not a fault: the strip says what to do, not "error".
+        assert "error:" not in note
 
     drive(app, steps)
 
@@ -1189,7 +1210,8 @@ def test_smoke_rendered_screen_both_panes(monkeypatch):
         ]
         await pilot.press("1")
         assert await wait_for(
-            app, pilot, lambda: static_text(app, "status").startswith("Overview")
+            app, pilot,
+            lambda: static_text(app, "status").startswith("/ search · s sort")
         )
 
     drive(app, steps)
@@ -1378,11 +1400,17 @@ def test_wheel_scrolls_the_pane_not_the_screen(monkeypatch):
             pane = app.query_one("#pane-overview")
             assert pane.show_vertical_scrollbar  # content overflows the pane
             base = pane.scroll_y
-            for _ in range(3):
+            # Wheel until the pane answers, within a bound: the scroll is applied
+            # on the next refresh, and inside a full suite that refresh can lose
+            # the race with a fixed two-hundredth pause. A wheel that never moves
+            # the pane still fails here, it just gets leave to be late.
+            for _ in range(12):
                 pane.post_message(
                     events.MouseScrollDown(pane, 10, 5, 0, 1, 0, False, False, False)
                 )
-                await pilot.pause(0.02)
+                await pilot.pause(0.05)
+                if pane.scroll_y > base:
+                    break
             assert pane.scroll_y > base
             assert app.screen.scroll_y == 0  # the tab strip never slides off
             top = pane.scroll_y
@@ -1806,7 +1834,7 @@ def _quota_cell(table, label, header):
     at = {str(c.label): i for i, c in enumerate(table.ordered_columns)}
     for row in range(table.row_count):
         cells = table.get_row_at(row)
-        if str(cells[0]) == label:
+        if cell(cells[0]) == label:  # cell() reads the label off the badge
             return cells[at[header]]
     raise AssertionError(f"no quota row for {label!r}")
 

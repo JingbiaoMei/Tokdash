@@ -1,6 +1,19 @@
 {
-  "current": "2.6.19",
+  "current": "2.6.20",
   "releases": [
+    {
+      "version": "2.6.20",
+      "date": "2026-10-22",
+      "sections": [
+        {
+          "type": "fixed",
+          "items": [
+            "Cache hit rates now agree with the tokens beside them when you combine servers. A merged row used to carry the first server's rate while its token columns showed every server's totals; the rate is recomputed from the combined totals now, so a card's header and its model rows say the same thing.",
+            "The Server dropdown in model output speed shows your server names instead of raw host ids, using the same labels the rest of the dashboard uses."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.6.19",
       "date": "2026-10-18",

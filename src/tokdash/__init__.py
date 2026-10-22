@@ -1,3 +1,3 @@
 """Tokdash package."""
 
-__version__ = "2.6.19"
+__version__ = "2.6.20"

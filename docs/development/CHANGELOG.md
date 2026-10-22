@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.6.20 - 2026-10-22
+
+### Fixed
+
+- Combining servers no longer reports a cache hit rate that belongs to only one of them. `combineUsagePayloads` merged same-named apps and models by summing their token, cost and message fields, and `cache_hit_rate` was not in that field list, so the merged row carried the first server's ratio while its token columns showed every server's totals: a Claude card could read `Cache hit rate 97.5%` in its header -- which the same merge does recompute -- above a model row showing 44.4% next to the merged 2.3M input and 89.8M cache tokens. Every merged object, and each model row inside it, is now recomputed from the summed `tokens_in` and `tokens_cache` -- the same ratio `cache_hit_rate` uses on the server, where the raw tokens are aggregated before the division rather than the per-server ratios averaged -- and stays `n/a` for a merge with no prompt input. (#255, closes #253)
+- The Server picker in model output speed shows host names. It read `item.name`, a field host objects do not carry, so every option fell back to the raw id and a second server appeared in the dropdown as its UUID; it reads `item.label` now, the same expression the usage report picker uses, so a server renamed in Settings -- and the local host -- are called what the rest of the dashboard calls them. (#256, closes #254)
+
 ## 2.6.19 - 2026-10-18
 
 ### Added

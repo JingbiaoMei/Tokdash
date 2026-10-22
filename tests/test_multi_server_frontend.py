@@ -109,6 +109,106 @@ def test_usage_merger_identity_sum_and_missing_previous(tmp_path):
     assert apps == [{"name": "gpt", "tokens": 3, "cost": 3}]
 
 
+def _cache_hit_rate_payload(stats):
+    model = {"name": "shared-model", **stats}
+    return {
+        **stats,
+        **{
+            key: {"editor": {**stats, "models": [model]}}
+            for key in ("by_tool", "apps", "coding_apps")
+        },
+        **{
+            key: [model]
+            for key in (
+                "coding_models", "openclaw_models", "combined_models",
+                "top_models", "top_models_by_cost",
+            )
+        },
+    }
+
+
+def _cache_hit_rate_entries(payload):
+    for key in ("by_tool", "apps", "coding_apps"):
+        yield key, payload[key]["editor"]
+        yield f"{key}.models", payload[key]["editor"]["models"][0]
+    for key in (
+        "coding_models", "openclaw_models", "combined_models",
+        "top_models", "top_models_by_cost",
+    ):
+        if key == "combined_models" and not payload[key]:
+            continue
+        yield key, payload[key][0]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@pytest.mark.parametrize("reverse_servers", [False, True])
+@pytest.mark.parametrize("full_model_lists", ["all", "partial", "none"])
+def test_usage_merger_recomputes_cache_hit_rates(tmp_path, reverse_servers, full_model_lists):
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    function = _extract_js_function(source, "function combineUsagePayloads(list) {")
+    payloads = [
+        _cache_hit_rate_payload({
+            "tokens_in": 90, "tokens_cache": 10, "cache_hit_rate": 0.1,
+            # Cache writes are already in tokens_in; output and reasoning do not
+            # contribute to the cache-hit denominator either.
+            "tokens_cache_write": 40, "tokens_out": 1_000, "tokens_reasoning": 500,
+        }),
+        _cache_hit_rate_payload({
+            "tokens_in": 0, "tokens_cache": 300, "cache_hit_rate": 1,
+            "tokens_cache_write": 0, "tokens_out": 2_000, "tokens_reasoning": 800,
+        }),
+    ]
+    if full_model_lists != "all":
+        del payloads[0]["combined_models"]
+    if full_model_lists == "none":
+        del payloads[1]["combined_models"]
+    if reverse_servers:
+        payloads.reverse()
+
+    merged = _run(tmp_path, "cache-rates", [function], "combineUsagePayloads(input)", payloads)
+    assert merged["cache_hit_rate"] == pytest.approx(0.775)
+    assert bool(merged["combined_models"]) == (full_model_lists != "none")
+    for path, entry in _cache_hit_rate_entries(merged):
+        # A partial combined_models list only has one server's contributions;
+        # the legacy podium fallback must still include both servers.
+        if path == "combined_models" and full_model_lists == "partial":
+            assert entry["cache_hit_rate"] == 1
+            continue
+        assert entry["tokens_in"] == 90, path
+        assert entry["tokens_cache"] == 310, path
+        assert entry["cache_hit_rate"] == pytest.approx(0.775), path
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@pytest.mark.parametrize("stats, expected_rate", [
+    ({"tokens_in": 0, "tokens_cache": 10}, 1),
+    ({"tokens_in": 0, "tokens_cache": 0, "tokens_out": 50}, None),
+    ({"tokens_cache": 10, "tokens_out": 50, "cache_hit_rate": None}, None),
+    ({"tokens_cache": 10, "tokens_out": 50}, None),
+], ids=["cache-only", "zero-denominator", "no-input-breakdown", "no-rate-or-input-breakdown"])
+def test_usage_merger_cache_hit_rate_edge_cases(tmp_path, stats, expected_rate):
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    function = _extract_js_function(source, "function combineUsagePayloads(list) {")
+    payload = _cache_hit_rate_payload(stats)
+    merged = _run(tmp_path, "cache-edge", [function], "combineUsagePayloads(input)", [payload, payload])
+
+    for path, entry in _cache_hit_rate_entries(merged):
+        assert entry.get("cache_hit_rate") == expected_rate, path
+        assert ("cache_hit_rate" in entry) == ("tokens_in" in stats or "cache_hit_rate" in stats), path
+        assert ("tokens_in" in entry) == ("tokens_in" in stats), path
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_usage_merger_preserves_single_server_cache_hit_rates(tmp_path):
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    function = _extract_js_function(source, "function combineUsagePayloads(list) {")
+    # Keep the server's rounded rate verbatim on the single-server path.
+    payload = _cache_hit_rate_payload({
+        "tokens_in": 2, "tokens_cache": 1, "cache_hit_rate": 0.3333,
+    })
+    assert _run(tmp_path, "cache-identity", [function], "combineUsagePayloads(input)", [payload]) == payload
+
+
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
 def test_overview_deltas_use_one_decimal_place(tmp_path):
     source = INDEX_HTML.read_text(encoding="utf-8")

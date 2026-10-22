@@ -21871,7 +21871,7 @@
       if (wrap) wrap.hidden = servers.length < 2;
       const server = outputSpeedServer();
       if (select) select.replaceChildren(...servers.map((item) => usageReportSpeedOption(
-        item.id, item.name || item.id, !!server && item.id === server.id)));
+        item.id, item.label || item.id, !!server && item.id === server.id)));
       usageReportRenderSpeedPeriod(window);
       usageReportRenderSpeedLens();
     }

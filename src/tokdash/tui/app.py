@@ -3508,28 +3508,34 @@ class TokdashApp(App):
         """
         self._repaint_chrome()
         self._fit_panes()  # the strip's share of the screen just changed shape
-        # ... and again once it has. The resize event arrives with the app's new
-        # size, but the pane and strip are fitted against the geometry the
-        # layout pass has not produced yet, so a window dragged WIDE keeps the
-        # labels it chose while it was narrow: "d Yest." and a nav row with no
-        # keys on it, in a terminal that has room for both. Measured against the
-        # live tmux session: the labels only came back when something else
-        # (a pane switch) happened to repaint them.
+        pane = self._active_pane()
+        if self._state[pane] == "ok":
+            self._repaint_pane(pane)
+        # And the chrome again once the layout has landed. The resize event
+        # arrives with the app's new size, but the labels it chooses are fitted
+        # against geometry the layout pass has not produced yet, so a window
+        # dragged WIDE keeps the labels it chose while it was narrow: "d Yest.",
+        # and a nav row with no keys on it, in a terminal with room for both.
+        # Measured on the live tmux session, where the letters only came back
+        # when something else happened to repaint them.
+        #
+        # Chrome only. A pane's own repaint stays on the synchronous path above
+        # and happens ONCE: a second one, late, is a repaint that a pending
+        # Speed read has to survive, and the panes that name the series a reader
+        # picked (rather than the one a snapshot lists first) cannot tell a
+        # re-fit from a relabel. tests/test_tui_review_fixes4.py pins both halves.
         self.call_after_refresh(self._repaint_chrome)
 
     def _repaint_chrome(self) -> None:
-        """Re-choose every label whose shape depends on the screen's size.
+        """Re-choose the labels whose shape depends on the screen's size.
 
-        Cheap to call twice: the tab row and the strip both compare the form
-        they are about to wear with the one they are wearing, and a paint that
-        changes nothing writes nothing.
+        The tab row and the strip both compare the form they are about to wear
+        with the one they are wearing, so a pass that changes nothing writes
+        nothing. This never repaints a pane's figures.
         """
         self._apply_density()
         self._paint_tabs()
         self._paint_rangebar()
-        pane = self._active_pane()
-        if self._state[pane] == "ok":
-            self._repaint_pane(pane)
 
     def on_key(self, event: Key) -> None:
         self._check_day_rollover()

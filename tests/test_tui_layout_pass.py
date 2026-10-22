@@ -16,7 +16,7 @@ import copy
 import datetime as dt
 
 import pytest
-from textual.widgets import Button, DataTable, Static, Tab
+from textual.widgets import Button, DataTable, Static, Tab, Tabs
 
 from tokdash.tui import views
 from tokdash.sessions import SESSION_TOOLS, TOOL_LABELS
@@ -592,3 +592,27 @@ def test_the_live_window_is_the_one_thing_the_strip_paints_lavender(api):
         assert "-selected" not in app.query_one("#range-today", Button).classes
 
     fx.run(api, body, size=(120, 36))
+
+
+def test_a_window_that_grows_gives_its_letters_back(api):
+    """A fit made while the window was narrow must not outlive the narrow window.
+
+    The key chips and the full window names are the two things the layout gives
+    up at eighty columns. If the repaint that follows a resize measures against
+    the geometry the layout has not produced yet, a terminal dragged wide keeps
+    the crowded-window labels for the rest of the session.
+    """
+
+    async def body(app, pilot):
+        tabs = list(app.query(Tabs).first().query(Tab))
+        assert [str(t.label) for t in tabs][:2] == ["Overview", "Sessions"]
+        assert "d Yest." in str(app.query_one("#range-yesterday", Button).label)
+
+        await pilot.resize_terminal(120, 36)
+        await settle(pilot, 2)
+        labels = [str(t.label) for t in app.query(Tabs).first().query(Tab)]
+        assert labels[0].endswith("Overview") and labels[0] != "Overview", labels
+        assert labels[1].endswith("Sessions") and not labels[1].startswith("S"), labels
+        assert "d Yesterday" in str(app.query_one("#range-yesterday", Button).label)
+
+    fx.run(api, body, size=(80, 24))

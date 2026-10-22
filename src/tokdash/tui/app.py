@@ -3506,10 +3506,27 @@ class TokdashApp(App):
         stand for the rest of the session -- the squeeze a narrow terminal
         caused would outlive the narrow terminal.
         """
+        self._repaint_chrome()
+        self._fit_panes()  # the strip's share of the screen just changed shape
+        # ... and again once it has. The resize event arrives with the app's new
+        # size, but the pane and strip are fitted against the geometry the
+        # layout pass has not produced yet, so a window dragged WIDE keeps the
+        # labels it chose while it was narrow: "d Yest." and a nav row with no
+        # keys on it, in a terminal that has room for both. Measured against the
+        # live tmux session: the labels only came back when something else
+        # (a pane switch) happened to repaint them.
+        self.call_after_refresh(self._repaint_chrome)
+
+    def _repaint_chrome(self) -> None:
+        """Re-choose every label whose shape depends on the screen's size.
+
+        Cheap to call twice: the tab row and the strip both compare the form
+        they are about to wear with the one they are wearing, and a paint that
+        changes nothing writes nothing.
+        """
         self._apply_density()
         self._paint_tabs()
         self._paint_rangebar()
-        self._fit_panes()  # the strip's share of the screen just changed shape
         pane = self._active_pane()
         if self._state[pane] == "ok":
             self._repaint_pane(pane)

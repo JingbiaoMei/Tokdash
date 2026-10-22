@@ -75,10 +75,15 @@ def test_calendar_presets_clamp_the_current_window_and_complete_the_past_one():
 
 
 def test_single_key_shortcuts_name_the_window_the_spec_promises():
-    # "d" is Yesterday and "w" is the rolling seven days. The old "w" (calendar
-    # week) survives as a named preset, so nothing was lost by the re-key.
+    # The strip's keys and the strip's buttons agree: d is Yesterday, w is the
+    # calendar week the reader is standing in (Monday through today), m is this
+    # month. "Last 7 Days" is a DIFFERENT window and lives behind "More...", so
+    # the two never share a letter and mean two things.
     assert window_for(RANGE_KEYS["d"], TODAY).date_from == TODAY - dt.timedelta(days=1)
-    assert window_for(RANGE_KEYS["w"], TODAY).days == 7
+    week = window_for(RANGE_KEYS["w"], TODAY)
+    assert week.date_from == TODAY - dt.timedelta(days=TODAY.weekday()), week
+    assert week.date_to == TODAY, week
+    assert window_for("7d", TODAY).days == 7  # still reachable, no longer on the strip
     assert PRESET_BY_KEY["lastweek"].unit == "week"
 
 

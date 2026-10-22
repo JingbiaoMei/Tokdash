@@ -84,14 +84,24 @@ class Preset:
     rolling_days: int | None  # for rolling presets (inclusive length)
     shift: int  # whole units back from the current one (0 = current window)
     all_time: bool = False
+    hint: str = ""  # the ONE key that selects it, printed inside its button
+    strip: bool = False  # on the always-visible shortcut row (the rest: "More")
 
 
+# The strip is SHORTCUTS, not a menu: five of them, each with the key that
+# presses it written inside its own button, and everything further back behind
+# "More...". Ten look-alike buttons spread across a row ask the reader to read
+# ten labels to find the one they meant; five ask them to remember one letter.
 PRESETS: tuple[Preset, ...] = (
-    Preset("today", "Today", "Today", "day", None, 0),
-    Preset("yesterday", "Yesterday", "Yest.", "day", None, 1),
+    Preset("today", "Today", "Today", "day", None, 0, hint="t", strip=True),
+    Preset("yesterday", "Yesterday", "Yest.", "day", None, 1, hint="d", strip=True),
+    Preset("thisweek", "This Week", "Week", "week", None, 0, hint="w", strip=True),
+    Preset("month", "This Month", "Month", "month", None, 0, hint="m", strip=True),
+    # Behind "More...": still reachable, still named, still on the keyboard --
+    # by list, with their dates printed next to them, rather than by a label
+    # that a narrow terminal clips to "LMth".
     Preset("7d", "Last 7 Days", "7d", None, 7, 0),
     Preset("lastweek", "Last Week (Mon-Sun)", "Lwk", "week", None, 1),
-    Preset("month", "This Month", "Mth", "month", None, 0),
     Preset("lastmonth", "Last Month", "LMth", "month", None, 1),
     Preset("year", "This Year", "Yr", "year", None, 0),
     Preset("lastyear", "Last Year", "LYr", "year", None, 1),
@@ -99,14 +109,20 @@ PRESETS: tuple[Preset, ...] = (
     Preset("all", "All Time", "All", None, None, 0, all_time=True),
 )
 PRESET_BY_KEY: dict[str, Preset] = {p.key: p for p in PRESETS}
+STRIP_PRESETS: tuple[Preset, ...] = tuple(p for p in PRESETS if p.strip)
+# "p" opens the chooser that holds the rest. It is the strip's last button and
+# the only one that is always there.
+MORE_KEY = "p"
 
-# Single-keystroke presets (spec 2). "d" is Yesterday, "w" is the rolling
-# seven-day window -- NOT the calendar week, which is what the old "w" meant.
-# The old meaning is reachable as a named preset, so no window was lost.
+# Single-keystroke presets, and they are the STRIP's keys: what the button says
+# is what the key does. "w" is the calendar week from Monday (the week the
+# reader is in), which is why "Last 7 Days" rolled off the strip and into the
+# chooser -- the two are not the same window and must not share a key. "y" and
+# "a" stay as aliases for hands that learned them first; neither is advertised.
 RANGE_KEYS: dict[str, str] = {
     "t": "today",
     "d": "yesterday",
-    "w": "7d",
+    "w": "thisweek",
     "m": "month",
     "y": "year",
     "a": "all",

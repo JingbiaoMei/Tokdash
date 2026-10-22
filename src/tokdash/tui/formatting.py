@@ -290,6 +290,30 @@ def tool_tint(tool: object) -> str:
     return _TINT_FALLBACK[sum(key.encode("utf-8", "ignore")) % len(_TINT_FALLBACK)]
 
 
+#: The navy a badge is mixed into: the panel every table sits on.
+_CHIP_GROUND = (0x12, 0x19, 0x24)
+
+
+def tool_chip(tool: object) -> str:
+    """The badge's BACKGROUND: the source's own colour, a quarter of the way
+    into panel navy.
+
+    The approved design marks each source with a chip of its own hue rather than
+    a flat grey pill, and the hue is what the reader learns to scan for. A
+    quarter strength is the whole trick: the chip has to read as a different
+    colour from the row behind it without competing with the bold accent word
+    sitting inside it. Flat #1a2331 for every source made the tool column one
+    grey slab with different words in it.
+    """
+    accent = tool_tint(tool).lstrip("#")
+    try:
+        rgb = tuple(int(accent[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        rgb = (0x25, 0x30, 0x44)
+    mixed = tuple(round(a * 0.25 + g * 0.75) for a, g in zip(rgb, _CHIP_GROUND))
+    return "#{:02x}{:02x}{:02x}".format(*mixed)
+
+
 def text_bar(value: float, maxv: float, *, width: int = 20, glyphs: str = "blocks") -> str:
     """Inline bar row: round(width * value / maxv) filled glyphs ("█", "#" in
     ascii mode). maxv <= 0 → empty string: nothing to scale against renders

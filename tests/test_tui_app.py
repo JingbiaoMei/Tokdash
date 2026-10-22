@@ -386,7 +386,7 @@ def test_overview_paints_window_cards_and_status(monkeypatch):
         assert strip.startswith("2026-09-20"), strip
         assert "Overview" not in strip
         assert static_text(app, "ov-title") == "Overview"
-        assert static_text(app, "ov-scope") == "All harnesses"
+        assert static_text(app, "ov-scope") == "All tools"
         cards = str(app.query_one("#ov-cards").content)
         assert "12.4M" in cards and "$142.31" in cards and "4,820" in cards
         assert "1h 30m" in cards  # agent SUM, not the 1h clock union
@@ -412,7 +412,7 @@ def test_overview_paints_window_cards_and_status(monkeypatch):
         assert table.row_count == len(USAGE_PAYLOAD["by_tool"])
         # At 80 columns the harness table keeps its five load-bearing columns;
         # the optional breakdown is what goes (see the width law below).
-        assert headers_of(table) == ["Harness", "Tokens", "Share", "Cost",
+        assert headers_of(table) == ["Tool", "Tokens", "Share", "Cost",
                                      "Est. time"]
         assert plain_row(table, 0) == ["Codex", "8.0M", "64.5%", "$90.00", "50m"]
         assert plain_row(table, 1) == ["Claude Code", "4.4M", "35.5%", "$52.31",
@@ -648,12 +648,15 @@ def test_the_surface_keeps_its_layout_laws_in_css():
 
 
 
-def test_tables_mark_the_keyboard_position_without_banding(monkeypatch):
+def test_tables_mark_the_keyboard_position_with_a_quiet_row_tone(monkeypatch):
     # Round 5 banned the accidental highlight of row 0; revision 5 keeps a
     # VISIBLE cursor (it is the only keyboard-position affordance a DataTable
     # has) but the band is the quiet surface tone and never the lavender the
-    # active tab wears, so a cursor can never be read as a selection. Rows are
-    # also un-striped: the approved design separates rows by spacing alone.
+    # active tab wears, so a cursor can never be read as a selection.
+    #
+    # Rows DO alternate, one background step apart: a terminal cannot space its
+    # lines, and a reader tracking one figure across ten columns loses the row
+    # they started on. It is one step, one tone, and never a rule between rows.
     patch_fetchers(monkeypatch)
     app = TokdashApp("today")
 
@@ -663,9 +666,17 @@ def test_tables_mark_the_keyboard_position_without_banding(monkeypatch):
         assert len(tables) >= 6  # every pane ships its table
         for table in tables:
             assert table.cursor_type == "row", table.id
-            assert table.zebra_stripes is False, table.id
+            assert table.zebra_stripes is True, table.id
         band = css_rule("DataTable > .datatable--cursor")
         assert "#263141" in band and "#b9a7ff" not in band
+        odd = css_rule("DataTable > .datatable--odd-row")
+        even = css_rule("DataTable > .datatable--even-row")
+        assert "#b9a7ff" not in odd and "#b9a7ff" not in even, (odd, even)
+        # One tone each, and no rule between rows -- the separation the approved
+        # design draws with space and surface, not with lines.
+        assert "background:" in odd and "background:" in even, (odd, even)
+        for rule in (odd, even):
+            assert "border" not in rule and "underline" not in rule, rule
 
     drive(app, steps)
 
@@ -682,7 +693,7 @@ def test_a_wide_pane_gains_the_breakdown_a_narrow_one_drops(monkeypatch):
         assert await wait_for(app := narrow, pilot,
                               lambda: narrow._state["overview"] == "ok")
         table = narrow.query_one("#ov-table", DataTable)
-        assert headers_of(table) == ["Harness", "Tokens", "Share", "Cost",
+        assert headers_of(table) == ["Tool", "Tokens", "Share", "Cost",
                                      "Est. time"]
         assert plain_row(table, 0) == ["Codex", "8.0M", "64.5%", "$90.00", "50m"]
         assert all(c.width for c in table.ordered_columns)  # FIXED, not auto
@@ -695,7 +706,7 @@ def test_a_wide_pane_gains_the_breakdown_a_narrow_one_drops(monkeypatch):
         assert await wait_for(app := wide, pilot,
                               lambda: wide._state["overview"] == "ok")
         table = wide.query_one("#ov-table", DataTable)
-        assert headers_of(table) == ["Harness", "Tokens", "Share", "Cost",
+        assert headers_of(table) == ["Tool", "Tokens", "Share", "Cost",
                                      "Input", "Output", "Cache", "Hit", "Msgs",
                                      "Est. time"]
         assert plain_row(table, 0) == ["Codex", "8.0M", "64.5%", "$90.00",
@@ -847,8 +858,13 @@ def test_report_pane_footer_uses_cached_db_line_and_never_opens_store(monkeypatc
         assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         await pilot.press("2")
         assert await wait_for(app, pilot, lambda: app._state["report"] == "ok")
-        body = static_text(app, "rp-body")
-        assert DB_LINE in body  # the app's cached line reached the footer
+        # Revision 5 moved the store line off the report body and onto the strip
+        # at the foot of EVERY pane: the database a figure came from belongs to
+        # all the numbers on screen, not to the one section that prints last.
+        # What this test still carries is the guard above -- the cached string
+        # arrives here, and the builder never opens the store to get it.
+        assert DB_LINE in static_text(app, "status")
+        assert DB_LINE not in static_text(app, "rp-body")
 
     drive(app, steps)
 
@@ -977,9 +993,10 @@ def test_markup_hostile_names_render_literally(monkeypatch):
 
 
 def test_p_is_the_stats_year_key_and_never_moves_the_shared_window(monkeypatch):
-    # Revision 5 gave 'p' one meaning: walk Stats' annual ladder. It used to be
-    # a period cycle that quietly re-anchored whatever window was on screen,
-    # which is exactly the surprise the shared strip removes.
+    # 'p' is the strip's "More" on the four panes that have a strip, and Stats'
+    # year key on the one pane that does not. Neither meaning MOVES a window by
+    # itself: the chooser opens and waits, because a letter that quietly
+    # re-anchored whatever was on screen is the surprise this strip removes.
     calls = patch_fetchers(monkeypatch)
     app = TokdashApp("today")
 
@@ -989,13 +1006,18 @@ def test_p_is_the_stats_year_key_and_never_moves_the_shared_window(monkeypatch):
         usage_before = len(calls.usage)
         await pilot.press("p")
         await pilot.pause(0.15)
+        # The strip's fifth control is "p More": the window does not change, the
+        # list of the rest of them opens.
+        assert type(app.screen).__name__ == "PresetPicker", type(app.screen).__name__
         assert app._win == window_before
         assert len(calls.usage) == usage_before  # no reload, no refetch
+        await pilot.press("escape")
+        await pilot.pause(0.15)
 
         app.action_show_pane("stats")
         assert await wait_for(app, pilot, lambda: app._state["stats"] == "ok")
         assert app._stats_win.year is None  # trailing 365 is the top rung
-        assert "Trailing 365 Days" in static_text(app, "st-window")
+        assert "Trailing 365 Days" in static_text(app, "st-scope")
         # 'p' walks DOWN the ladder, and the rung below the trailing window is
         # the calendar year the reader is standing in.
         await pilot.press("p")
@@ -1249,7 +1271,7 @@ def test_period_keys_set_token_and_normalize_fetch_args(monkeypatch):
         assert calls.active_full[-1] == ("today", "2026-09-19", "2026-09-19", None)
 
         for key, preset, pair in (
-            ("w", "7d", ("2026-09-14", "2026-09-20")),      # rolling seven days
+            ("w", "thisweek", ("2026-09-14", "2026-09-20")),  # Monday so far
             ("m", "month", ("2026-09-01", "2026-09-20")),   # calendar month so far
             ("y", "year", ("2026-01-01", "2026-09-20")),    # calendar year so far
         ):

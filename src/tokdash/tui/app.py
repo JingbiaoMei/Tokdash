@@ -52,11 +52,11 @@ from textual.widgets import (
     Button,
     DataTable,
     Footer,
-    Header,
     Input,
     ListView,
     ListItem,
     Static,
+    Tab,
     TabbedContent,
     TabPane,
     Tabs,
@@ -94,13 +94,17 @@ from .formatting import (
     fmt_int,
     fmt_tokens,
     glyph_style,
+    tool_chip,
     tool_label,
     tool_tint,
 )
 from .charts import column_chart, quota_detail_rows, quota_table
+from .terminal import CEILING_MONO, palette as terminal_palette
 from .ranges import (
     ALL_PERIOD,
+    MORE_KEY,
     PRESETS,
+    STRIP_PRESETS,
     PRESET_BY_KEY,
     RANGE_KEYS,
     DateWindow,
@@ -124,6 +128,10 @@ STALE_REREAD_SECONDS = 12.0
 SESSION_FANOUT = 3
 
 PANI = ("overview", "sessions", "stats", "report", "speed", "quota", "pricing")
+# The navigation row prints the key that selects each view inside the view's own
+# tab, as the approved design does. F1..F7 follow PANI, which is also the tab
+# order, so the number a reader sees is the number the binding uses.
+VIEW_FKEYS: dict[str, str] = dict(zip(PANI, ("F1", "F2", "F3", "F4", "F5", "F6", "F7")))
 # Each pane's ONE status strip: the place it says "this is pending / partial /
 # failed / still building". A pane gets exactly one, so a reader who wants to
 # know whether the figures are trustworthy never has to scan the page.
@@ -212,10 +220,85 @@ def _source_cell(tool: object, label: object = None) -> Text:
     # badge, so it borrows the two things that make one legible: an accent edge
     # and a chip of background. Colour alone left a column of tints that a
     # reader had to read word by word to tell apart.
+    # No trailing ground: the cell's text IS the contract every caller (and
+    # every test) reads, and a chip that adds an invisible cell to it makes
+    # "Codex" a different string from "Codex".
+    chip = tool_chip(tool)
     return Text.assemble(
-        (_BADGE_EDGE, f"bold {tint} on #1a2331"),
-        (text, f"bold {tint} on #1a2331"),
+        (_BADGE_EDGE, f"bold {tint} on {chip}"),
+        (text, f"bold {tint} on {chip}"),
     )
+
+
+def _report_pane_segments(segments: list[list[Run]]) -> list[list[Run]]:
+    """The shared report body as the PANE shows it: same lines, no CLI furniture.
+
+    The piped report is a document. It rules across the page to separate its
+    sections and it closes with the store it read from, because a printed page
+    has no other way to say either. The pane is a screen, where separation is
+    spacing and surface tone (the one law of this design), and the database line
+    is already at the foot of EVERY pane in the status strip -- where it belongs
+    to all the numbers on screen, not to the one section that happens to print
+    last. Nothing here changes a figure or drops news: the [warn] lines, the
+    note about which scan each figure came from, and every value stay.
+    """
+    out: list[list[Run]] = []
+    for runs in segments:
+        text = "".join(run.text for run in runs).strip()
+        if set(text) and set(text) <= set("─-"):
+            out.append([])  # the rule becomes the blank row the layout uses
+            continue
+        if text.startswith("db ") or text == "db":
+            continue
+        out.append(runs)
+    while out and not out[-1]:
+        out.pop()
+    return out
+
+
+def _session_cell(display: object, session_id: object, width: int) -> Text:
+    """One session, named and identified: the bold project, the dim id after it.
+
+    The approved design gives the id its own line under the name; a table cell
+    has one line, so the id follows the name and is given up whole when the
+    column cannot hold both. Cropping an id is the worse error -- "codex-202610…"
+    looks like another session rather than a longer label.
+    """
+    name = str(display or "")
+    ident = str(session_id or "")
+    if not ident or ident == name:
+        return Text(name, style="bold")
+    both = f"{name}  {ident}"
+    if width and cell_len(both) > width:
+        return Text(name, style="bold")
+    return Text.assemble((name, "bold"), ("  ",), (ident, "#7f8da3"))
+
+
+def _chip_cells(label: object) -> int:
+    """Cells a tool chip costs: its label plus the button chrome it wears."""
+    return cell_len(str(label)) + _BUTTON_CHROME
+
+
+def _session_cell_tall(display: object, session_id: object, width: int) -> Text:
+    """The session's name on one line and its id on the next, as the design draws it.
+
+    This is what a two-row-tall list row is FOR: the project name is what the eye
+    scans, the id is what tells apart two sessions of the same project on the same
+    day, and the two no longer fight over one line. When the column cannot hold
+    the id whole it is given up entirely -- a cropped id reads as a different
+    session -- and the detail under the list names it in full either way.
+    """
+    name = str(display or "")
+    ident = str(session_id or "")
+    if not ident or ident == name:
+        return Text(name, style="bold")
+    if width and cell_len(ident) > width:
+        return Text(name, style="bold")
+    return Text.assemble((name, "bold"), ("\n",), (ident, "#7f8da3"))
+
+
+# "Tools" plus the space the chip row's own label takes before the first chip.
+_CHIP_LABEL_CELLS = 6
 
 
 def _source_text(tool: object, label: object = None) -> str:
@@ -413,7 +496,15 @@ class TokdashApp(App):
 
     CSS = """
     App { background: #0d1118; color: #e3eaf3; }
-    Header { background: #121924; color: #b9a7ff; }
+    /* THE BRAND ROW, the design's first row: the name on the left, what the
+       palette ended up as on the right. Textual's own Header centres its title
+       in the middle of the screen and opens the command palette from its icon,
+       and neither of those is this design -- the row that names the page has to
+       sit where the eye starts, and the colour readout is the one piece of
+       terminal news a reader needs before they trust a tint. */
+    #brand { height: 1; background: #121924; padding: 0 1; }
+    #brand-name { width: auto; color: #b9a7ff; text-style: bold; }
+    #brand-note { width: 1fr; text-align: right; color: #7f8da3; padding: 0 0 0 2; }
     /* The pane's own strip below is the ONE footer row the design asks for: it
        names the keys this pane answers and how fresh its figures are. Textual's
        Footer repeats three of those keys in a second band, so it is off and the
@@ -431,12 +522,30 @@ class TokdashApp(App):
        costs the reader the freshness of the numbers they are about to act on. */
     #status { height: auto; max-height: 2; background: #121924; color: #7f8da3; padding: 0 1; }
 
-    /* The shared scope strip: surface fill, no outlines (revision 5). */
-    #rangebar { height: auto; background: #121924; padding: 0 1 0 1; }
+    /* The shared scope strip: chips on the page, no outlines (revision 5). The
+       strip carries NO background of its own: a band behind a row of buttons
+       turns five shortcuts into one slab, and the approved design separates this
+       row from the page by the chips themselves. */
+    #rangebar { height: 1; background: transparent; padding: 0 1 0 1; margin-top: 1; }
+    /* An unchosen window is TEXT, not a button: five boxes in a row read as five
+       things to press and give the chosen one nothing to be seen against. The
+       key letter keeps its own small plate (the label's span paints it), so the
+       shortcut is still printed where it is used, and the lavender plate is the
+       ONE window that is on screen. */
+    /* The chip's whole width is its label plus ONE cell of ground on each side
+       plus the cell that separates it from the next chip: three cells of chrome,
+       which is exactly what _BUTTON_CHROME charges and _fit_button pins.
+       Textual's Button brings a line-pad of 1 (a cell of background either side
+       of the line, which it measures AGAINST the widget's width) and its own
+       padding, and the two stack: a chip pinned to label+2 gets its label
+       measured two cells short, "t Today" wraps, and the whole strip turns two
+       rows tall. line-pad cannot be set to 0 (the parser refuses it), so the
+       padding is what pays for it -- the chip keeps one cell of ground and stops
+       asking for a second. */
     #rangebar Button {
-        width: auto; min-width: 0;
-        background: #1b2534; color: #a0adbf; border: none;
-        padding: 0 1; margin: 0 1 0 0; text-style: none;
+        width: auto; min-width: 0; height: 1;
+        background: transparent; color: #a6b3c6; border: none;
+        padding: 0 0; margin: 0 1 0 0; text-style: none;
     }
     #rangebar Button:hover { background: #253044; color: #e3eaf3; }
     #rangebar Button.-active { background: #b9a7ff; color: #12121a; text-style: bold; }
@@ -444,13 +553,13 @@ class TokdashApp(App):
     #rangebar Button.-selected { background: #b9a7ff; color: #12121a; text-style: bold; }
     #range-dates {
         width: 1fr; height: 1; text-align: right; text-wrap: nowrap;
-        color: #e3eaf3; background: #121924; padding: 0 0 0 2;
+        color: #e3eaf3; background: transparent; padding: 0 0 0 2;
     }
 
     TabbedContent { height: 1fr; background: #0d1118; }
     Tabs { height: 1; background: #0d1118; padding: 0 1; }
     Underline { display: none; }
-    Tab { background: transparent; color: #7f8da3; padding: 0 1; margin: 0 1 0 0; }
+    Tab { background: transparent; color: #7f8da3; padding: 0 1; margin: 0; }
     Tab:hover { color: #e3eaf3; }
     Tab.-active { background: #b9a7ff; color: #12121a; text-style: bold; }
     TabPane { background: #0d1118; padding: 0 1; height: 1fr; overflow-y: auto; }
@@ -459,14 +568,22 @@ class TokdashApp(App):
        (the strip under them) -> page title and scope -> view controls -> content.
        Separation is spacing and surface tone; what is left with a rule is a table
        header, a search box, and the outline that says where the keyboard is. */
-    /* The page head: what this page is, and what its numbers cover. It gets a
-       blank row above it because it is the boundary between the machinery at the
-       top of the screen (tabs, range) and the page itself. */
-    .head { height: 2; padding: 1 0 0 0; }
+    /* The page head: what this page is, and what its numbers cover. ONE blank row
+       above the words (the range strip above it already carries a margin of its
+       own), and the words sit at the bottom of the band, because this is the
+       boundary between the machinery at the top of the screen (tabs, range) and
+       the page itself -- the approved design sets the page title below the strip
+       with a row of its own, and a title glued under the chips reads as a fourth
+       control. The height is the spend and align-vertical is what puts the air
+       ABOVE the words rather than under them. */
+    .head { height: 2; padding: 0; align-vertical: bottom; }
     .head-title { width: auto; color: #dce6f2; text-style: bold; }
     .head-scope { width: 1fr; text-align: right; color: #7f8da3; padding: 0 0 0 2; }
     .tools { height: auto; padding: 0; margin-top: 1; }
     .tools .fill { width: 1fr; background: transparent; }
+    /* A Static is 1fr wide by default, which turns a row label into a spring
+       that pushes the chips off the right edge. */
+    .chip-label { width: auto; height: 1; padding: 0 1 0 0; }
     Section { margin-top: 1; }
     Static { background: transparent; }
     .label { color: #8fa0b8; }
@@ -474,7 +591,19 @@ class TokdashApp(App):
     /* A content surface: the navy panel for a summary, a chart or a table. The
        padding keeps a figure off the panel edge; the margin-top is the ONE blank
        row between major sections. */
-    .surface { background: #121924; padding: 1 2 0 2; margin-top: 1; }
+    .surface { background: #121924; padding: 1 2 1 2; margin-top: 1; }
+    /* The headline band carries its OWN blank row inside the block (the air
+       between the subview buttons and a card's label), so a margin above it
+       buys a second empty row in a row that is already empty. That row goes to
+       the activity picture at the bottom of the page, where the difference
+       between five rows and six is a chart and a caption about a chart. */
+    #ov-cards { margin-top: 0; }
+    /* The activity band keeps the page's blank row above it (the table's own
+       margin) and its own lip below, so its top padding is the one row of the
+       surface that can go to the bars instead. It is a row of a fixed grid, not
+       a stylistic preference: at thirty-six rows this panel had exactly enough
+       room for a two-row picture or none at all. */
+    #ov-activity { padding: 0 2 1 2; }
     /* The ONE status strip a pane owns -- pending, failed, partial, building. The
        strip says there is news; the colour of the words says how bad it is. */
     .alert { background: #171e29; padding: 0 1; margin-top: 1; }
@@ -495,21 +624,37 @@ class TokdashApp(App):
     }
     TabPane:hover { scrollbar-color: #44566f; }
 
+    /* Two cells of inset, not one: a table whose first column starts against
+       the edge of the screen reads as a continuation of whatever is above it,
+       and the approved design sets its figures inside the panel with air on both
+       sides. The column fit reads the table's own content region, so the inset
+       costs the figures nothing -- it is paid for before they are measured. */
     DataTable {
-        height: auto; background: #121924; border: none; padding: 0 1;
+        height: auto; background: #121924; border: none; padding: 0 2;
         margin-top: 1;
         scrollbar-color: #31405a;
         scrollbar-background: #121924;
     }
     DataTable:hover { scrollbar-color: #44566f; }
     /* A caption under a table explains the figures above it; it is not one. */
-    #ov-detail, #sn-detail, #st-day, #sp-detail, #quota-detail, #rp-hints {
+    #ov-detail, #sn-meta, #sn-detail, #st-day, #sp-detail, #quota-detail, #rp-hints {
         color: #7f8da3;
         margin-top: 1;
     }
+    /* The header keeps a tone of its own, one step above the even rows, because
+       that is the separator this design allows: no rule, and no second row of
+       height to draw one with. Same tone as row one and the labels above the
+       figures stop being a heading. */
     DataTable > .datatable--header {
-        background: #121924; color: #8fa0b8; text-style: bold;
+        background: #18212f; color: #93a3ba; text-style: bold;
     }
+    /* Rows are told apart by a BACKGROUND TONE, not by a rule between them: the
+       approved design draws no lines, and a terminal cannot space its lines
+       either. Every row here runs the width of the screen, so without a tone a
+       reader tracking one figure across ten columns loses the row they started
+       on. One step up from the panel, and no more: it is a row, not a wall. */
+    DataTable > .datatable--odd-row { background: #161e2b; }
+    DataTable > .datatable--even-row { background: #121924; }
     DataTable > .datatable--cursor { background: #263141; color: #e3eaf3; text-style: none; }
     DataTable > .datatable--header-cursor { background: #263141; color: #cdd8e6; }
     DataTable:focus { background: #131c28; }
@@ -540,7 +685,9 @@ class TokdashApp(App):
     /* The session list gets the same treatment: with two unbounded tables in
        one scrollable pane, whichever one lands lower is the one whose tail sits
        under the clip, and a clipped table does not know it is clipped. */
-    #sn-table { max-height: 45%; }
+    #sn-table { max-height: 86%; }
+    /* With the turns open below it, the list is the smaller of the two tables. */
+    #pane-sessions.-session-open #sn-table { max-height: 46%; }
     /* Speed's hour view is 24 rows of its own and its trend view can be a month
        of them, with a strip above and a caption below, so the table gets the
        room that is LEFT rather than the room its rows would like. Given that, it
@@ -588,9 +735,13 @@ class TokdashApp(App):
        air gives way and the page order does not. One flag, set by _apply_density,
        moves the whole screen -- a layout that thinned itself widget by widget
        would leave the page reading differently at every size. */
-    #tabs.-compact .head { height: 1; padding: 0; }
+    #tabs.-compact .head { height: 1; padding: 0; align-vertical: top; }
     #tabs.-compact .tools, #tabs.-compact .alert, #tabs.-compact .surface,
-    #tabs.-compact DataTable, #tabs.-compact .head { margin-top: 0; }
+    #tabs.-compact DataTable, #tabs.-compact .head,
+    #tabs.-compact #ov-cards { margin-top: 0; }
+    #tabs.-compact .surface { padding: 0 2; }
+    #st-cards { margin-top: 1; }
+    #tabs.-compact #st-cards,
     #tabs.-compact #ov-detail, #tabs.-compact #sn-detail, #tabs.-compact #st-day,
     #tabs.-compact #sp-detail, #tabs.-compact #quota-detail,
     #tabs.-compact #rp-hints { margin-top: 0; }
@@ -608,11 +759,15 @@ class TokdashApp(App):
     /* Textual's Horizontal defaults to height: 1fr, which turns a one-line
        toolbar into a spring: the subview row swallows the pane and shoves the
        table to the bottom. Toolbars are one row tall, always. */
-    .toggle { height: auto; }
+    .toggle { height: auto; margin-top: 1; }
+    #tabs.-compact .toggle { margin-top: 0; }
     #controls { height: auto; background: transparent; padding: 0; }
+    /* Same arithmetic as the range strip: one cell of ground, one cell of gap,
+       one row tall. A toolbar whose chips wrap onto a second row has eaten two
+       rows of a twenty-four row terminal to say the same thing. */
     #controls Button, .toggle Button, .tools Button {
-        width: auto; min-width: 0;
-        background: #1b2534; color: #a0adbf; border: none; padding: 0 1;
+        width: auto; min-width: 0; height: 1;
+        background: #1b2534; color: #a0adbf; border: none; padding: 0 0;
         margin: 0 1 0 0; text-style: none;
     }
     /* -active is Textual's 200 ms press flash. -selected is ours: the only
@@ -660,7 +815,7 @@ class TokdashApp(App):
         # which is what lets a search box accept "q", "r" and digits.
         Binding("t", "set_range('today')", "Today", show=False),
         Binding("d", "set_range('yesterday')", "Yesterday", show=False),
-        Binding("w", "set_range('7d')", "7 days", show=False),
+        Binding("w", "set_range('thisweek')", "This week", show=False),
         Binding("m", "set_range('month')", "Month", show=False),
         Binding("y", "set_range('year')", "Year", show=False),
         Binding("a", "set_range('all')", "All", show=False),
@@ -673,7 +828,16 @@ class TokdashApp(App):
         Binding("slash", "begin_search", "Search", show=False),
         Binding("s", "cycle_sort", "Sort", show=False),
         Binding("h", "choose_sources", "Sources", show=False),
-        Binding("p", "stats_year", "Stats year", show=False),
+        # ``H`` walks the Speed sources instead of opening the chooser: All, then
+        # each source the SCAN reported. It walks the inventory rather than the
+        # rows because a filtered response answers for one source only, and a
+        # cycle built from what is on screen can only ever alternate between
+        # that source and All -- which is exactly what the first review caught.
+        Binding("H, shift+h", "cycle_speed_source", "Next source", show=False),
+        # p is the strip's "More" on the four panes that have a strip, and
+        # Stats' year key on the one pane that does not. One letter, one job --
+        # which job is decided by the page the reader is looking at.
+        Binding("p", "pick_more", "More ranges", show=False),
         # A plain terminal reports shift+p as an uppercase "P"; Textual matches
         # binding keys literally, so both spellings are declared.
         Binding("P, shift+p", "stats_year(1)", "Next year", show=False),
@@ -753,11 +917,24 @@ class TokdashApp(App):
         self._ov_search = ""
         self._ov_selected: object | None = None
         self._custom_mode = False
+        # The label form the range buttons are wearing: (key hint, roomy name).
+        # Cached so a repaint does not relabel eleven buttons every time.
+        self._range_form: tuple[bool, bool] | None = None
+        # What the navigation row is currently wearing: (F-key hints, chosen tab).
+        self._tab_hint: tuple | None = None
         # Sessions
         self._sn_sources: tuple[str, ...] = tuple(SESSION_TOOLS)
         self._sn_payloads: dict[str, dict] = {}
         self._sn_failed: list[str] = []
         self._sn_search = ""
+        # The tools that ANSWERED with at least one session, in the order the
+        # chip row shows them, remembered from the last UNFILTERED read. The
+        # chips are a filter over what this window holds, so they must survive
+        # being filtered: rebuilt from the filtered rows they would collapse to
+        # the one tool already on screen.
+        self._sn_inventory: tuple[str, ...] = tuple(SESSION_TOOLS)
+        # What the "Last recorded" column is abbreviating, in words (see _paint).
+        self._sn_stamp_note = ""
         self._sn_selected_key: tuple[str, str] | None = None
         self._sn_sort = "last_seen"
         self._sn_detail: dict | None = None
@@ -832,20 +1009,65 @@ class TokdashApp(App):
 
     # ------------------------------------------------------------------ UI --
 
-    @staticmethod
-    def _build_rangebar() -> Horizontal:
+    #: The key chip's two states. The approved design prints each shortcut in a
+    #: box of its own, so the key reads as a KEY and not as the first letter of
+    #: the word next to it. Two palettes because the box sits on two surfaces:
+    #: the dark button (pale box, dark ink) and the lavender selection (dark box,
+    #: pale ink), which is what keeps the letter legible in both.
+    _CHIP_PALE = "#121a26 on #c3cde0"
+    _CHIP_DARK = "#e7ecf6 on #1b2433"
+
+    def _key_chip(self, key: str, *, selected: bool) -> Text:
+        """One shortcut, boxed. Bold ink in monochrome, where there is no box."""
+        if self._mono():
+            return Text(f"{key} ", style="bold")
+        return Text(f"{key} ", style=(self._CHIP_DARK if selected else self._CHIP_PALE))
+
+    def _strip_label(self, preset: Preset, *, hint: bool, roomy: bool,
+                     selected: bool = False) -> Text:
+        """A range button's label: the key that presses it, then the window.
+
+        The approved design prints the shortcut INSIDE the button it belongs to
+        ("t Today"), because a strip whose letters live only in a footer two
+        rows away is a strip the reader has to leave to use. The window's own
+        name keeps the button's colour, so hover and focus still read.
+        """
+        text = preset.label if roomy else preset.short
+        if hint and preset.hint:
+            return Text.assemble(self._key_chip(preset.hint, selected=selected), text)
+        return Text(text)
+
+    @classmethod
+    def _strip_cells(cls, preset: Preset, *, hint: bool, roomy: bool) -> int:
+        """Cells a range button costs with the label form it is about to wear."""
+        text = preset.label if roomy else preset.short
+        return cell_len(text) + (2 if hint and preset.hint else 0) + _BUTTON_CHROME
+
+    def _more_label(self, selected: bool = False) -> Text:
+        return Text.assemble(self._key_chip(MORE_KEY, selected=selected), "More")
+
+    def _build_rangebar(self) -> Horizontal:
         """The one range strip every dated pane shares, built for its slot.
 
         Presets are shortcuts, so they come first; the exact inclusive dates are
         the truth, so they are the last thing on the row and the last thing a
         narrow terminal gives up (see _visible_presets).
+
+        Every preset still gets a button, so every one is still a click away in
+        the chooser. The five that own the row are the ones the strip SHOWS; the
+        rest stay mounted but hidden, because a window the reader is IN always
+        names itself -- at the right-hand end of this very row, in dates.
         """
         return Horizontal(
             *[
-                Button(preset.short, id=f"range-{preset.key}", variant="default")
+                Button(
+                    self._strip_label(preset, hint=True, roomy=True),
+                    id=f"range-{preset.key}",
+                    variant="default",
+                )
                 for preset in PRESETS
             ],
-            Button("More...", id="range-more", variant="default"),
+            Button(self._more_label(), id="range-more", variant="default"),
             Static("", id="range-dates"),
             Input(placeholder="YYYY-MM-DD .. YYYY-MM-DD", id="range-dates-input"),
             id="rangebar",
@@ -857,7 +1079,9 @@ class TokdashApp(App):
         # The range strip is re-parented under the tab row in on_mount, because
         # Textual's TabbedContent owns both the tab row and the panes -- a strip
         # yielded here lands ABOVE the navigation it belongs under.
-        yield Header()
+        with Horizontal(id="brand"):
+            yield Static("Tokdash", id="brand-name")
+            yield Static("", id="brand-note")
         # The shared range strip is NOT composed here. TabbedContent turns any
         # child that is not a TabPane into a pane of its own -- which is how a
         # range strip ends up with a blank tab of its own -- so on_mount builds it
@@ -873,31 +1097,52 @@ class TokdashApp(App):
                     yield Static("", id="ov-scope", classes="head-scope")
                 yield Static("", id="ov-note", classes="alert")
                 with Horizontal(id="ov-subview", classes="toggle"):
-                    yield Button("Harnesses", id="ov-tab-harnesses")
+                    yield Button("Tools", id="ov-tab-harnesses")
                     yield Button("Models", id="ov-tab-models")
                     yield Static("", id="ov-sort", classes="head-scope")
                 yield Input(placeholder="filter names", id="ov-search")
                 yield Static("", id="ov-cards")
-                yield DataTable(id="ov-table", cursor_type="row", zebra_stripes=False)
+                yield DataTable(id="ov-table", cursor_type="row", zebra_stripes=True)
                 yield Static("", id="ov-detail")
                 yield Static("", id="ov-activity", classes="surface")
             with TabPane("Sessions", id="pane-sessions"):
                 with Horizontal(id="sn-head", classes="head"):
-                    yield Static("Session explorer", id="sn-title", classes="head-title")
+                    yield Static("Sessions", id="sn-title", classes="head-title")
                     yield Static("", id="sn-scope", classes="head-scope")
                 yield Static("", id="sn-note", classes="alert")
+                # WHICH TOOL the rows came from is the first thing a reader wants
+                # to narrow by, and it was reachable only as "h" -- a chooser
+                # two keystrokes deep that showed nothing about what is on
+                # screen. The chips are the same filter, on screen, in the order
+                # the window holds them; "More" opens the chooser for the tools
+                # this row has no room for.
+                with Horizontal(id="sn-tools", classes="tools"):
+                    yield Static("Tools", classes="label chip-label")
+                    yield Button("All", id="sn-tool-all")
+                    for _tool in SESSION_TOOLS:
+                        yield Button(
+                            tool_label(_tool, TOOL_LABELS), id=f"sn-tool-{_tool}"
+                        )
+                    yield Button("More", id="sn-tool-more", classes="picker")
+                    yield Static("", id="sn-tools-fill", classes="fill")
                 yield Input(placeholder="search project, id, model", id="sn-search")
-                yield DataTable(id="sn-table", cursor_type="row", zebra_stripes=False)
+                yield DataTable(id="sn-table", cursor_type="row", zebra_stripes=True)
+                # The rows' own caption: how many there are, what they are sorted
+                # by, how fresh. It sits UNDER the table because that is where a
+                # caption belongs and because above it the line competed with the
+                # page title it repeated.
+                yield Static("", id="sn-meta")
                 yield Static("", id="sn-detail")
-                yield DataTable(id="sn-turns", cursor_type="row", zebra_stripes=False)
+                yield DataTable(id="sn-turns", cursor_type="row", zebra_stripes=True)
             with TabPane("Stats", id="pane-stats"):
                 with Horizontal(id="st-head", classes="head"):
                     yield Static("Year in review", id="st-title", classes="head-title")
                     yield Static("", id="st-scope", classes="head-scope")
                 yield Static("", id="st-window", classes="alert")
+                yield Static("", id="st-cards")
                 yield Static("", id="st-summary")
                 yield Static("", id="st-calendar")
-                yield DataTable(id="st-days", cursor_type="row", zebra_stripes=False)
+                yield DataTable(id="st-days", cursor_type="row", zebra_stripes=True)
                 yield Static("", id="st-day")
             with TabPane("Report", id="pane-report"):
                 with Horizontal(id="rp-head", classes="head"):
@@ -908,7 +1153,7 @@ class TokdashApp(App):
                     yield Button("When", id="rp-tab-when")
                     yield Button("Projects", id="rp-tab-projects")
                 yield Static("", id="rp-hints")
-                yield Static("", id="rp-body")
+                yield Static("", id="rp-body", classes="surface")
             with TabPane("Speed", id="pane-speed"):
                 with Horizontal(id="sp-head", classes="head"):
                     yield Static("Model output speed", id="sp-title", classes="head-title")
@@ -935,14 +1180,14 @@ class TokdashApp(App):
                     yield Button("Include whole-request timing", id="sp-windows", classes="picker")
                 with Container(id="sp-series"):
                     yield Static("", id="sp-chart")
-                    yield DataTable(id="sp-table", cursor_type="row", zebra_stripes=False)
+                    yield DataTable(id="sp-table", cursor_type="row", zebra_stripes=True)
                 yield Static("", id="sp-detail")
             with TabPane("Quota", id="pane-quota"):
                 with Horizontal(id="quota-head", classes="head"):
                     yield Static("Quota", id="quota-title", classes="head-title")
                     yield Static("", id="quota-scope", classes="head-scope")
                 yield Static("", id="quota-note", classes="alert")
-                yield DataTable(id="quota-table", cursor_type="row", zebra_stripes=False)
+                yield DataTable(id="quota-table", cursor_type="row", zebra_stripes=True)
                 yield Static("", id="quota-detail")
                 yield Static("", id="quota-credits")
             with TabPane("Pricing", id="pane-pricing"):
@@ -951,7 +1196,7 @@ class TokdashApp(App):
                     yield Static("", id="pr-scope", classes="head-scope")
                 yield Static("", id="pr-note", classes="alert")
                 yield Input(placeholder="search model or alias", id="pr-search")
-                yield DataTable(id="pr-table", cursor_type="row", zebra_stripes=False)
+                yield DataTable(id="pr-table", cursor_type="row", zebra_stripes=True)
         yield Static("", id="status")
         yield Footer()
 
@@ -978,6 +1223,8 @@ class TokdashApp(App):
         # mount must finish before the strip can be painted or hidden.
         tabs = self.query_one("#tabs", TabbedContent)
         await tabs.mount(self._build_rangebar(), after=tabs.query_one(Tabs))
+        self._paint_tabs()
+        self._paint_brand()
         if not hasattr(sys.stdout, "encoding"):
             try:  # hand the real terminal's encoding back to the driver's shim
                 sys.stdout.encoding = _STDOUT_ENCODING
@@ -985,12 +1232,12 @@ class TokdashApp(App):
                 pass
         self._add_grid(
             self.query_one("#ov-table", DataTable),
-            (("Harness", 22), ("Tokens", 8), ("Share", 6), ("Cost", 10), ("Input", 8),
+            (("Tool", 22), ("Tokens", 8), ("Share", 6), ("Cost", 10), ("Input", 8),
              ("Output", 8), ("Cache", 8), ("Hit", 7), ("Msgs", 8), ("Est. time", 14)),
         )
         self._add_grid(
             self.query_one("#sn-table", DataTable),
-            (("Harness", 14), ("Session", 30), ("Last recorded", 20), ("Main model", 22),
+            (("Tool", 14), ("Session", 34), ("Last recorded", 20), ("Main model", 22),
              ("Tokens", 8), ("Cost", 10)),
         )
         self._add_grid(
@@ -2089,7 +2336,7 @@ class TokdashApp(App):
     #: data: nothing here may compete with a figure or cost a table a row.
     PANE_KEYS = {
         "overview": "/ search · s sort · enter open · esc close · [ ] range · c dates",
-        "sessions": "/ search · s sort · h sources · enter whole session · [ ] range",
+        "sessions": "/ search · s sort · h tools · enter whole session · [ ] range",
         "stats": "p year · P next year · ← → month · enter day opens overview",
         "report": "← → section · s sorts projects · [ ] range",
         # Speed's selectors are on screen LABELED with what they hold, but a
@@ -2328,6 +2575,13 @@ class TokdashApp(App):
             box.value = ""
             self._paint_rangebar()
 
+    def action_pick_more(self) -> None:
+        """``p`` -- the row's own chooser: more ranges, or more years."""
+        if self._active_pane() in RANGE_PANES:
+            self.push_screen(PresetPicker(self._today, self._win), self._on_preset)
+            return
+        self.action_stats_year(-1)
+
     def action_stats_year(self, delta: int = -1) -> None:
         """``p`` an earlier year, ``P`` a later one, back up to trailing 365 days.
 
@@ -2378,7 +2632,7 @@ class TokdashApp(App):
         pane = self._active_pane()
         if pane == "sessions":
             options: list[tuple[str, object]] = [
-                (f"All supported sources ({len(SESSION_TOOLS)})", ""),
+                (f"All supported tools ({len(SESSION_TOOLS)})", ""),
             ]
             options += [
                 (f"{label}  (tool={tool})", tool)
@@ -2389,7 +2643,7 @@ class TokdashApp(App):
             active = "" if set(self._sn_sources) == set(SESSION_TOOLS) else (
                 self._sn_sources[0] if len(self._sn_sources) == 1 else None
             )
-            self.push_screen(ChoicePicker("Sources to read", options, active), self._on_sources)
+            self.push_screen(ChoicePicker("Tools to read", options, active), self._on_sources)
         elif pane == "speed":
             # The same chooser Sessions uses, over the scan's OWN inventory. A
             # blind cycle was the earlier answer and it stranded readers two
@@ -2424,6 +2678,25 @@ class TokdashApp(App):
             return
         self._sp_source = None if value == "" else str(value)
         self._restart_speed()
+
+    def action_cycle_speed_source(self) -> None:
+        """``H`` — All, then one source at a time, then back to All.
+
+        The chooser (``h``) is the way to get somewhere specific; this is the way
+        to compare what is on screen with what comes next without leaving the
+        keyboard. Both read the same inventory, so a source that is only ever
+        reachable through one of them does not exist.
+        """
+        if self._active_pane() != "speed":
+            return
+        order = ["", *self._speed_inventory()]
+        current = self._sp_source or ""
+        try:
+            position = order.index(current)
+        except ValueError:
+            position = 0
+        nxt = order[(position + 1) % len(order)]
+        self._on_speed_source(nxt)
 
     def _restart_speed(self, *, cache_only: bool = True) -> None:
         """Re-read the timing snapshot for a new view, lens, source or timing set.
@@ -3037,7 +3310,7 @@ class TokdashApp(App):
         """Build one Across-models row's explanation, or say the row is gone."""
         source, _model, _timing = (key.split("|") + ["", ""])[:3]
         rows = views.speed_rows(
-            self._sp_payload or {}, lens=self._sp_lens
+            self._sp_payload or {}, lens=self._sp_lens, labels=TOOL_LABELS
         )["rows"]
         row = next((r for r in rows if f"{r.get('harness') or r.get('sources')}|{r['model']}|{r['timing']}" == key), None)
         if row is None:
@@ -3102,6 +3375,15 @@ class TokdashApp(App):
                 self._set_window(window_for(key, self._today))
             except ValueError:
                 return
+            return
+        if button_id == "sn-tool-all":
+            self._on_sources("")
+            return
+        if button_id == "sn-tool-more":
+            self.action_choose_sources()
+            return
+        if button_id.startswith("sn-tool-"):
+            self._on_sources(button_id[len("sn-tool-"):])
             return
         if button_id in ("ov-tab-harnesses", "ov-tab-models"):
             self._ov_subview = "harnesses" if button_id.endswith("harnesses") else "models"
@@ -3225,6 +3507,7 @@ class TokdashApp(App):
         caused would outlive the narrow terminal.
         """
         self._apply_density()
+        self._paint_tabs()
         self._paint_rangebar()
         self._fit_panes()  # the strip's share of the screen just changed shape
         pane = self._active_pane()
@@ -3317,6 +3600,76 @@ class TokdashApp(App):
                 return max(8, widget.content_size.width)
         return fallback
 
+    def _paint_brand(self) -> None:
+        """Name the palette the terminal actually agreed to.
+
+        A design made of tints is the worst place to discover that the terminal
+        refused them: the reader has no way to tell "the dashboard is grey" from
+        "there is nothing to show", and both look like a broken tool. The answer
+        is one short readout, on the row that is always on screen, that says
+        which ceiling this terminal gave and, inside tmux, what would raise it.
+
+        The word comes from the decision this process made (``terminal.py``),
+        but NO_COLOR is checked against the App itself as well: Textual reads
+        that variable when the App is BUILT, so an app that was built with it set
+        has to say "off" whatever the shared readout last recorded. Saying
+        "truecolour" over a grey screen is the exact lie this row exists to
+        prevent.
+        """
+        state = terminal_palette()
+        ceiling = str(state.get("ceiling") or "truecolor")
+        word = {"truecolor": "truecolour", "256": "256 colours",
+                CEILING_MONO: "off"}.get(ceiling, ceiling)
+        if self.no_color:
+            word = "off (NO_COLOR)"
+        hint = ""
+        if word.startswith("off"):
+            # The one thing a reader with a grey screen can still do.
+            hint = "  ·  TOKDASH_TUI_COLOR=always"
+        elif "tmux" in str(state.get("reason") or ""):
+            # Short on purpose: the row is one line, right-aligned, and a long
+            # note eats the tail -- which is where the instruction was.
+            hint = "  ·  tmux: set terminal-features truecolour"
+        note = self.query_one("#brand-note", Static)
+        note.update(escape(f"colour: {word}{hint}"))
+
+    def _paint_tabs(self) -> None:
+        """Put F1..F7 on the tabs, or take them off when the row cannot hold them.
+
+        The key belongs where the choice is made, and the approved design says so
+        by printing it in the tab. But a navigation row that scrolls sideways is
+        worse than one without the hints, so the letters are the first thing the
+        row spends: at eighty columns the seven names are all it can carry.
+        """
+        tabs = list(self.query(Tabs).first().query(Tab)) if self.query(Tabs) else []
+        if len(tabs) != len(PANI):
+            return
+        room = self._pane_screen_width() - _TABS_PAD
+        plain = sum(cell_len(PANE_TITLES[pane]) + _TAB_CHROME for pane in PANI)
+        hinted = plain + sum(len(VIEW_FKEYS[pane]) + 1 for pane in PANI)
+        hint = hinted <= room and plain <= room
+        active = ""
+        try:
+            active = str(self.query_one("#tabs", TabbedContent).active or "")
+        except Exception:  # noqa: BLE001 — before the panes exist (early paint)
+            pass
+        state = (hint, active)
+        if self._tab_hint == state:
+            return
+        self._tab_hint = state
+        for tab, pane in zip(tabs, PANI):
+            name = PANE_TITLES[pane]
+            if not hint:
+                tab.label = Text(name)
+                continue
+            # The chosen tab's own name keeps CSS's colour (lavender ground, dark
+            # ink) and only the KEY box inverts, so the reader can see which key
+            # they are on without the row losing its focus and hover states.
+            tab.label = Text.assemble(
+                self._key_chip(VIEW_FKEYS[pane], selected=f"pane-{pane}" == active),
+                name,
+            )
+
     def _pane_screen_width(self) -> int:
         """Cells available to a full-width strip (the rangebar), never 0."""
         width = self.screen.size.width if self.screen is not None else 0
@@ -3330,50 +3683,71 @@ class TokdashApp(App):
     def _mono(self) -> bool:
         return bool(self.no_color)
 
-    @staticmethod
-    def _button_cells(preset: Preset) -> int:
-        """Cells a preset button costs: its label plus all of its chrome."""
-        return len(preset.short) + _BUTTON_CHROME
+    #: Rows a terminal has to be given before a table row can afford a second
+    #: line. The approved design gives every row more air than one line of
+    #: digits, and a terminal has no line spacing, so the air IS a second line.
+    #: The row it is bought from is the one below the fold: the page scrolls, and
+    #: a table the reader can scan row by row is worth more than a page that
+    #: squeezes seven rows of figures into seven lines to keep a chart in sight.
+    #: ``-compact`` (thirty-one rows and under) still buys the dense grid, because
+    #: there the second line costs a figure the reader came to read.
+    _AIRY_ROWS = 32
+
+    @property
+    def _airy(self) -> bool:
+        """Whether this screen can give every table row a second line."""
+        return not self._compact and self._pane_screen_height() >= self._AIRY_ROWS
+
+    @property
+    def _row_air(self) -> int:
+        """Lines each Overview row gets.
+
+        The approved design gives a table row more air than one line of digits.
+        A terminal has no line spacing, so the air is bought as a second row.
+        Measured from the screen rather than from the table's own geometry,
+        because the first paint of a pane has no geometry to measure and a page
+        must not look like two different designs.
+        """
+        return 2 if self._airy else 1
 
     @staticmethod
     def _more_cells() -> int:
-        """Cells the "More..." button costs once any preset is hidden behind it."""
-        return len("More...") + _BUTTON_CHROME
+        """Cells the permanent "More" button costs, key hint included."""
+        return len(MORE_KEY) + 1 + len("More") + _BUTTON_CHROME
 
-    def _visible_presets(self, bar_width: int, dates_cells: int) -> set[str]:
-        """The presets that fit on one line WITH their dates, in priority order.
+    def _visible_presets(
+        self, bar_width: int, dates_cells: int, *, hint: bool, roomy: bool
+    ) -> set[str]:
+        """The strip buttons that fit on one line WITH their dates.
 
         The exact dates are not negotiable -- a shortcut row that hides which
         window is live is how a dashboard lies -- so the buttons yield space to
-        them, and everything else goes behind "More...". The active preset always
-        keeps a slot, so what is on screen always names itself.
+        them, and anything that no longer fits goes behind "More". The five
+        shortcuts go first, in their own order; a window reached from the chooser
+        rides along only in whatever room is left.
+
+        Only STRIP_PRESETS are candidates, and they are the WHOLE row: t, d, w,
+        m and the door. Ten shortcuts on a row is a menu, and a menu the reader
+        has to read is slower than the one key they meant. A window reached from
+        the chooser does not buy itself a button here either -- the exact dates
+        at the right of the row already name whatever is live, and a strip whose
+        membership changes with the window is a row the reader cannot learn.
         """
         # What the strip actually has: its own padding, then the dates (with the
-        # left padding the Static adds), then the buttons -- and the "More..."
-        # button costs a slot too once anything is hidden. Leaving that out is
-        # how the dates ended up clipped mid-value at 80 columns.
+        # left padding the Static adds) and the typed-date box when it is open,
+        # then the buttons -- and "More", which is here whether or not anything
+        # is hidden behind it, because it is the door and the key that opens it.
         inner = max(0, bar_width - _RANGEBAR_PAD)
-        room = max(0, inner - dates_cells)
-        total = sum(self._button_cells(preset) for preset in PRESETS)
-        if total <= room:
-            return {preset.key for preset in PRESETS}
+        room = max(0, inner - dates_cells - (_RANGE_INPUT_CELLS if self._custom_mode else 0))
         room -= self._more_cells()
         shown: set[str] = set()
         used = 0
-        for preset in PRESETS:
-            cost = self._button_cells(preset)
+        for preset in STRIP_PRESETS:
+            cost = self._strip_cells(preset, hint=hint, roomy=roomy)
             if used + cost > room:
                 break
             shown.add(preset.key)
             used += cost
-        active = self._win.preset
-        if active in PRESET_BY_KEY and active not in shown:
-            # The live window always names itself. It takes the LAST slot rather
-            # than adding one, so guaranteeing it can never widen the row.
-            order = [preset.key for preset in PRESETS]
-            if shown:
-                shown.discard(max(shown, key=order.index))
-            shown.add(active)
         return shown
 
     def _paint_rangebar(self) -> None:
@@ -3409,20 +3783,63 @@ class TokdashApp(App):
             return with_label if cells(with_label) <= inner else text
 
         roomy = named(self._win.describe())
-        dates_text = roomy
-        shown = self._visible_presets(screen, cells(roomy))
-        if len(shown) < len(PRESETS):
-            # Both forms name the same inclusive window; the tighter one only
-            # buys shortcut slots back, so the roomier wording survives for as
-            # long as every preset still fits beside it.
-            tight = named(self._win.short_window())
-            tight_shown = self._visible_presets(screen, cells(tight))
-            if len(tight_shown) > len(shown):
-                dates_text, shown = tight, tight_shown
+        tight = named(self._win.short_window())
+        # The row is the same four shortcuts and their dates at every width, so
+        # what a narrow terminal gives up is chosen rather than fallen into. In
+        # order of willingness: the roomy wording, the exact dates in long form,
+        # and only THEN the key letters, which are the whole point of the row.
+        # The form that shows the MOST shortcuts wins; between two that show the
+        # same number, the one earlier in this list wins. A button behind "More"
+        # is the last resort, and the dates are the last thing to be shortened.
+        candidates = (
+            (True, True, False),   # hints, full names, dates with their day count
+            (True, True, True),    # hints, full names, dates without it
+            (True, False, False),  # hints, abbreviated names
+            (True, False, True),
+            (False, True, True),   # no hints: the last thing the row gives up
+        )
+        strip_keys = {preset.key for preset in STRIP_PRESETS}
+        best = None
+        for order, (hint, form, wide_dates) in enumerate(candidates):
+            shown = self._visible_presets(
+                screen, cells(tight if wide_dates else roomy), hint=hint, roomy=form
+            )
+            score = len(shown & strip_keys)
+            if best is None or score > best[0]:
+                best = (score, order, hint, form, wide_dates, shown)
+        _, _, hint, form, wide_dates, shown = best
+        dates_text = tight if wide_dates else roomy
         self.query_one("#range-dates", Static).update(escape(dates_text))
+        # The window on screen, by preset: what the strip must name, and what its
+        # key chip has to look chosen for. A typed pair of dates belongs to no
+        # preset, which is why "More" -- the door that holds that form too -- is
+        # the thing that looks chosen then.
+        live = (
+            "" if self._win.custom
+            else next(
+                (p.key for p in PRESETS
+                 if p.key == self._win.preset and p.shift == self._win.shift),
+                self._win.preset,
+            )
+        )
+        # Relabel only when the form or the chosen window changed: Button.label is
+        # a Reactive, and writing it every repaint (every resize, every load,
+        # every keystroke that moves the cursor) spends a relayout.
+        if self._range_form != (hint, form, live):
+            self._range_form = (hint, form, live)
+            for preset in PRESETS:
+                self.query_one(f"#range-{preset.key}", Button).label = (
+                    self._strip_label(
+                        preset, hint=hint, roomy=form, selected=preset.key == live
+                    )
+                )
+            self.query_one("#range-more", Button).label = self._more_label(
+                selected=bool(self._win.custom)
+            )
         for preset in PRESETS:
             button = self.query_one(f"#range-{preset.key}", Button)
             button.display = preset.key in shown
+            _fit_button(button)
             button.set_class(
                 # Textual 8 takes the flag first: set_class(bool, "class").
                 self._win.preset == preset.key
@@ -3430,7 +3847,11 @@ class TokdashApp(App):
                 and not self._win.custom,
                 "-selected",
             )
-        self.query_one("#range-more", Button).display = len(shown) < len(PRESETS)
+        # Always on screen: it is the door to every window the row does not
+        # hold, and the key hint that says "p" opens it.
+        more = self.query_one("#range-more", Button)
+        more.display = True
+        _fit_button(more)
 
     def _paint_overview(self) -> None:
         self._sync_toggle_states()
@@ -3447,14 +3868,19 @@ class TokdashApp(App):
         )
         cards = views.kpi_cards(usage, self._ov_active, window=self._win.describe())
         width = self._pane_width("overview")
-        # Six across pays for itself below 116 too. Three across spends SEVEN
-        # rows of a 30-row screen on the headline band, and the rows it took
-        # came off the table and the activity picture underneath; sixteen cells
-        # per card is enough for the longest label here (EST. AGENT TIME) and
-        # the shortest of the detail lines, which is what the narrow wording is
-        # for.
-        per_row = 6 if width >= 116 else 3 if width >= 76 else 2
-        self.query_one("#ov-cards", Static).update(_card_block(cards, per_row, width, self._mono()))
+        # Six across, everywhere. Three across puts the six figures on TWO rows
+        # of the band, and at a thirty-row screen those rows came straight off
+        # the table and the activity picture underneath -- the headline read as
+        # two stacked strips, which is the one shape the approved cards are not.
+        # Sixteen cells per card carries the longest label here; below that the
+        # cards switch to their short wording (TOTAL MESSAGES becomes MESSAGES),
+        # because a clipped label is worse than a plainer one.
+        per_row = _cards_per_row(width)
+        self.query_one("#ov-cards", Static).update(
+            _card_block(
+                cards, per_row, width, self._mono(), air=0 if self._compact else 1
+            )
+        )
         # The sort lives here, next to the table it reorders, rather than in a
         # paragraph under it: "s" is invisible until the reader knows what it does.
         sort_note = self.query_one("#ov-sort", Static)
@@ -3480,16 +3906,28 @@ class TokdashApp(App):
 
         ``None``, "" or an empty line list HIDES it: an empty strip is a tinted
         band across the page that says nothing, which is worse than no band.
+
+        A warning in the strip is said in the strip's own amber, not in terminal
+        yellow: the band runs the width of the screen, and the loudest colour on
+        the page should be the one that says WHICH FIGURE IS WRONG, not that
+        something is worth reading. A failure ("bad") keeps its red.
         """
+        def softened(line: list[Run]) -> list[Run]:
+            return [
+                run if run.style != "warn" else Run(run.text, "amber") for run in line
+            ]
+
         body = None
         if isinstance(lines, Text):
             if str(lines).strip():
                 body = lines
         elif isinstance(lines, str):
             if lines.strip():
-                body = emit_markup([[Run(lines, style)]])
+                body = emit_markup([[Run(
+                    lines, "amber" if style == "warn" else style
+                )]])
         elif lines:
-            kept = [line for line in lines if line]
+            kept = [softened(line) for line in lines if line]
             if kept:
                 body = emit_markup(kept)
         widget = self.query_one(PANE_ALERT[pane], Static)
@@ -3510,23 +3948,23 @@ class TokdashApp(App):
         """
         if pane == "overview":
             if self._ov_subview == "models":
-                text = "Normalized models · every harness"
+                text = "Normalized models · every tool"
             elif self._ov_selected:
                 label = TOOL_LABELS.get(self._ov_selected, self._ov_selected)
-                text = f"{label} · this source's models only"
+                text = f"{label} · this tool's models only"
             else:
-                text = "All harnesses"
+                text = "All tools"
         elif pane == "speed":
             text = ("Combined output during busy clock time" if self._sp_lens == "combined"
                     else "Output per measured stream-second")
         elif pane == "sessions":
             asked = len(self._sn_sources)
-            text = ("All session sources" if asked == len(SESSION_TOOLS)
-                    else f"{asked} of {len(SESSION_TOOLS)} session sources")
+            text = ("All session tools" if asked == len(SESSION_TOOLS)
+                    else f"{asked} of {len(SESSION_TOOLS)} session tools")
         elif pane == "stats":
             text = self._stats_win.describe(self._today)
         elif pane == "report":
-            text = "All harnesses"
+            text = "All tools"
         elif pane == "quota":
             text = "Current snapshots · all providers"
         else:
@@ -3548,6 +3986,7 @@ class TokdashApp(App):
         rows: list[tuple] | None = None,
         budget: int | None = None,
         reserve: int = 0,
+        name_index: int = 0,
     ) -> None:
         """Rebuild a table's columns for the view it is showing right now.
 
@@ -3576,14 +4015,16 @@ class TokdashApp(App):
         budget = (_table_budget(table) - reserve) if budget is None else budget
         budget = max(12, budget)
         table.clear(columns=True)
-        for key, label, width in fit_columns(sized, budget):
+        for key, label, width in fit_columns(sized, budget, name_index=name_index):
             # A column narrower than its own label prints "Hour (server clock" --
             # a clipped header is a wrong header, so the label always fits and
             # the FIT above is what gives room to the columns that matter more.
             table.add_column(label, key=key, width=max(width, len(label) + 1))
 
     @staticmethod
-    def _add_row(table: DataTable, cells: list[tuple[str, object]], key=None) -> None:
+    def _add_row(
+        table: DataTable, cells: list[tuple[str, object]], key=None, height: int = 1
+    ) -> None:
         """Add one row by COLUMN KEY, so a fitted (shorter) spec cannot misalign.
 
         Every cell is named, and the row is assembled in the order of the columns
@@ -3594,6 +4035,13 @@ class TokdashApp(App):
         Words a column cannot hold are cut with a visible ellipsis. DataTable
         clips without a trace otherwise, and "after first token, respo" reads
         exactly like a complete timing kind.
+
+        ``height`` is the row's own height in terminal rows, and it is how this
+        design gets the approved layout's air: a terminal cannot space its lines,
+        so a row that should breathe is a row that is two lines tall. Cells that
+        carry a line break (a session's name over its id) are what fills the
+        second line; a single-line cell sits on the first, which is the line the
+        eye scans.
         """
         present = [column.key for column in table.columns.values()]
         widths = {
@@ -3606,9 +4054,9 @@ class TokdashApp(App):
             for name in present
         ]
         if key is None:
-            table.add_row(*row)
+            table.add_row(*row, height=height)
         else:
-            table.add_row(*row, key=key)
+            table.add_row(*row, key=key, height=height)
 
     @staticmethod
     def _restore_cursor(table: DataTable, key) -> None:
@@ -3635,17 +4083,17 @@ class TokdashApp(App):
             labels=TOOL_LABELS,
             wide=wide,
         )
-        spec = [("harness", "Harness", 22, False), ("tokens", "Tokens", 8, False),
+        spec = [("harness", "Tool", 22, False), ("tokens", "Tokens", 8, False),
                 ("share", "Share", 6, False), ("cost", "Cost", 10, False)]
         if wide:
             spec += [("input", "Input", 8, True), ("output", "Output", 8, True),
                      ("cache", "Cache", 8, True), ("hit", "Hit", 7, True),
                      ("msgs", "Msgs", 8, True)]
         spec.append(("time", "Est. time", 14, False))
-        # reserve=1: the harness list is capped in height, and the vertical
+        # reserve=2: the tool list is capped in height, and the vertical
         # scrollbar it grows takes a column off the viewport AFTER the fit has
         # spent it -- which is how "20h 35m" reached the screen as "20h 35".
-        self._shape(table, tuple(spec), reserve=1)
+        self._shape(table, tuple(spec), reserve=2)
         selected = self._ov_selected
         for row in rows:
             self._add_row(table, [
@@ -3659,7 +4107,7 @@ class TokdashApp(App):
                 ("hit", _num_cell(row.get("hit", EM_DASH))),
                 ("msgs", _num_cell(row.get("messages", EM_DASH))),
                 ("time", _num_cell(row["agent_time"])),
-            ], key=row["tool"])
+            ], key=row["tool"], height=self._row_air)
         self._restore_cursor(table, selected)
 
     def _paint_models(self, usage: dict, width: int) -> None:
@@ -3681,7 +4129,7 @@ class TokdashApp(App):
             spec += [("input", "Input", 8, True), ("output", "Output", 8, True),
                      ("cache", "Cache", 8, True), ("hit", "Hit", 7, True),
                      ("msgs", "Msgs", 8, True)]
-        self._shape(table, tuple(spec), reserve=1)
+        self._shape(table, tuple(spec), reserve=2)
         selected = self._ov_selected
         for row in result["rows"]:
             self._add_row(table, [
@@ -3694,7 +4142,7 @@ class TokdashApp(App):
                 ("cache", _num_cell(row.get("cache", EM_DASH))),
                 ("hit", _num_cell(row.get("hit", EM_DASH))),
                 ("msgs", _num_cell(row.get("messages", EM_DASH))),
-            ], key=row["name"])
+            ], key=row["name"], height=self._row_air)
         self._restore_cursor(table, selected)
         detail = self.query_one("#ov-detail", Static)
         chosen = next((r for r in result["rows"] if r["name"] == selected), None)
@@ -3707,7 +4155,7 @@ class TokdashApp(App):
             f"input {chosen.get('input', EM_DASH)} · output {chosen.get('output', EM_DASH)} · "
             f"cache read {chosen.get('cache', EM_DASH)} · hit {chosen.get('hit', EM_DASH)} · "
             f"messages {chosen.get('messages', EM_DASH)}",
-            "merged across every harness · reasoning is not part of this figure · "
+            "merged across every tool · reasoning is not part of this figure · "
             f"rows listed cover {result['coverage']} of the reported total",
         ]
         detail.display = True
@@ -3730,7 +4178,7 @@ class TokdashApp(App):
                 ("tokens", _num_cell(row["tokens"])),
                 ("cost", _num_cell(row["cost"])),
                 ("msgs", _num_cell(row["messages"])),
-            ], key=row["name"])
+            ], key=row["name"], height=self._row_air)
         detail = self.query_one("#ov-detail", Static)
         scope = (
             "this source's models · the figures above stay global"
@@ -3774,7 +4222,15 @@ class TokdashApp(App):
             return
         entries = views.chart_entries(strip["all_rows"], "value", text_key="tokens")
         title = f"Token activity · {strip['bucket_count']} {strip['unit']} buckets"
-        room = self._rows_above_strip(widget)
+        # The pane scrolls and this band is the last thing in it, so "rows left
+        # on the first screen" is a smaller number than "rows the band may have":
+        # seven rows of tools leave five, which buys a title and two words and no
+        # picture at all. Refusing the chart on that arithmetic is what left a
+        # hole of navy under a short table -- and a reader who scrolls to the
+        # band expects to find the picture THERE, not a sentence about it. The
+        # floor is the shortest assembly that is still a picture: title, the
+        # value over each column, three rows of bar, the axis, two rows of facts.
+        room = max(self._rows_above_strip(widget), _ACTIVITY_MIN_ROWS)
         self._activity_painted = self._activity_stamp(widget)
         # Shorten the PICTURE before shortening anything that says a number, and
         # stop at the first height whose WHOLE assembly -- title, the value over
@@ -3782,6 +4238,7 @@ class TokdashApp(App):
         # has left. A chart whose caption is below the fold is a picture without
         # units; a chart whose columns are below the fold is a picture of nothing.
         lines: list[list[Run]] = []
+        spare_caption: list[str] = []
         # Four rows held back, not three: title, axis and the caption's SECOND
         # row. At three the caption arrived with a row missing and the packer
         # spent it telling the reader to widen the window.
@@ -3825,20 +4282,50 @@ class TokdashApp(App):
                 caption = [_two_ends(left, right, room_width)]
             else:
                 caption = [fact for fact in facts + [right] if fact]
+            # Kept for the branch that paints the facts with NO picture: every
+            # height can be refused below for want of a row, and the band must
+            # still say what the window held. A title alone over four blank rows
+            # is the hole this branch exists to avoid.
+            spare_caption = list(caption)
             spare = room - len(lines)
             if spare <= 0:
                 continue
             # notice=False: the facts that gave way are already under the
             # reader's cursor in the table above; a tally of them is a row of
             # furniture in the one band that shows the numbers.
-            lines += [[Run(part, "muted")]
-                      for part in _packed(caption, room_width, limit=spare,
-                                          notice=False)]
+            packed = _packed(caption, room_width, limit=spare, notice=False)
+            # A caption that lost a fact to the row budget buys that row back
+            # from the PICTURE, not from the facts: "1 bucket measured 0 tokens"
+            # and the span are said by this band and nowhere else on the page,
+            # while two bars at six rows and two bars at four say the same
+            # shape. Only the shortest picture is allowed to arrive with words
+            # it could not fit.
+            full = _packed(caption, room_width, limit=len(caption),
+                           notice=False)
+            if len(packed) < len(full) and height > 1:
+                continue
+            lines += [[Run(part, "muted")] for part in packed]
             if len(lines) <= room:
                 break
         else:
-            widget.display = False
-            widget.update("")
+            # No picture fits. That is not the same as no activity: the panel
+            # keeps its title and the sentence that says what the window held
+            # (buckets measured, the zeros, the peak), which is the part a
+            # reader cannot recover from the table. Hiding the panel instead
+            # leaves a hole of navy where the window's shape used to be, and a
+            # hole reads as a broken chart rather than a short terminal.
+            if room < 2:
+                widget.display = False
+                widget.update("")
+                return
+            widget.styles.height = "auto"
+            widget.update(emit_markup(
+                [[Run(title, "bold")]]
+                + [[Run(part, "muted")] for part in _packed(
+                    spare_caption, room_width, limit=max(1, room - 1),
+                    notice=False)]
+            ))
+            self.call_after_refresh(self._refit_activity)
             return
         widget.update(emit_markup(lines))
         # The band is drawn to the rows the pane is actually leaving, not to the
@@ -3891,11 +4378,119 @@ class TokdashApp(App):
         top = widget.region.y
         if limit <= 0 or top <= 0:
             return 12  # nothing is laid out yet: take the full-height default
-        # One row in hand: the pane ends the row BEFORE the strip begins, and a
-        # picture packed to the last row of its own box is a picture that puts
-        # the pane one row over its height -- which buys a vertical scrollbar,
-        # and a scrollbar takes a column off every table on the page.
-        return max(0, limit - top - 1)
+        # What the ASSEMBLY may spend is the box minus the box's own vertical
+        # padding. A panel's padding is rows too: size a picture to the outside
+        # of the panel and the panel lands one row under the status strip, which
+        # buys a scrollbar, and a scrollbar takes a column off every table on the
+        # page. Measured from the widget rather than assumed, because the surfaces
+        # do not all carry the same padding.
+        inset = max(0, widget.content_region.y - widget.region.y) + max(
+            0, widget.region.bottom - widget.content_region.bottom
+        )
+        # One row in hand: the pane ends the row BEFORE the strip begins.
+        return max(0, limit - top - 1 - inset)
+
+    def _sessions_grouped(self, rows: list[dict]) -> bool:
+        """Whether the list has more than one tool in it, and so is grouped."""
+        return len({row.get("tool") for row in rows}) > 1
+
+    def _sessions_by_tool(self, rows: list[dict]) -> list[dict]:
+        """Session rows grouped by tool, in the order the chips above list them.
+
+        One tool at a time is what makes the list readable at a glance: sorted by
+        the stamp alone, six tools interleave on every screen and the question
+        the pane gets asked -- what did CODEX do this week -- needs a read of
+        every row. The sort in force still rules WITHIN a tool (the sort is
+        stable, and this is the only reordering), and a tool the inventory has
+        never heard of keeps its first-appearance place at the end, so no row is
+        ever dropped or invented.
+        """
+        if not self._sessions_grouped(rows):
+            return rows
+        known = {tool: index for index, tool in enumerate(self._sn_inventory)}
+        first_seen: dict[object, int] = {}
+        for row in rows:
+            first_seen.setdefault(row.get("tool"), len(first_seen))
+
+        def rank(row: dict) -> tuple[int, int, int]:
+            tool = row.get("tool")
+            if tool in known:
+                return (0, known[tool], 0)
+            return (1, 0, first_seen.get(tool, 0))
+
+        return sorted(rows, key=rank)
+
+    def _paint_tool_chips(self, counts: dict[str, int], unfiltered: bool) -> None:
+        """The tool chips, thinned to what the row can actually hold.
+
+        The chip row IS the filter, so it shows the tools that have sessions in
+        this window, busiest first -- twenty buttons in a fixed order would put
+        the one the reader wants behind nineteen they have never used. The
+        inventory is only refreshed on an unfiltered read: filtered to one tool,
+        the rows say nothing about the others, and a chip row that forgets them
+        cannot put them back.
+
+        Like the range strip, the row yields space to the choice it must not
+        hide: the tool that is currently in force always keeps a slot, so what
+        is on screen always names itself.
+        """
+        if unfiltered and counts:
+            order = {tool: index for index, tool in enumerate(SESSION_TOOLS)}
+            self._sn_inventory = tuple(
+                sorted(counts, key=lambda tool: (-counts[tool], order.get(tool, 99)))
+            )
+        chosen = self._sn_sources
+        all_on = set(chosen) == set(SESSION_TOOLS)
+        picked = chosen[0] if len(chosen) == 1 and not all_on else ""
+        shown = [tool for tool in self._sn_inventory if tool in set(SESSION_TOOLS)]
+        # The count rides on the chip on an UNFILTERED read: "6" next to a tool's
+        # own tint is how the row says which tools this window is actually made
+        # of, which is the question the chips answer. On a filtered read the
+        # counts belong to a window the reader is no longer looking at, so they
+        # come off rather than mislead.
+        def chip_text(tool: str) -> str:
+            name = f"{_BADGE_EDGE}{tool_label(tool, TOOL_LABELS)}"
+            if not unfiltered:
+                return name
+            held = counts.get(tool)
+            return f"{name} {held}" if held else name
+
+        room = self._pane_width("sessions") - _CHIP_LABEL_CELLS - _chip_cells("All")
+        room -= _chip_cells("More")
+        used = 0
+        visible: list[str] = []
+        for tool in shown:
+            cost = _chip_cells(chip_text(tool))
+            if used + cost > room:
+                break
+            visible.append(tool)
+            used += cost
+        if picked and picked not in visible:
+            if visible:
+                visible.pop()
+            else:
+                visible.append(picked)
+        held = set(visible)
+        for tool in SESSION_TOOLS:
+            button = self.query_one(f"#sn-tool-{tool}", Button)
+            button.display = tool in held
+            button.set_class(tool == picked, "-selected")
+            # The tool's own accent, as the edge the row of chips is scanned by:
+            # the same tint the table's Tool column wears, so a chip and its rows
+            # match at a glance. The NAME keeps the button's colour, which is
+            # what changes on hover and on the chosen chip.
+            button.label = Text(chip_text(tool), style=tool_tint(tool))
+        self.query_one("#sn-tool-all", Button).set_class(all_on, "-selected")
+        # "More" is the door to the tools this row had no room for -- and, unlike
+        # the range strip's, it is also the door to every tool this window holds
+        # NONE of, which is the answer to "where is my other agent".
+        self.query_one("#sn-tool-more", Button).display = (
+            len(visible) < len(SESSION_TOOLS)
+        )
+        row = self.query_one("#sn-tools", Horizontal)
+        row.display = any(
+            self.query_one(f"#sn-tool-{tool}", Button).display for tool in SESSION_TOOLS
+        ) or all_on
 
     def _paint_sessions(self) -> None:
         # The head names what the rows cover even when the body below has no rows
@@ -3905,7 +4500,11 @@ class TokdashApp(App):
             self._paint_pending("sessions")
             return
         table = self.query_one("#sn-table", DataTable)
-        wide = self._pane_width("sessions") >= 104
+        # A roomy pane can hold the session id beside the name; a tighter one
+        # pays for MAIN MODEL first, because "which model" is the question the
+        # list is asked most and the id is one Enter away.
+        pane_width = self._pane_width("sessions")
+        wide = pane_width >= 104
         result = views.session_rows(
             self._sn_payloads,
             search=self._sn_search,
@@ -3914,45 +4513,134 @@ class TokdashApp(App):
             narrow=not wide,
             failed=self._sn_failed,
         )
-        note = self.query_one("#sn-note", Static)
         asked = len(self._sn_sources)
         answered = len(result["sources"])
-        scope = (
-            f"{answered} of {asked} source{'s' if asked != 1 else ''} · "
-            f"{result['count']} session{'' if result['count'] == 1 else 's'}"
-            " · sorted by "
-            f"{SESSION_SORT_LABELS[result['sort']]}"
+        # The CAPTION under the table states the rows: how many, in what order,
+        # how fresh. Above the table there is a strip for that, and a strip that
+        # is always full is a strip that never means anything -- so the strip
+        # below gets kept for the two things that are news: a fan-out still in
+        # the air, and a tool that did not answer.
+        plural = "" if result["count"] == 1 else "s"
+        caption = (
+            f"{result['count']} session{plural} matching"
+            if self._sn_search else f"{result['count']} session{plural}"
         )
+        caption += " · sorted by " + SESSION_SORT_LABELS[result["sort"]]
+        if self._sessions_grouped(result["rows"]):
+            # Said out loud because it changes what "sorted by" means here: the
+            # order is per tool, and the tools are in the order the chips above
+            # list them. A caption that promised a window-wide sort the list does
+            # not have would be a caption the reader has to disbelieve.
+            caption += " · grouped by tool"
         if result.get("loading"):
-            scope = (
-                f"{answered} of {asked} sources loaded · "
-                f"{result['count']} sessions so far"
-            )
-        if self._sn_failed:
-            n = len(self._sn_failed)
-            scope += f" · Partial · {n} source{'s' if n != 1 else ''} unavailable · r Retry"
-        scope += " · review sessions " + (
+            caption = f"{answered} of {asked} tools loaded · {caption} so far"
+        elif answered != asked:
+            caption = f"{answered} of {asked} tools answered · {caption}"
+        caption += self._sn_stamp_note
+        caption += " · review sessions " + (
             "server default" if self._sn_review is None
             else ("included" if self._sn_review else "excluded")
         )
-        note.update(emit_markup([[Run(scope, "warn" if self._sn_failed else "muted")]]))
-        spec = [("harness", "Harness", 14, False), ("session", "Project / session", 30, False)]
-        if wide:
-            spec += [("last", "Last recorded", 20, True), ("model", "Main model", 22, True)]
-        spec += [("tokens", "Tokens", 8, False), ("cost", "Cost", 10, False)]
-        self._shape(table, tuple(spec), reserve=1)
+        self.query_one("#sn-meta", Static).update(
+            emit_markup([[Run(caption, "muted")]])
+        )
+        if self._sn_failed:
+            # One strip, and it says the whole of the bad news: that the pane is
+            # partial, how much of the fan-out is missing, WHICH tool, and the
+            # key that asks again. Split over two places it is two hints.
+            missing = ", ".join(str(tool) for tool in self._sn_failed[:3])
+            more = "" if len(self._sn_failed) <= 3 else f" +{len(self._sn_failed) - 3}"
+            self._set_alert(
+                "sessions",
+                f"Partial · {answered} of {asked} tools answered · "
+                f"{missing}{more} unavailable · r Retry",
+            )
+        else:
+            self._set_alert("sessions", None)
+        counts: dict[str, int] = {}
         for row in result["rows"]:
+            counts[row["tool"]] = counts.get(row["tool"], 0) + 1
+        self._paint_tool_chips(counts, set(self._sn_sources) == set(SESSION_TOOLS))
+        # The six columns the approved design shows, with the two identity
+        # columns OPTIONAL so the fit drops them one at a time. Gating both on
+        # one width is what lost the stamp and the model together at 98
+        # columns, where there was room for the stamp on its own.
+        # Fourteen cells is the minute-resolution stamp ("2026-10-18 11:40" is 16;
+        # the header "Last recorded" is 13, and a header always fits). Asking for
+        # the seconds here is what cost the MODEL column at a hundred columns: the
+        # fit gave the stamp 20 cells and took 22 from the model, and the two
+        # columns swapped places depending on how the arithmetic landed.
+        spec = [("harness", "Tool", 13, False),
+                ("session", "Project / session",
+                 38 if pane_width >= 118 else 34 if pane_width >= 108 else 26, False),
+                # Twelve is "10-18 11:40" whole. Asking for sixteen at a laptop
+                # terminal is what cost the MODEL column: the fit gave the stamp
+                # the year and the seconds it had been told to want, and paid for
+                # them by dropping the one column that says what was run. The
+                # fuller stamp comes back on a pane wide enough to hold both.
+                ("last", "Last recorded", 16 if pane_width >= 124 else 12, True),
+                # Eighteen, not twenty: a hundred columns is the width a laptop
+                # terminal actually has, and at that width the declared widths
+                # decide whether the reader sees WHICH MODEL at all. Model and
+                # stamp are the two identity columns of this list, and the model
+                # is the one a reader cannot recover from anywhere else on the
+                # pane, so it asks for its shortest honest width first.
+                ("model", "Main model", 20 if pane_width >= 118 else 18, True),
+                ("tokens", "Tokens", 8, False),
+                ("cost", "Cost", 10 if pane_width >= 108 else 9, False)]
+        # Index 1 is the column that may be cropped. With the default of 0 the fit
+        # tried to narrow the TOOL chip -- already at its label's width, so it
+        # could not move -- and paid for the spare cells by deleting the recorded
+        # time and then the model, which are the two columns that tell one row
+        # from another.
+        self._shape(table, tuple(spec), reserve=2, name_index=1)
+        # The id is the disambiguator the approved design puts under the name. A
+        # table cell is one line, so it rides AFTER the name and is dropped
+        # whole when the column cannot hold both: a cropped id reads like a
+        # different id, and the name is what the eye is scanning.
+        session_width = int(
+            (table.columns.get("session") and table.columns["session"].width) or 0
+        )
+        # The stamp takes the FULLEST form its column can hold whole. Seconds
+        # first, then the year, and only when neither fits does the row give up
+        # the column -- which the fit already decided by dropping it.
+        last_width = int(
+            (table.columns.get("last") and table.columns["last"].width) or 0
+        )
+        stamp = ("last_seen_shown" if last_width >= 19
+                 else "last_seen_minute" if last_width >= 16
+                 else "last_seen_clock")
+        # The resolution the column is actually showing, said out loud. Without
+        # it a reader who needs the seconds cannot know whether there are none or
+        # whether the screen simply has no room for them.
+        self._sn_stamp_note = (
+            "" if stamp == "last_seen_shown" else " · times to the minute"
+        )
+        # Two lines per row where the terminal has rows to spare (the design's
+        # air, paid for with the session id's own line); one line where it does
+        # not, with the id after the name as it was. The session column's width
+        # decides whether the id is shown at all, in either shape.
+        tall = not self._compact
+        # ONE TOOL AFTER ANOTHER, in the order the chips above list them. A list
+        # sorted purely by the stamp interleaves six tools on every screen, and
+        # the one question this pane gets asked -- what did CODEX do this week --
+        # can only be answered by reading every row. Within a tool the sort in
+        # force still rules, so "s" keeps doing exactly what it says.
+        for row in self._sessions_by_tool(result["rows"]):
             self._add_row(table, [
                 ("harness", _source_cell(row["tool"], row["harness"])),
-                ("session", escape(row["display"])),
-                ("last", escape(row["last_seen_shown"])),
+                ("session", (_session_cell_tall if tall else _session_cell)(
+                    row["display"], row["session_id"], session_width)),
+                ("last", escape(row[stamp])),
                 ("model", escape(row["model"])),
                 ("tokens", _num_cell(row["tokens"])),
                 ("cost", _num_cell(row["cost"])),
-            ], key=(row["tool"], row["session_id"]))
+            ], key=(row["tool"], row["session_id"]), height=2 if tall else 1)
         self._restore_cursor(table, self._sn_selected_key)
         detail = self.query_one("#sn-detail", Static)
         turns = self.query_one("#sn-turns", DataTable)
+        pane = self.query_one("#pane-sessions")
+        pane.set_class(self._sn_detail_key is not None, "-session-open")
         if self._sn_detail_key is None:
             detail.display = False
             turns.display = False
@@ -4031,9 +4719,13 @@ class TokdashApp(App):
             return
         payload = getattr(self, "_stats_payload", None) or {}
         start, end = self._stats_win.bounds(self._today)
-        self.query_one("#st-window", Static).update(
-            emit_markup([[Run(self._stats_win.describe(self._today), "header")]])
-        )
+        # The strip under the title is for NEWS only. This pane's window is
+        # already named at the right of the title row -- Stats owns its own
+        # window, so that is where a scope belongs, exactly as "All tools" sits
+        # there on every other page -- and repeating it here cost a row and gave
+        # the reader the same sentence twice, which is what the design review
+        # called "dates, page names and instructions on several tight lines".
+        self._set_alert("stats", None)
         # /api/stats answers in three blocks: summary (web-card shape),
         # contributions (the calendar) and stats (the annual figures). The annual
         # headline lives in ``stats`` -- reading the envelope instead turns every
@@ -4043,20 +4735,27 @@ class TokdashApp(App):
             today=self._today.isoformat(),
             window_days=(end - start).days + 1,
         )
+        # The figures are CARDS, not a paragraph. Six values in running text is
+        # something the reader has to parse; six values in six boxes is
+        # something they can scan and compare. The denominators that the
+        # paragraph carried by hand stay underneath, where a wrong reading of a
+        # card can be checked without leaving the page.
+        width = self._pane_width("stats")
+        per_row = _cards_per_row(width)
+        self.query_one("#st-cards", Static).update(
+            _card_block(
+                views.stats_cards(summary), per_row, width, self._mono(),
+                air=0 if self._compact else 1,
+            )
+        )
         lines = [
-            [
-                Run("Active days ", "muted"), Run(summary["active_days"], "bold"),
-                Run("  · Longest streak ", "muted"), Run(summary["longest_streak"], "bold"),
-                Run("  · Current streak ", "muted"), Run(summary["current_streak"], "bold"),
-                Run("  · Coverage ", "muted"), Run(summary["coverage"]),
-            ],
-            [Run(f"{summary['span_note']} · {summary['current_note'] or 'streak ends today or yesterday'}", "muted")],
-            [Run("Tokens ", "muted"), Run(summary["tokens"]), Run("  · Messages ", "muted"),
-             Run(summary["messages"]), Run("  · Most used ", "muted"), Run(summary["most_used"]),
-             Run("  · Costliest ", "muted"), Run(summary["costliest"])],
+            [Run(f"coverage {summary['coverage']} of this window "
+                 f"({summary['span_note']})", "muted")],
             [Run("annual window only · messages count assistant and user turns, "
                  "not sessions · no model or project tables here", "muted")],
         ]
+        if summary["current_note"]:
+            lines.insert(0, [Run(summary["current_note"], "warn")])
         self.query_one("#st-summary", Static).update(emit_markup(lines))
         cal = views.stats_calendar(
             payload,
@@ -4203,17 +4902,15 @@ class TokdashApp(App):
             "db_line": self._ensure_db_line(),
         }
         if self._rp_section == "summary":
-            markup = emit_markup(
-                build_report_segments(
-                    self._rp_usage,
-                    self._rp_insights,
-                    self._rp_active,
-                    window=window,
-                    width=width,
-                    glyphs=_safe_glyphs(),
-                    sections=("summary",),
-                )
-            )
+            markup = emit_markup(_report_pane_segments(build_report_segments(
+                self._rp_usage,
+                self._rp_insights,
+                self._rp_active,
+                window=window,
+                width=width,
+                glyphs=_safe_glyphs(),
+                sections=("summary",),
+            )))
         elif self._rp_section == "when":
             markup = emit_markup(self._report_when_lines(width))
         else:
@@ -4222,10 +4919,11 @@ class TokdashApp(App):
             " · projects ranked by " + ("cost" if self._rp_project_sort == "cost" else "tokens")
             if self._rp_section == "projects" else " · s sorts projects"
         )
+        # The strip above already names the window; what this line still has to
+        # say is how wide the text was laid out for -- a report is wrapped, and
+        # the wrap is the one thing the reader cannot otherwise see.
         self.query_one("#rp-hints", Static).update(
-            emit_markup([[
-                Run(f"{self._win.describe()} · {width} columns{sort_note}", "muted")
-            ]])
+            emit_markup([[Run(f"wrapped to {width} columns{sort_note}", "muted")]])
         )
         self.query_one("#rp-body", Static).update(markup)
 
@@ -4294,7 +4992,9 @@ class TokdashApp(App):
             )
         if head:
             lines.append(head)
-        lines.append([Run("  ·  ", "muted")])
+        # No rule between the two facets: the week starts with a heading of its
+        # own, and the rows the reader is tracking are the hours, not a line of
+        # middots above them. Those two rows belong to the weekday names.
         if when["missing_hours"]:
             lines.append([Run("no hourly facet in this scan", "warn")])
         else:
@@ -4321,11 +5021,17 @@ class TokdashApp(App):
                     if column == 0 and two_columns:
                         cells.append(Run("   ", "muted"))
                 lines.append(cells)
-            lines.append([Run("  ·  ", "muted")])
         if when["missing_weekdays"]:
             lines.append([Run("no weekday facet in this scan", "warn")])
         else:
-            lines.append([Run("By weekday", "header")])
+            # SEVEN ROWS, each with its own bar. A week spread over one row of
+            # names loses the bar -- the only thing in this facet that shows a
+            # Tuesday that is three times a Wednesday -- and it splits one day's
+            # three figures over three rows, which the eye has to stitch back
+            # together by counting columns. The hours above already use two
+            # columns to stay on screen; the week is seven rows and does not
+            # pretend otherwise.
+            lines.append([Run("Tokens by weekday", "header")])
             for entry in when["weekdays"]:
                 lines.append([
                     Run(f"{entry['day']:<9}", "muted"),
@@ -4413,7 +5119,7 @@ class TokdashApp(App):
         self._paint_speed_chart_hidden()
         self._sp_chart_wanted = False
         table = self.query_one("#sp-table", DataTable)
-        result = views.speed_rows(payload, lens=self._sp_lens)
+        result = views.speed_rows(payload, lens=self._sp_lens, labels=TOOL_LABELS)
         width = self._pane_width("speed")
         # A roomy pane spells the measurement out; a close one spells it
         # smaller; none of them cuts it. "response window / outpu…" is not a
@@ -4470,7 +5176,7 @@ class TokdashApp(App):
              f"{row['measured']} / {row['eligible']}",
              str(row["coverage"]))
             for row in result["rows"]
-        ], reserve=1)
+        ], budget=self._speed_table_budget(reserve=2))
         for row in result["rows"]:
             self._add_row(table, [
                 ("model", escape(row["model"])),
@@ -4687,11 +5393,26 @@ class TokdashApp(App):
         arrangement being replaced.
         """
         pane = self._pane_width("speed")
-        # 60 cells is what the table needs to name a bucket, its rate and the
-        # responses behind it; anything less and the picture would be bought with
-        # a table that cannot identify its own rows.
-        split = pane >= 104
-        return split, max(24, pane - (60 if split else 4))
+        # What the rows need to name a bucket, its rate, the responses behind it
+        # and the coverage under the rate; anything less and the picture would be
+        # bought with a table that cannot identify its own rows.
+        split = pane >= (_SPEED_TABLE_CELLS + 44)
+        return split, max(24, pane - (_SPEED_TABLE_CELLS if split else 4))
+
+    def _speed_table_budget(self, *, reserve: int = 0) -> int:
+        """Cells the Speed columns may spend, in the arrangement being drawn.
+
+        Measuring the widget instead is a race the pane loses in the
+        side-by-side arrangement: the paint runs BEFORE the layout, so the table
+        still reports the width of the stacked arrangement it is replacing, the
+        fit happily spends it, and the settled frame -- half as wide, with a
+        vertical scrollbar taking two more -- answers with a horizontal scrollbar
+        across its own last column. Numbers the reader has to slide sideways to
+        finish are numbers the screen did not show.
+        """
+        split = self._sp_chart_wanted and self._speed_chart_geometry()[0]
+        cells = _SPEED_TABLE_CELLS if split else self._pane_width("speed")
+        return max(12, cells - _TABLE_INSET - reserve)
 
     #: Rows a table needs to be arrowed usefully: its header and three rows.
     _SERIES_TABLE_MIN = 4
@@ -4875,6 +5596,14 @@ class TokdashApp(App):
         only the space between them. Toggling it on resize is what stops a window
         dragged small from keeping a layout it outgrew.
         """
+        # Thirty-one rows is the line. The roomier page spends eight rows of its
+        # own above the first table (two of air under the strip, a three-row head,
+        # the card band's air), and a thirty-six row terminal can pay for them and
+        # still leave the activity band a picture. A thirty row terminal cannot:
+        # measured, the same page at one hundred columns lost the window's shape
+        # entirely, which is a worse trade than a tighter title. The card band
+        # keeps the air BETWEEN a figure's name and the figure at every density,
+        # because that is what makes the number the headline.
         compact = self._pane_screen_height() <= 31
         tabs = self.query("#tabs")
         if not tabs:
@@ -5000,9 +5729,13 @@ class TokdashApp(App):
         bought only when nothing has to be dropped to pay for it.
         """
         long = "tok/s per stream" if lens == "stream" else "tok/s combined"
-        # minus one: the vertical scrollbar these tables grow takes a column the
-        # fit has to leave room for.
-        budget = _table_budget(table) - 1
+        # The scrollbar these tables grow takes cells the fit has to leave room
+        # for, and the budget is the arrangement's, not the widget's (the fit
+        # below has to be asked the same question the table will be laid out at).
+        # The reserve is the SHAPE's reserve as well: probed at one and painted
+        # at two, this probe once promised a fourth column the table then
+        # dropped, which is how the hour view lost its parallelism column.
+        budget = self._speed_table_budget(reserve=2)
 
         def kept(label: str) -> int:
             spec = [("rate", label, max(8, cell_len(label) + 1), False), *others]
@@ -5052,7 +5785,7 @@ class TokdashApp(App):
             (row["key"], row["span"], row["per_stream"] if stream else row["combined"],
              row["calls"], row["parallelism"], row["p10"], row["p90"])
             for row in trend["rows"]
-        ], reserve=1)  # a month of day buckets outgrows any terminal
+        ], budget=self._speed_table_budget(reserve=2))  # a month of buckets scrolls
         for row in trend["rows"]:
             self._add_row(table, [
                 ("bucket", escape(row["key"])),
@@ -5114,7 +5847,7 @@ class TokdashApp(App):
             (row["hour"], row["rate"], row.get("calls", EM_DASH),
              row.get("parallelism", EM_DASH) if combined else row.get("coverage", EM_DASH))
             for row in hours["rows"]
-        ], reserve=1)  # 24 hours do not fit above a status strip
+        ], budget=self._speed_table_budget(reserve=2))  # 24 hours do not fit
         for row in hours["rows"]:
             cells = [
                 ("hour", escape(row["hour"])),
@@ -5188,7 +5921,7 @@ class TokdashApp(App):
         # like a value, not like a column that is too narrow. So the columns are
         # measured against the rows they are about to hold, and fit_columns drops
         # a whole optional column rather than cutting a word in half.
-        self._shape(table, QUOTA_COLUMNS, list(rows), reserve=1)
+        self._shape(table, QUOTA_COLUMNS, list(rows), reserve=2)
         self._quota_idents = {}
         for index, (row, identity) in enumerate(zip(rows, row_keys)):
             cells = list(row)
@@ -5237,7 +5970,7 @@ class TokdashApp(App):
             ("model", "Model", 40, False), ("input", "Input", 10, False),
             ("output", "Output", 10, False), ("cache_read", "Cache read", 10, True),
             ("cache_write", "Cache write", 11, True), ("aliases", "Aliases", 20, True),
-        ), reserve=1)
+        ), reserve=2)
         for row in result["rows"]:
             self._add_row(table, [
                 ("model", escape(row["model"])),
@@ -5272,20 +6005,55 @@ QUOTA_COLUMNS: tuple[tuple[str, str, int, bool], ...] = (
 # position: "sorted by cost" moves the columns, and a colour that moved with
 # them would stop meaning anything.
 _CARD_COLORS = {
-    "tokens": "#a8b1ff",
-    "cost": "#79dfbd",
+    # Not #b9a7ff: that lavender belongs to the thing the keyboard is ON. A
+    # figure wearing the selection colour reads as a figure you can act on.
+    "tokens": "#adb8ff",
+    "cost": "#7ee7c3",
     "messages": "#c4a1ff",
     "agent": "#86bdff",
     "cache": "#8cdeeb",
     "model": "#f2d07e",
+    # Stats' annual band. A streak is a count of days, so it takes the day blue
+    # and the mint of a run that is still going; none of them borrows the
+    # lavender that means "tokens" everywhere else on the screen.
+    "days": "#86bdff",
+    "streak": "#79dfbd",
+    "longest": "#c4a1ff",
 }
 _CARD_TINT_DEFAULT = "#a8b1ff"
+# The card's label is the smallest voice in the block: the approved design prints
+# it small and grey under a figure twice its weight, and the two steps of dimming
+# below are as close as a fixed-grid terminal gets to that ratio.
+_CARD_LABEL = "#8b99b0"
 
 
 # A DataTable charges itself two cells of padding per column on top of the
 # width it was given (measured, not guessed: 10 columns of the shipped widths
 # need 20 cells more than their sum).
 _TABLE_CELL_PAD = 2
+# DataTable { padding: 0 2 }: two cells at each end, INSIDE the widget's width,
+# so they come off a budget before any column is measured.
+_TABLE_INSET = 4
+# Cells the Speed rows keep when the picture sits BESIDE them: the bucket, the
+# rate the bars are drawn from, the responses behind it and the coverage under
+# the rate. This is not a second guess at the arrangement --
+# _speed_chart_geometry hands the REST of the pane to the picture, and both
+# halves are read from this number.
+#
+# Sized to the WIDEST set those rows must carry, not the average one: Hour
+# (server clock) 19 + tok/s 8 + Responses 10 + Parallelism 12, plus two cells of
+# padding each. At sixty-two that arithmetic was one cell short, and the fit paid
+# for it by dropping the optional column -- Parallelism in the combined hour
+# view, the one figure that says how many responses overlapped -- so the pane
+# printed a dash for a measurement it had while spare cells sat under the
+# picture.
+_SPEED_TABLE_CELLS = 66
+
+#: Rows the Overview's activity band is allowed to ask for even when the first
+#: screen has fewer left. Title, one row of figures over the columns, four rows
+#: of bar, the axis and two rows of facts: the shortest assembly that reads as a
+#: picture of the window rather than a caption about one.
+_ACTIVITY_MIN_ROWS = 8
 
 
 def _row_key_at(table: DataTable, index: int | None) -> object:
@@ -5319,13 +6087,20 @@ def fit_columns(
     *,
     name_floor: int = 16,
     number_floor: int = 6,
+    name_index: int = 0,
 ) -> list[tuple[str, str, int]]:
     """Trim a column spec until it fits ``width`` cells.
 
-    Order of concessions, deliberately: drop columns the view can live without
-    (the detail line still carries them), then narrow the name column, then
-    narrow the numeric ones. Every floor holds, so no figure is ever squeezed
-    into a value that reads wrong.
+    Order of concessions, deliberately: narrow the name column, then drop columns
+    the view can live without (the detail line still carries them), then narrow
+    the numeric ones. Every floor holds, so no figure is ever squeezed into a
+    value that reads wrong.
+
+    ``name_index`` says WHICH column may be cropped, because it is not always the
+    first one: Sessions leads with the tool chip and its long column is the
+    session name at index 1. Left at 0 the name column could not give ground, so
+    a hundred-column terminal dropped the recorded time and the model -- the two
+    facts a reader uses to tell rows apart -- to protect spare width on a label.
     """
     cols = [[key, label, int(width_), bool(optional)] for key, label, width_, optional in spec]
 
@@ -5335,8 +6110,20 @@ def fit_columns(
     # The name column is the only one allowed to be cropped -- the detail line
     # always carries the full text -- so it gives ground first and every measured
     # number keeps its home for as long as one can be found.
-    while len(cols) > 2 and need(cols) > width and cols[0][2] > name_floor:
-        cols[0][2] -= 1
+    name_at = name_index if 0 <= name_index < len(cols) else 0
+    # The name column's own header is part of its floor: _shape re-applies
+    # "at least the label" when it adds the column, so a fit that crops past the
+    # header is a fit whose arithmetic the table silently undoes -- and the
+    # columns it measured then arrive one cell wider than the budget, which is a
+    # horizontal scrollbar across the last figure.
+    name_min = max(name_floor, cell_len(str(cols[name_at][1])) + 1)
+    while (
+        len(cols) > 2
+        and need(cols) > width
+        and cols[name_at][2] > name_min
+        and len(cols) > 1  # the crop must not be the whole column set
+    ):
+        cols[name_at][2] -= 1
     while len(cols) > 2 and need(cols) > width:
         drop = next((i for i in range(len(cols) - 1, 0, -1) if cols[i][3]), None)
         if drop is None:
@@ -5383,6 +6170,15 @@ def _clip_text(cell: object, width: int) -> object:
     if isinstance(cell, Text):
         if width <= 1 or len(cell.plain) <= width:
             return cell
+        if "\n" in cell.plain:
+            # A cell that carries its own line break (a session's name over its
+            # id) is cropped LINE by line: the plain text of the whole cell is
+            # longer than either of its lines, so cropping it as one string would
+            # put an ellipsis in the middle of the first line and lose the second.
+            lines = cell.split("\n")
+            return Text("\n").join(
+                Text(_fit(line.plain, width), style=line.style) for line in lines
+            )
         return Text(_fit(cell.plain, width), style=cell.style)
     if not isinstance(cell, str) or width <= 1:
         return cell
@@ -5544,6 +6340,11 @@ def session_detail_lines(
 
 
 _CARD_SURFACE = "#121924"
+#: The plate under a card's figure. The approved design prints the figure about
+#: twice the height of its label; a terminal has one row height, so the figure
+#: gets the next best emphasis -- a plate of its own, one step above the card,
+#: with the number in bold on top of it.
+_CARD_PLATE = "#18212f"
 
 
 _CAL_BG = ("#161e2b", "#2f2a4d", "#4a3f80", "#6d59bd", "#b9a7ff")
@@ -5555,16 +6356,27 @@ _SP_JOB_DONE = frozenset({"ready", "complete", "done"})
 # The rangebar's own horizontal padding, and the left padding #range-dates adds
 # in front of the dates. Measured from the CSS above, not guessed.
 _RANGEBAR_PAD = 2
-# A Textual Button lays out WIDER than "label + padding: 0 1": the widget adds a
-# label gutter of its own on top of ours, and every button carries a 1-cell right
-# margin. Counting only what our own CSS asks for is what clipped the exact dates
-# at 100 columns, so the strip budgets the measured cell cost instead.
-# Two cells of its own padding, plus two of slack: the strip is right-aligned
-# and does not wrap, so a budget one cell short loses the LAST digit of the end
-# date rather than a shortcut button. The buttons are what should give, and they
-# only do so if the dates ask for more than the minimum.
+# The dates get their own pad because the strip is right-aligned and does not
+# wrap: a budget one cell short loses the LAST digit of the end date rather than
+# a shortcut button. The buttons give way first, and they only do so if the
+# dates ask for more than the minimum.
 _RANGE_DATES_PAD = 4
-_BUTTON_CHROME = 5
+# A Button's full cell cost: the label, the two cells of padding the stylesheet
+# gives it, and the one-cell margin that separates it from the next shortcut.
+_BUTTON_CHROME = 3
+# The width _fit_button pins a button to. It equals _BUTTON_CHROME minus the
+# 1-cell margin: padding plus label, nothing spare. The extra gutter Textual used
+# to be given (and happily spent in the middle of the row) is what made a five
+# shortcut strip read as a spread of islands instead of a row of keys.
+_BUTTON_LABEL_PAD = 2
+# The typed-date box: #range-dates-input is 34 cells of input inside a round
+# border, and it only exists while "c" has it open -- but while it is open it
+# takes the room the shortcut buttons would have spent.
+_RANGE_INPUT_CELLS = 36
+# A tab costs its label plus the Tab rule's padding (0 1). The Tabs row itself is
+# padded 0 1, which is what comes off the screen.
+_TAB_CHROME = 2
+_TABS_PAD = 2
 _MONTH_CELLS = 22  # seven 3-cell day blocks plus the label gutter
 _CAL_MONTH_LINES = 8  # month label, weekday header, up to six week rows
 _CAL_OTHER_LINES = 12  # window, summary, day list and day detail in the pane
@@ -5779,7 +6591,37 @@ def _two_ends(left: str, right: str, width: int) -> str:
     return f"{left} · {right}" if left and right else (left or right)
 
 
-def _card_block(cards: list[dict], per_row: int, pane_width: int, mono: bool) -> Text:
+def _fit_button(button: Button) -> None:
+    """Pin a shortcut button to the width of the label it is wearing.
+
+    The row is a Horizontal of auto-width buttons, and when the row runs out of
+    room Textual shrinks SOME of them -- not the last one, which is what a reader
+    (and my arithmetic) expects -- so "d Yesterday" arrives as "d Ye". The strip
+    decides which buttons are on the row; the layout is then told the exact width
+    of each, and the row cannot quietly eat a shortcut that was paid for.
+    """
+    button.styles.width = cell_len(str(button.label)) + _BUTTON_LABEL_PAD
+
+
+def _cards_per_row(pane_width: int) -> int:
+    """How many cards fit across a pane this wide: six, or three when six is thin.
+
+    One rule for both bands (Overview's usage, Stats' year), because two panes
+    that reflow the same six figures differently read as two different products.
+
+    The break is where a card stops being able to hold a figure WHOLE, not where
+    a row of six stops fitting: fourteen cells carries "gpt-5-codex", "$567.66"
+    and (in its short form) "2d 3h" with their padding, and sixty of those plus
+    the gutters is ninety-two columns. Below that the band goes to two rows of
+    three, because a name cropped to "gpt-5-c…" is a different name and the
+    reader has no way to know it.
+    """
+    return 6 if pane_width >= 92 else 3
+
+
+def _card_block(
+    cards: list[dict], per_row: int, pane_width: int, mono: bool, *, air: int = 1
+) -> Text:
     """Six figures as coloured blocks, reflowed to the pane's real width.
 
     Card width comes from the pane and the row count, never from the longest
@@ -5787,40 +6629,117 @@ def _card_block(cards: list[dict], per_row: int, pane_width: int, mono: bool) ->
     neighbour's digits off the screen. Separation is the tinted surface and the
     gap between blocks -- the approved design has no rules and no borders.
 
+    ``air`` is the blank row above and below each block. A terminal has no font
+    size, so the only way a headline figure can be made to READ larger is the
+    space around it: the approved cards spend more panel on empty navy than on
+    ink, and a three-line strip of tight text is the one thing it definitively is
+    not. On a 24-row terminal the air is the row the table needs, so the caller
+    takes that back (--compact) -- but the blank row BETWEEN a card's label and
+    its figure stays at every size, because it is the one thing that makes the
+    figure the card's headline rather than its subtitle.
+
     In a monochrome terminal the tints cannot carry the hierarchy, so the layout
     and the words carry it instead: short delta wording, no surface fill, and the
     same block geometry.
     """
-    width = max(15, (max(40, pane_width) - 2 * (per_row - 1)) // per_row)
-    inner = max(6, width - 2)  # one cell of padding each side of the surface
+    # Two cells of gutter when the band is roomy, ONE when it is not. The cards
+    # are separated by their own surfaces, so the second cell of gutter is the
+    # first thing the band can give back -- and at a hundred columns the cell it
+    # gives back is the difference between "gpt-5.1-codex" and "gpt-5.1-cod…".
+    gutter = 2
+    plain = (max(40, pane_width) - gutter * (per_row - 1)) // per_row
+    if plain < 17:
+        gutter = 1
+        plain = (max(40, pane_width) - gutter * (per_row - 1)) // per_row
+    # Seventeen cells is where the decoration starts paying for itself. A roomy
+    # band spends one cell on a right gutter (a figure flush with the edge of the
+    # screen reads as a figure the screen cut off) and one on the card's tint
+    # edge; a tight band spends both on the figures instead, because at fourteen
+    # cells an accent is what makes "gpt-5-codex" arrive as "gpt-5-co…".
+    fancy = plain >= 17
+    width = max(11, plain - (1 if fancy else 0))
+    inner = max(6, width - 2)
     short = inner < 24  # "+12.0% vs prior window" needs 22 cells to say itself
     surface = "" if mono else f"on {_CARD_SURFACE}"
+    blank = f" {_pad('', inner)}"
+    # label, air, figure, note: the air is INSIDE the block, between the name of
+    # the figure and the figure, so the eye lands on the number first.
+    # The extra row is bought once, not once per card ROW: at eighty columns the
+    # band is two rows of three, and air inside both of them spends eight rows of
+    # a twenty-four row terminal on the headline. A single row of six, which is
+    # the shape the approved design draws, is the shape that gets the space.
+    plan = (["air"] * air) + ["label"] + (["air"] if per_row >= 6 else []) + [
+        "value", "note"] + (["air"] * air)
+
     body = Text()
+    # The band ends at its last painted row. A newline after it is a row of the
+    # Static's height spent on nothing, and at thirty rows a screen that row
+    # comes straight off the table underneath.
+    total_lines = -(-len(cards) // max(1, per_row)) * len(plan)
+    painted = 0
     for start in range(0, len(cards), per_row):
         row = cards[start:start + per_row]
-        for line_index in range(3):
+        for slot in plan:
             for column, card in enumerate(row):
+                tint = _CARD_COLORS.get(card.get("key"), _CARD_TINT_DEFAULT)
+                edge = fancy and not mono
+                if slot == "air":
+                    if edge:
+                        body.append(" ", style=f"on {tint}")
+                    body.append(_pad(blank, width - (1 if edge else 0)), style=surface)
+                    if column < len(row) - 1:
+                        body.append(" " * gutter)
+                    continue
                 # Tint by WHAT the figure is, not by where it landed: cost is
                 # mint and tokens lavender in every pane and every row count, so
                 # a colour seen twice is the same kind of number twice.
-                tint = _CARD_COLORS.get(card.get("key"), _CARD_TINT_DEFAULT)
-                if line_index == 0:
-                    text, style = _fit(str(card["label"]).upper(), inner), f"#8fa0b8 {surface}"
-                elif line_index == 1:
-                    text = _fit(str(card["value"]), inner)
-                    style = (f"bold {tint} {surface}").strip() if not mono else surface
-                else:
+                if slot == "label":
+                    # The long name of the figure when there is room for it, the
+                    # short one when there is not, and a clipped label never: an
+                    # ellipsis on a heading asks the reader to guess which figure
+                    # they are looking at.
+                    label = str(card["label"])
+                    short_label = str(card.get("short_label") or "")
+                    if cell_len(label) > inner and short_label:
+                        label = short_label
+                    text, style = _fit(label.upper(), inner), f"{_CARD_LABEL} {surface}"
+                elif slot == "value":
+                    # Abbreviate the unit before cropping the figure. "2d 3h" is
+                    # the same length of time as "2 days 3 hours"; "2 days 3 ho…"
+                    # is a number with a piece missing.
+                    value = str(card["value"])
+                    short_value = str(card.get("short_value") or "")
+                    if cell_len(value) > inner and short_value:
+                        value = short_value
+                    text = _fit(value, inner)
+                    # The plate is the emphasis a terminal can actually give a
+                    # number: it cannot print the figure twice the size of its
+                    # label, so the figure gets its own ground instead.
+                    plate = surface if mono else f"on {_CARD_PLATE}"
+                    style = (f"bold {tint} {plate}").strip() if not mono else surface
+                else:  # the note under the figure: a delta, or the caveat
                     delta = card.get("delta")
                     if delta is not None:
                         text = _delta_text(delta, short=short)
                     else:
                         detail = str(card.get("detail", ""))
-                        if short or len(detail) > inner:
+                        if short or cell_len(detail) > inner:
                             detail = str(card.get("short_detail") or detail)
-                        text = _fit(detail, inner)
+                        # Prose is not a figure: a third of "prompt-token weighted"
+                        # is not a shorter truth, it is a broken sentence. If the
+                        # card cannot hold one, it shows none, and the pane's
+                        # caption underneath still carries the caveat.
+                        text = detail if cell_len(detail) <= inner else ""
                     style = f"#7f8da3 {surface}"
-                body.append(_pad(f" {_pad(text, inner)} ", width), style=style)
+                if edge:
+                    body.append(" ", style=f"on {tint}")
+                body.append(
+                    _pad(f" {_pad(text, inner)}", width - (1 if edge else 0)),
+                    style=style,
+                )
                 if column < len(row) - 1:
-                    body.append("  ")
-            body.append("\n")
+                    body.append(" " * gutter)
+            painted += 1
+            if painted < total_lines:
+                body.append("\n")
     return body

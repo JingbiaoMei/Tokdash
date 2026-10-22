@@ -176,5 +176,19 @@ baseline. See [`QUOTA.md`](QUOTA.md) for the full quota polling design.
 
 ## TUI & update checks
 
+- `TOKDASH_TUI_COLOR` (unset) — `always` (also `1`/`true`) keeps colour in `tokdash tui` even where the [`NO_COLOR`](https://no-color.org) convention has it off. The convention is written for line-oriented output, and a `NO_COLOR` exported into a shell or a tmux session greys a full-screen dashboard out with no way to tell it apart from an empty one; the TUI's own monochrome layout stays the default. The palette the terminal agreed to is on the top row as `colour: …`
 - `TOKDASH_TUI_NO_REMOTE` (unset) — set to any non-empty value and `tokdash tui` never probes the local server for a same-version `tokdash serve` to delegate read-only GETs to; every fetch then answers exactly as the in-process path does (fail-closed to in-process on any doubt regardless)
 - `TOKDASH_UPDATE_CHECK` — opt-in switch (`1`) or hard disable (`0`) for PyPI update checks; see [`ONBOARDING.md`](../guides/ONBOARDING.md) for details
+
+Inside `tmux`, `COLORTERM` does not reach the pane, so the palette is capped at 256
+colours and this dashboard's lavender, mint and navy round onto grey steps. `colour:
+256 colours` in the top row is that case. tmux 3.2 and newer pass 24-bit through once
+the client terminal is known to speak it:
+
+```tmux
+set -as terminal-features ',xterm*:truecolour'
+```
+
+`TEXTUAL_COLOR_SYSTEM` (`auto`) is the underlying override — `truecolor`, `256` or
+`standard` — and is honoured as given, including when it says less than the terminal
+could.

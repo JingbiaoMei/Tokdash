@@ -20,7 +20,8 @@ PY="${PY:-python3}"
   tests/test_tui_data.py tests/test_tui_formatting.py tests/test_tui_import_discipline.py \
   tests/test_tui_ranges.py tests/test_tui_remote.py tests/test_tui_report.py \
   tests/test_tui_review_fixes.py tests/test_tui_review_fixes2.py \
-  tests/test_tui_review_fixes3.py tests/test_tui_review_fixes4.py -q "$@"
+  tests/test_tui_review_fixes3.py tests/test_tui_review_fixes4.py \
+  tests/test_tui_layout_pass.py tests/test_tui_terminal_colour.py -q "$@"
 status=$?
 
 repo="$(git rev-parse --show-toplevel 2>/dev/null)"

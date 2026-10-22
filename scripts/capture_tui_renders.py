@@ -118,12 +118,26 @@ def capture(name: str, size: tuple[int, int], body, *, initial: str = "today",
 
 # --------------------------------------------------------------- interactions --
 
+async def pick_range(app, pilot, key: str) -> None:
+    """Choose a window from the strip's chooser, the way the keyboard does.
+
+    The strip shows five shortcuts; everything further back -- the seven days
+    the preview was drawn with among them -- lives behind "p More". A button
+    that is not on screen cannot be pressed at all (Textual refuses), so the
+    captures go through the chooser rather than through a widget the user
+    never sees.
+    """
+    await pilot.press("p")
+    await fx.settle(pilot, 2)
+    assert type(app.screen).__name__ == "PresetPicker", type(app.screen).__name__
+    app.screen.dismiss(key)  # what picking the row does
+    await fx.settle(pilot, 4)
+
+
 async def week(app, pilot):
     """The preview's seven-day window. Production opens on Today; the range
     strip and every pane re-anchor to whatever is selected."""
-    from textual.widgets import Button
-    app.query_one("#range-7d", Button).press()
-    await fx.settle(pilot, 4)
+    await pick_range(app, pilot, "7d")
 
 
 async def models(app, pilot):
@@ -755,17 +769,74 @@ def use_rich_payloads() -> None:
     FAKE.speed_across = rich_speed_across()
     FAKE.speed_trend = rich_speed_trend()
     FAKE.speed_hour = rich_speed_hour()
-    FAKE.sessions = {
-        tool: {"sessions": [
-            {"session_id": f"{tool}-{n:03d}",
-             "first_seen": f"2026-10-{12 + n}T09:{n:02d}:00",
-             "last_seen": f"2026-10-{12 + n}T{11 + n}:4{min(n, 9)}:00",
-             "project": f"/home/dev/work/{['api', 'web', 'cli', 'docs', 'infra'][n % 5]}",
-             "model": model, "messages": 12 + n * 7, "tokens": 180_000 + n * 61_000}
-            for n, model in enumerate(["gpt-5.1-codex", "gpt-5.5", "claude-opus-4.1",
-                                       "kimi-k2.6", "deepseek-v3.2"])]}
-        for tool in fx.SESSION_TOOLS
-    }
+    FAKE.sessions = rich_sessions()
+
+
+# Six of the twenty supported tools carry sessions this week, and one carries a
+# lot: the chip row is a filter over what the window HOLDS, so a capture where
+# every tool looks alike cannot show whether it orders itself usefully, thins
+# itself at eighty columns, or keeps the tool that is in force on screen.
+_RICH_PROJECTS = [
+    ("tokdash", "TUI parity"),
+    ("tokdash", "pricing normalize aliases"),
+    ("companion", "status refresh"),
+    ("campus_runs", "r56B budget sweep"),
+    ("ad-prof", "stage_w train"),
+    ("docs", "release notes"),
+]
+_RICH_MODELS = ["gpt-5.1-codex", "gpt-5.5", "claude-opus-4-1", "kimi-k2.6",
+                "deepseek-v3.2", "gemini-3-flash"]
+_RICH_TOOL_LOAD = {"codex": 6, "claude": 5, "opencode": 3, "kimi": 2,
+                   "omp": 2, "qwen_code": 1}
+
+
+def rich_sessions() -> dict:
+    """One /api/sessions body per supported tool, in the shape the route sends."""
+    out: dict[str, dict] = {}
+    load = _RICH_TOOL_LOAD
+    for tool in fx.SESSION_TOOLS:
+        rows = []
+        for n in range(load.get(tool, 0)):
+            project, name = _RICH_PROJECTS[n % len(_RICH_PROJECTS)]
+            day = 18 - (n % 6)
+            rows.append({
+                "tool": tool,
+                "session_id": f"{tool}-202610{day:02d}-{n + 1}",
+                "project": f"{project} / {name}",
+                "model": _RICH_MODELS[n % len(_RICH_MODELS)],
+                "token_events": 14 + n * 9,
+                "tokens": 929_000 + n * 1_900_000,
+                "cost": 1.31 + n * 2.4,
+                "started_at": f"2026-10-{day:02d}T09:{n:02d}:00+00:00",
+                "last_seen_at": f"2026-10-{day:02d}T{11 + n}:{40 + n}:00+00:00",
+            })
+        out[tool] = {"tool": tool, "tool_label": tool, "sessions": rows}
+    return out
+
+
+async def rich_sessions_pane(app, pilot):
+    """Sessions at a working load: six tools, nineteen rows."""
+    use_rich_payloads()
+    app.action_show_pane("sessions")
+    await fx.settle(pilot, 6)
+
+
+async def rich_sessions_filtered(app, pilot):
+    """One tool chosen from the chip row: the row must still name it and still
+    offer the way back."""
+    from textual.widgets import Button
+    await rich_sessions_pane(app, pilot)
+    app.query_one("#sn-tool-claude", Button).press()
+    await fx.settle(pilot, 6)
+
+
+async def rich_sessions_detail(app, pilot):
+    from textual.widgets import DataTable
+    await rich_sessions_pane(app, pilot)
+    table = app.query_one("#sn-table", DataTable)
+    table.action_cursor_down()
+    app.action_open_row()
+    await fx.settle(pilot, 6)
 
 
 async def rich_overview(app, pilot):
@@ -911,6 +982,11 @@ CASES = [
     ("80-speed-hour-combined-populated-100x30", (100, 30), rich_speed_hour_combined, "today", False),
     ("81-speed-detail-populated-100x30", (100, 30), rich_speed_detail, "today", False),
     ("82-speed-trend-detail-populated-100x30", (100, 30), rich_speed_trend_detail, "today", False),
+    ("90-sessions-populated-120x36", (120, 36), rich_sessions_pane, "7d", False),
+    ("91-sessions-populated-100x30", (100, 30), rich_sessions_pane, "7d", False),
+    ("92-sessions-populated-80x24", (80, 24), rich_sessions_pane, "7d", False),
+    ("93-sessions-filtered-100x30", (100, 30), rich_sessions_filtered, "7d", False),
+    ("94-sessions-detail-populated-100x30", (100, 30), rich_sessions_detail, "7d", False),
 ]
 
 

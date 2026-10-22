@@ -86,6 +86,11 @@ _ANSI_STYLES = {"ok": _ok, "bad": _bad, "warn": _warn, "bold": _bold,
 # with a quiet heading and the surface tone under them, not with a filled band
 # across the pane, which reads as one giant selection.
 _MARKUP_STYLES = {"ok": "green", "bad": "red", "warn": "yellow", "bold": "bold",
+                  # The pane's status strip. A full-width band of terminal yellow
+                  # is the loudest thing on the page whatever it says, and a
+                  # partial read is news, not an alarm: the SAME amber, at the
+                  # weight of a sentence.
+                  "amber": "#d8ae6c",
                   "accent": "cyan", "muted": "dim", "header": "bold #c5d2e3",
                   "series": "#a8b1ff"}
 

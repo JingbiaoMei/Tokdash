@@ -273,7 +273,8 @@ def kpi_cards(
     return [
         {
             "key": "tokens",
-            "label": "Tokens",
+            "label": "Total tokens",
+            "short_label": "Tokens",
             "value": fmt_tokens(usage.get("total_tokens")),
             "delta": comparison.get("tokens_pct"),
             "detail": f"{fmt_int(usage.get('total_tokens'))} tokens",
@@ -282,16 +283,18 @@ def kpi_cards(
         },
         {
             "key": "cost",
-            "label": "Cost (USD)",
+            "label": "Total cost",
+            "short_label": "Cost",
             "value": cost_value,
             "delta": comparison.get("cost_pct"),
-            "detail": "usage cost estimate, not an invoice",
-            "short_detail": "estimate only",
+            "detail": "usage cost estimate in US dollars, not an invoice",
+            "short_detail": "USD, estimate only",
             "style": "kpi_cost",
         },
         {
             "key": "messages",
-            "label": "Messages",
+            "label": "Total messages",
+            "short_label": "Messages",
             "value": fmt_int(usage.get("total_messages")),
             "delta": comparison.get("messages_pct"),
             "detail": "assistant + user messages, not sessions",
@@ -301,7 +304,11 @@ def kpi_cards(
         {
             "key": "agent",
             "label": "Est. agent time",
+            "short_label": "Agent",
             "value": _duration(active.get("active_ms_sum")) if active else MISSING,
+            "short_value": (
+                _duration_short(active.get("active_ms_sum")) if active else MISSING
+            ),
             "delta": active_cmp.get("active_ms_sum_pct"),
             "detail": "concurrent agents add; estimated clock time is separate",
             "short_detail": "not wall clock",
@@ -309,7 +316,8 @@ def kpi_cards(
         },
         {
             "key": "cache",
-            "label": "Cache hit",
+            "label": "Cache hit rate",
+            "short_label": "Cache hit",
             "value": fmt_hit(usage.get("cache_hit_rate")),
             "delta": None,
             "detail": "prompt-token weighted, not a mean of source rates",
@@ -319,6 +327,7 @@ def kpi_cards(
         {
             "key": "model",
             "label": "Most used model",
+            "short_label": "Top model",
             "value": str(top.get("name") or MISSING),
             "delta": None,
             # Ranked by TOKENS (top_models[0]), whatever the table below is sorted
@@ -499,6 +508,12 @@ def session_rows(
                     "display": display,
                     "last_seen": str(entry.get("last_seen_at") or ""),
                     "last_seen_shown": _timestamp(entry.get("last_seen_at")),
+                    # The same instant at two resolutions. The list picks the
+                    # one its column can hold WHOLE: a stamp cropped to
+                    # "2026-10-18 11:…" is a timestamp that stops being one, and
+                    # the detail line always carries the full figure.
+                    "last_seen_minute": _minute_stamp(entry.get("last_seen_at")),
+                    "last_seen_clock": _clock_stamp(entry.get("last_seen_at")),
                     "model": str(entry.get("model") or MISSING),
                     "tokens": fmt_tokens(entry.get("tokens")),
                     "tokens_sort": _num(entry.get("tokens")),
@@ -578,12 +593,56 @@ def _duration(ms: object) -> str:
     return fmt_duration(_num(ms))
 
 
+_UNIT_LETTERS = {
+    "second": "s", "seconds": "s", "minute": "m", "minutes": "m",
+    "hour": "h", "hours": "h", "day": "d", "days": "d",
+    "week": "w", "weeks": "w", "month": "mo", "months": "mo",
+    "year": "y", "years": "y",
+}
+
+
+def _duration_short(ms: object) -> str:
+    """The same duration in unit LETTERS: "2 days 3 hours" is "2d 3h".
+
+    A card column at a hundred columns is fourteen cells wide, and the spelled
+    duration the contract locks -- which the CLI and the web both print -- does
+    not fit it. Abbreviating the UNIT is the only shortening available: a cropped
+    duration ("2 days 3 ho...") reads as a different length of time.
+    """
+    words = _duration(ms).split(" ")
+    out: list[str] = []
+    for index in range(0, len(words), 2):
+        number = words[index]
+        unit = words[index + 1] if index + 1 < len(words) else ""
+        out.append(f"{number}{_UNIT_LETTERS.get(unit, unit)}")
+    return " ".join(out)
+
+
 def _timestamp(raw: object) -> str:
     text = str(raw or "").strip()
     if not text:
         return MISSING
     head = text.replace("T", " ")[:19]
     return head if head.strip() else MISSING
+
+
+def _minute_stamp(raw: object) -> str:
+    """``2026-10-18 11:40`` -- the instant without its seconds (16 cells)."""
+    full = _timestamp(raw)
+    return full[:-3] if len(full) == 19 and full[16] == ":" else full
+
+
+def _clock_stamp(raw: object) -> str:
+    """``10-18 11:40`` -- month, day, hour and minute (11 cells).
+
+    The year and the seconds both go, and neither is a secret: the range strip
+    above the list names the window these rows came from, and the note under it
+    says the column is to the minute. The whole stamp, seconds included, is one
+    Enter away in the session detail.
+    """
+    return _minute_stamp(raw)[5:]
+
+
 
 
 def _bar(value: float, peak: float, *, width: int, glyphs: str = "blocks") -> str:
@@ -637,6 +696,39 @@ def stats_summary(stats: dict, *, today: str | None = None, window_days: int | N
         "most_used": str(stats.get("most_used_model") or MISSING),
         "costliest": str(stats.get("highest_cost_model") or MISSING),
     }
+
+
+def stats_cards(summary: dict) -> list[dict]:
+    """The annual headline as cards, in the shape the card band draws.
+
+    Same fields as the paragraph this replaces, and the same honesty about what
+    each one covers: a streak that lapsed shows as a dash with its reason beside
+    it, and "messages" keeps the note that they are turns rather than sessions.
+    """
+    summary = summary or {}
+    return [
+        {"key": "days", "label": "Active days", "short_label": "Days",
+         "value": summary["active_days"],
+         "detail": summary["span_note"], "short_detail": "in this window"},
+        {"key": "streak", "label": "Current streak", "short_label": "Streak",
+         "value": summary["current_streak"],
+         "detail": summary["current_note"] or "ending today or yesterday",
+         "short_detail": "ends today/yesterday"},
+        {"key": "longest", "label": "Longest streak", "short_label": "Best",
+         "value": summary["longest_streak"], "detail": "within this window",
+         "short_detail": "within this window"},
+        {"key": "tokens", "label": "Total tokens", "short_label": "Tokens",
+         "value": summary["tokens"],
+         "detail": "usage total in this window", "short_detail": "this window"},
+        {"key": "messages", "label": "Total messages", "short_label": "Messages",
+         "value": summary["messages"],
+         "detail": "assistant + user turns, not sessions",
+         "short_detail": "user + assistant"},
+        {"key": "model", "label": "Most used model", "short_label": "Top model",
+         "value": summary["most_used"],
+         "detail": f"costliest {summary['costliest']}",
+         "short_detail": f"costliest {summary['costliest']}"},
+    ]
 
 
 def stats_calendar(
@@ -1058,7 +1150,13 @@ def _rate(value: object) -> str:
     return MISSING if value is None else f"{_num(value):.1f}"
 
 
-def speed_rows(payload: dict, *, lens: str = "stream", search: str = "") -> dict:
+def speed_rows(
+    payload: dict,
+    *,
+    lens: str = "stream",
+    search: str = "",
+    labels: dict | None = None,
+) -> dict:
     """Comparison rows for the Across-models view.
 
     Per stream: one row per (source, model, measurement kind, token basis). Those
@@ -1106,11 +1204,20 @@ def speed_rows(payload: dict, *, lens: str = "stream", search: str = "") -> dict
             name = str(entry.get("model") or MISSING)
             source = str(entry.get("source") or MISSING)
             if needle and needle not in f"{source} {name}".lower():
+                # Searched by id AND by display name: a reader types what the
+                # table shows them.
+                if needle not in tool_label(source, labels).lower():
+                    continue
                 continue
             rows.append(
                 {
                     "model": name,
-                    "harness": source,
+                    # The name the rest of the dashboard uses for this tool. The
+                    # id stays in "source_id" -- it is what the request is built
+                    # with -- but a screen that says "codex" here and "Codex" on
+                    # the page above it makes the reader compare spellings.
+                    "source_id": source,
+                    "harness": tool_label(source, labels),
                     "timing": _kinds([entry.get("measurement_kind")])
                     + " / "
                     + _basis(entry.get("token_basis")),

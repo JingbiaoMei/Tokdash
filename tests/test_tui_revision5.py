@@ -817,7 +817,7 @@ def test_more_picker_resolves_a_preset_to_explicit_dates(api):
         press(app, "range-more")
         await settle(pilot, 1)
         items = list(app.screen.query("ListItem"))
-        assert len(items) == 10  # every preset stays reachable
+        assert len(items) == 11  # the four shortcuts and the seven windows behind them
         # "Last Month" is a COMPLETE month, never the current one a day short.
         app._on_preset("lastmonth")
         await settle(pilot, 1)
@@ -892,7 +892,9 @@ def test_sessions_fan_out_keeps_partial_truth(api):
         _sessions_body(app, pilot)
         await settle(pilot, 4)
         note = visible(app, "#sn-note")
-        assert "2 of 3 sources" in note, note
+        # The count that stays is the one that is NEWS: three tools were asked,
+        # two answered. (Which tools are in force is the head's line to say.)
+        assert "2 of 3 tools answered" in note, note
         assert "Partial" in note and "kimi" not in note.split("Partial")[1][:3]
         assert "unavailable" in note and "r Retry" in note, note
         rows = rows_of(app.query_one("#sn-table", DataTable))
@@ -915,7 +917,13 @@ def test_identical_session_ids_in_two_sources_stay_two_rows(api):
         assert len(keys) == len(set(keys))
         # The two rows are visibly different sessions of different sources.
         rows = rows_of(table)
-        assert {"Codex", "Claude Code"} == {row[0] for row in rows if row[1] in ("other", "reports")}, rows
+        # The session cell is "project / name  id" (the id rides after the name
+        # so two tools' identical ids never read as one session), so the filter
+        # reads the name the cell starts with.
+        assert {"Codex", "Claude Code"} == {
+            row[0] for row in rows
+            if row[1].split()[0] in ("other", "reports")
+        }, rows
 
     run(api, body)
 
@@ -929,7 +937,14 @@ def test_session_detail_is_the_whole_session_and_asks_for_no_dates(api):
         await settle(pilot, 4)
         table = app.query_one("#sn-table", DataTable)
         table.focus()
-        await pilot.press("enter")  # row 0 is the most recently recorded
+        # The list is grouped by tool, so the newest row of the window is not
+        # necessarily row 0: move to the session this test is about by key.
+        position = next(
+            index for index, stored in enumerate(table.rows.keys())
+            if getattr(stored, "value", stored) == ("claude", "shared-id")
+        )
+        table.move_cursor(row=position)
+        await pilot.press("enter")
         await settle(pilot, 4)
         assert app._sn_detail_key == ("claude", "shared-id"), app._sn_detail_key
         detail = visible(app, "#sn-detail")
@@ -1006,7 +1021,9 @@ def test_sessions_and_speed_keep_separate_source_selections(api):
         app.action_show_pane("sessions")
         await settle(pilot, 3)
         assert app._sn_sources == sessions_choice
-        assert "1 of 1 source ·" in visible(app, "#sn-note"), visible(app, "#sn-note")
+        # Sessions still stands where the reader left it: one tool in force, and
+        # the head says so in the same words the chips use.
+        assert "session tools" in visible(app, "#sn-scope"), visible(app, "#sn-scope")
 
     run(api, body)
 
@@ -1023,7 +1040,7 @@ def test_stats_names_its_own_window_and_ignores_the_shared_range(api):
         await settle(pilot, 1)
         app.action_show_pane("stats")
         await settle(pilot, 3)
-        head = visible(app, "#st-window")
+        head = visible(app, "#st-scope")
         assert "Trailing 365 Days" in head, head
         assert f"{TRAILING_FROM} .. {TODAY.isoformat()}" in head, head
         # The shared range did not leak in, and Stats did not move it.
@@ -1049,7 +1066,7 @@ def test_stats_year_picker_walks_the_ladder_and_asks_for_that_year(api):
             await pilot.press("p")
             await settle(pilot, 2)
             ladder.append(app._stats_win.request())
-            heads.append(visible(app, "#st-window"))
+            heads.append(visible(app, "#st-scope"))
         assert ladder == [2026, 2025, 2024, 2023], ladder
         assert api.last("stats")[1][0] == 2023
         # The in-progress year is named for the days it can actually answer.
@@ -1061,7 +1078,7 @@ def test_stats_year_picker_walks_the_ladder_and_asks_for_that_year(api):
             await pilot.press("P")
             await settle(pilot, 2)
         assert app._stats_win.request() is None
-        assert "Trailing 365 Days" in visible(app, "#st-window")
+        assert "Trailing 365 Days" in visible(app, "#st-scope")
 
     run(api, body)
 
@@ -1072,10 +1089,10 @@ def test_stats_reads_messages_and_never_the_deprecated_sessions(api):
     async def body(app, pilot):
         app.action_show_pane("stats")
         await settle(pilot, 3)
-        summary = visible(app, "#st-summary")
-        assert "Messages 5,000" in summary, summary
-        assert "777" not in summary
-        assert "annual window only" in summary
+        cards = visible(app, "#st-cards")
+        assert "TOTAL MESSAGES" in cards and "5,000" in cards, cards
+        assert "777" not in cards, cards
+        assert "annual window only" in visible(app, "#st-summary")
 
     run(api, body)
 
@@ -1088,7 +1105,8 @@ def test_a_lapsed_streak_is_not_reported_as_current(api):
         await settle(pilot, 3)
         summary = visible(app, "#st-summary")
         assert "no streak ending today or yesterday" in summary, summary
-        assert "Longest streak 30" in summary, summary
+        cards = visible(app, "#st-cards")
+        assert "LONGEST STREAK" in cards and "30" in cards, cards
 
     run(api, body)
 
@@ -1699,7 +1717,7 @@ def test_the_live_window_is_named_in_exact_dates_at_every_width(api):
     async def body(app, pilot):
         dates = visible(app, "#range-dates")
         assert TODAY.isoformat() in dates, dates
-        press(app, "range-7d")
+        app._on_preset("7d")  # the chooser's answer: the row a pick hands back
         await settle(pilot, 2)
         dates = visible(app, "#range-dates")
         assert "2026-10-12" in dates and TODAY.isoformat() in dates, dates
@@ -1803,9 +1821,9 @@ def test_the_range_strip_marks_the_preset_that_names_the_window(api):
 
     async def body(app, pilot):
         assert lit(app, RANGE_IDS) == ["range-today"]
-        press(app, "range-7d")
+        press(app, "range-thisweek")  # a shortcut that is ON the strip
         await settle(pilot, 4)
-        assert lit(app, RANGE_IDS) == ["range-7d"], lit(app, RANGE_IDS)
+        assert lit(app, RANGE_IDS) == ["range-thisweek"], lit(app, RANGE_IDS)
         await pilot.press("d")
         await settle(pilot, 3)
         assert lit(app, RANGE_IDS) == ["range-yesterday"], lit(app, RANGE_IDS)
@@ -2094,7 +2112,8 @@ def test_the_monochrome_cards_still_separate_their_figures():
 
     cards = views_mod.kpi_cards(copy.deepcopy(USAGE), copy.deepcopy(ACTIVE))
     painted = "\n".join(_card_lines(cards, 118, mono=True))
-    for label in ("TOKENS", "COST (USD)", "MESSAGES", "EST. AGENT TIME", "CACHE HIT", "MOST USED MODEL"):
+    for label in ("TOTAL TOKENS", "TOTAL COST", "TOTAL MESSAGES",
+                  "EST. AGENT TIME", "CACHE HIT RATE", "MOST USED MODEL"):
         assert label in painted, label
 
 

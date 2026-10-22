@@ -1246,7 +1246,10 @@ class TokdashApp(App):
         )
         self._add_grid(
             self.query_one("#sp-table", DataTable),
-            (("Model", 26), ("Harness", 12), ("Timing", 24), ("tok/s", 8),
+            # "Source", not "Harness": this is the grid a reader sees while a
+            # first run computes, before the pane paints its own fitted columns,
+            # and it names the same thing the picker above it names.
+            (("Model", 26), ("Source", 12), ("Timing", 24), ("tok/s", 8),
              ("Measured", 10), ("Eligible", 10), ("Coverage", 9)),
         )
         self._add_grid(

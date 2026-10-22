@@ -6991,6 +6991,12 @@
       const sumFields = (target, source, fields) => fields.forEach((field) => {
         if (target[field] !== undefined || source[field] !== undefined) target[field] = number(target[field]) + number(source[field]);
       });
+      const recalculateCacheHitRate = (value) => {
+        if (value?.tokens_in === undefined) return;
+        // tokens_in already includes cache writes; output/reasoning are excluded.
+        const denominator = number(value.tokens_in) + number(value.tokens_cache);
+        value.cache_hit_rate = denominator > 0 ? number(value.tokens_cache) / denominator : null;
+      };
       // Mirrors model_rank_key on the server: tokens first, cost only to break a
       // tie. Merging used to re-sort by cost, so combining servers reordered the
       // very arrays the server had just ranked by usage.
@@ -7033,6 +7039,10 @@
             }
           } else merged[name] = number(merged[name]) + number(value);
         }));
+        Object.values(merged).forEach((value) => {
+          recalculateCacheHitRate(value);
+          if (Array.isArray(value.models)) value.models.forEach(recalculateCacheHitRate);
+        });
         out[key] = merged;
       };
       const mergeArray = (key, comparator) => {
@@ -7043,6 +7053,7 @@
           if (!merged.has(name)) merged.set(name, { ...item });
           else sumFields(merged.get(name), item, ['tokens','total_tokens','tokens_in','tokens_out','tokens_cache','tokens_cache_write','tokens_reasoning','cost','total_cost','messages','total_messages']);
         }));
+        merged.forEach(recalculateCacheHitRate);
         out[key] = [...merged.values()].sort(comparator || byModelRank);
       };
       ['total_tokens','total_cost','total_messages'].forEach((field) => { out[field] = rows.reduce((sum, row) => sum + number(row[field]), 0); });

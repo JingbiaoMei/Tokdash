@@ -21,7 +21,7 @@ PY="${PY:-python3}"
   tests/test_tui_ranges.py tests/test_tui_remote.py tests/test_tui_report.py \
   tests/test_tui_review_fixes.py tests/test_tui_review_fixes2.py \
   tests/test_tui_review_fixes3.py tests/test_tui_review_fixes4.py \
-  tests/test_tui_review_fixes5.py \
+  tests/test_tui_review_fixes5.py tests/test_tui_review_fixes6.py \
   tests/test_tui_layout_pass.py tests/test_tui_terminal_colour.py -q "$@"
 status=$?
 
@@ -38,13 +38,17 @@ main_root="${main_root%/.git}"
 
 found=0
 for dir in tui-rev5-review tui-rev5-review2 tui-rev5-review3 tui-rev5-review4 \
-           tui-rev5-review5; do
+           tui-rev5-review5 tui-rev5-review6; do
   for root in "$main_root/output" "$main_root/docs/internal/output-archive"; do
-    file="$root/$dir/test_regressions.py"
-    [ -f "$file" ] || continue
-    found=$((found + 1))
-    echo "--- $dir ---"
-    "$PY" -m pytest "$file" -q --tb=line || status=1
+    # A reviewer's file is usually test_regressions.py; the sixth round shipped
+    # test_followup_review.py, and a gate that looks for one name silently
+    # drops whichever reviewer did not use it.
+    for file in "$root/$dir/test_regressions.py" "$root/$dir/test_followup_review.py"; do
+      [ -f "$file" ] || continue
+      found=$((found + 1))
+      echo "--- ${dir}/$(basename "$file") ---"
+      "$PY" -m pytest "$file" -q --tb=line || status=1
+    done
   done
 done
 if [ "$found" = "0" ]; then

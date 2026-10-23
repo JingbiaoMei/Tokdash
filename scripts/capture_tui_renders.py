@@ -77,13 +77,18 @@ def screen_lines(app) -> list[str]:
 
 
 def capture(name: str, size: tuple[int, int], body, *, initial: str = "today",
-            mono: bool = False, resize_to: tuple[int, int] | None = None) -> None:
+            mono: bool = False, resize_to: tuple[int, int] | None = None,
+            after_resize=None) -> None:
     """One pilot run, one frame, two files.
 
     ``resize_to`` drags the window AFTER the pane has painted at ``size`` and the
     frame is taken at the NEW size: the pair of captures is the resize itself,
     which is the only honest way to show that a squeezed page re-fitted rather
     than kept the column set and the card grid it chose for another window.
+
+    ``after_resize`` runs one more interaction after the drag (and its settle),
+    which is how a chooser that was OPEN for the drag gets dismissed before the
+    frame is taken: the page under it only learns its new geometry on the way back.
     """
     if mono:  # a real terminal asks for this with NO_COLOR=1
         os.environ["NO_COLOR"] = "1"
@@ -101,6 +106,9 @@ def capture(name: str, size: tuple[int, int], body, *, initial: str = "today",
             if resize_to is not None:
                 await pilot.resize_terminal(*resize_to)
                 await fx.settle(pilot, 5)
+            if after_resize is not None:
+                await after_resize(app, pilot)
+                await fx.settle(pilot, 6)
             if mono:
                 app.no_color = True  # drives the {nocolor} CSS variable as well
                 app._repaint_pane(app._active_pane())
@@ -143,6 +151,21 @@ async def pick_range(app, pilot, key: str) -> None:
     assert type(app.screen).__name__ == "PresetPicker", type(app.screen).__name__
     app.screen.dismiss(key)  # what picking the row does
     await fx.settle(pilot, 4)
+
+
+async def open_picker(app, pilot):
+    """Reveal the range chooser and LEAVE IT OPEN; the drag happens under it."""
+    await week(app, pilot)
+    await pilot.press("p")
+    await fx.settle(pilot, 2)
+    assert type(app.screen).__name__ == "PresetPicker", type(app.screen).__name__
+
+
+async def close_picker(app, pilot):
+    """Cancel the chooser without touching the range, then let the page re-settle."""
+    if type(app.screen).__name__ == "PresetPicker":
+        await pilot.press("escape")
+    await fx.settle(pilot, 6)
 
 
 async def week(app, pilot):
@@ -1071,6 +1094,14 @@ CASES = [
     ("86-overview-resized-120-to-80", (120, 36), None, "7d", False, (80, 24)),
     ("87-overview-resized-80-to-120", (80, 24), None, "7d", False, (120, 36)),
     ("88-speed-across-resized-120-to-80", (120, 36), rich_speed, "7d", False, (80, 24)),
+    # The resize that arrives while a CHOOSER covers the page. The page is painted
+    # for the first window, the terminal is dragged to the second with the chooser
+    # still up, and only the dismissal hands the page its real width -- so these
+    # two frames are that dismissal.
+    ("95-overview-resized-under-picker-120-to-80", (120, 36), open_picker, "7d",
+     False, (80, 24), close_picker),
+    ("96-overview-resized-under-picker-80-to-120", (80, 24), open_picker, "7d",
+     False, (120, 36), close_picker),
     ("90-sessions-populated-120x36", (120, 36), rich_sessions_pane, "7d", False),
     ("91-sessions-populated-100x30", (100, 30), rich_sessions_pane, "7d", False),
     ("92-sessions-populated-80x24", (80, 24), rich_sessions_pane, "7d", False),
@@ -1085,10 +1116,12 @@ def main() -> int:
     for case in CASES:
         name, size, body, initial, mono = case[:5]
         resize_to = case[5] if len(case) > 5 else None
+        after_resize = case[6] if len(case) > 6 else None
         if wanted and name not in wanted:
             continue
         install_fakes()  # a fresh fake per frame: no state bleeds between captures
-        capture(name, size, body, initial=initial, mono=mono, resize_to=resize_to)
+        capture(name, size, body, initial=initial, mono=mono, resize_to=resize_to,
+                after_resize=after_resize)
     print(f"\ncaptures in {OUT}", flush=True)
     # Every file is closed and flushed by now. The exit is explicit because the
     # app's worker threads are not: a plain return would sit in

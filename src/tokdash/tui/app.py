@@ -1313,6 +1313,11 @@ class TokdashApp(App):
             self._started["overview"] = True
             self._load_pane("overview", refresh=False)
         self._update_status()
+        # A chooser that was RESIZED while it was open leaves the page behind it
+        # wearing the frame it has not been given yet. ScreenResume does not
+        # bubble here, so the app's screen-change signal is the hook; the page
+        # only learns its real geometry on the way back. See _screen_changed.
+        self.screen_change_signal.subscribe(self, self._screen_changed)
 
     # ------------------------------------------------------------- dispatch --
 
@@ -3641,6 +3646,31 @@ class TokdashApp(App):
         self._update_status()  # re-wraps the strip, then re-fits the panes
         self._refit_body()
 
+    def _screen_changed(self, _screen) -> None:
+        """Re-take the page's fit when a resized chooser is dismissed.
+
+        A pushed screen COVERS the page rather than moving it, so a terminal
+        resize that arrives while a chooser is open is answered against the
+        chooser: the fit chain measures widgets that are not on screen, settles,
+        and the page keeps the layout of a width it no longer has. Measured at
+        120x36 shrunk to 80x24 under the range picker: 118 cells of card inside a
+        78-cell pane, so "450.0K" arrived as "450" -- and in the other direction
+        the page stayed on three-across cards with room for six.
+
+        Nothing on the way back asks again. ScreenResume does not bubble to the
+        App, and the deferred refit the resize queued had already run against the
+        chooser. The app's screen-change signal is published on push AND on pop
+        with the screen that is now active, so this covers every chooser through
+        the shared lifecycle instead of only the range picker's success callback.
+        """
+        if len(self.screen_stack) > 1:
+            return  # a chooser going ON covers a page that has not moved
+        # The chain may have settled against the chooser, so it is told to measure
+        # the page again rather than trust a stamp taken while nothing was visible.
+        self._fit_stamp = None
+        self._fit_rearms = 0
+        self.call_after_refresh(self._refit_after_layout)
+
     def _refit_body(self) -> None:
         """Refit the page on screen, but only if its box is not the one it fitted.
 
@@ -3653,6 +3683,8 @@ class TokdashApp(App):
         see: figures under a "computing" line, for a window that has not answered.
         """
         pane = self._active_pane()
+        if len(self.screen_stack) > 1:
+            return  # a chooser is on top: the page is measuring the frame being replaced
         if self._state[pane] != "ok" or self._open_loads.get(pane):
             return
         if self._body_fitted.get(pane) == self._body_stamp(pane):

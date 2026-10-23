@@ -1680,14 +1680,23 @@ def test_a_superseded_load_on_the_visible_pane_is_re_issued_at_once(monkeypatch)
         await pilot.press("3")  # Quota tab: its first load starts, blocked
         await pilot.pause(0.1)
         assert "quota" in app._inflight or app._open_loads.get("quota")
+        # Overview has to be MID-FLIGHT for the bump to supersede anything. On a
+        # busy runner its worker can still be queued here, and a load that STARTS
+        # after the bump belongs to the new generation -- nothing to strand, so
+        # the last assertion below would be checking nothing.
+        assert await wait_for(app, pilot, lambda: "overview" in app._inflight)
         app._gen += 1  # the bump a rival pane's reload would deliver
         gate.set()
         assert await wait_for(app, pilot, lambda: app._state["quota"] == "ok")
         assert "quota" not in app._stranded  # the visible pane was served again
         assert len(calls.quota_state) >= 2  # superseded flight + re-issue
         # Overview — superseded by the same bump but OUT OF SIGHT — correctly
-        # waits for the tab hook instead of reloading behind the user's back.
-        assert "overview" in app._stranded
+        # waits for the tab hook instead of reloading behind the user's back. It
+        # gets there when the blocked thread wakes, which is not tied to when
+        # Quota's re-issue lands, so the bookkeeping is awaited rather than
+        # inferred from the other pane's timing.
+        assert await wait_for(app, pilot, lambda: "overview" in app._stranded)
+        assert len(calls.usage) == 1  # no re-read while the pane sat unwatched
 
     drive(app, steps)
 

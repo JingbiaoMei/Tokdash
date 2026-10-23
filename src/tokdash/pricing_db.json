@@ -1,6 +1,6 @@
 {
-  "version": "2.0.37",
-  "lastUpdated": "2026-10-17T16:44:30Z",
+  "version": "2.0.38",
+  "lastUpdated": "2026-10-23T04:27:20Z",
   "note": "Comprehensive pricing database with all Moonshot, MiniMax, GLM, and OpenAI models from OpenRouter. Cache pricing estimated at 10% of input for cache_read, 100% of input for cache_write.",
   "aliases": {
     "Qwen/Qwen3.8-Flash-Next": "qwen3.8-flash",
@@ -239,6 +239,15 @@
       "unit": "per_million_tokens",
       "source": "platform.minimax.io/docs/guides/pricing-paygo",
       "note": "Official standard PAYG (<=512K ctx). 7-day launch 50% off (~till 2026-06-07) billed 0.3/1.2 — matches back-derived minimax-cn logs."
+    },
+    "minimax-m3.1-flash": {
+      "provider": "minimax",
+      "input": 0.15,
+      "output": 0.6,
+      "cache_read": 0.015,
+      "cache_write": 0.15,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/minimax/minimax-m3.1-flash"
     },
     "_comment_glm": "=== GLM / Z.ai Models ===",
     "glm-4-32b": {

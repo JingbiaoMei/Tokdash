@@ -22,6 +22,7 @@ PY="${PY:-python3}"
   tests/test_tui_review_fixes.py tests/test_tui_review_fixes2.py \
   tests/test_tui_review_fixes3.py tests/test_tui_review_fixes4.py \
   tests/test_tui_review_fixes5.py tests/test_tui_review_fixes6.py \
+  tests/test_tui_review_fixes7.py \
   tests/test_tui_layout_pass.py tests/test_tui_terminal_colour.py -q "$@"
 status=$?
 

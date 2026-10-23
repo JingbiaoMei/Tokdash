@@ -906,6 +906,13 @@ class TokdashApp(App):
         # like a pass that has nothing to do, so this one makes the next pass a
         # MEASUREMENT rather than a verdict. See _fit_panes.
         self._fit_forced = False
+        # A refit the app DECLINED, per pane. The page needed re-fitting while a
+        # read was in flight or a chooser covered it, so the repaint that would
+        # have measured the settled frame could not run. Refusing is only safe
+        # while the refusal is REMEMBERED: the frame moves again, the guard that
+        # refused never gets asked a second time, and the page keeps figures
+        # laid out for a size it no longer has. Paid by _end_load / _page_moved.
+        self._refit_owed: set[str] = set()
         # Is something covering the page right now? The refit on the way back is
         # owed only after a chooser that was ACTUALLY OPEN goes away: the app also
         # publishes a screen change for its very first screen, and reading that as
@@ -2264,6 +2271,15 @@ class TokdashApp(App):
         self._open_loads[pane] = max(0, self._open_loads.get(pane, 0) - 1)
         if self._open_loads[pane]:
             return  # a newer load of this pane is running; it owns the next paint
+        if pane in self._refit_owed:
+            # The frame moved while this read was running and the repaint that
+            # would have followed it was refused. The paint this load is about to
+            # do measures whatever geometry has landed, which on a slow runner is
+            # not the settled one; take the honest measurement once the layout
+            # below it stops moving. Guarded by _refit_body's own stamp, so a
+            # page that fitted itself correctly in the meantime repaints nothing.
+            self._refit_owed.discard(pane)
+            self.call_after_refresh(self._refit_body)
         tracked = self._inflight.get(pane) == gen
         if tracked:
             self._inflight.pop(pane, None)
@@ -2335,12 +2351,27 @@ class TokdashApp(App):
         self._body_fitted[pane] = self._body_stamp(pane)
 
     def _body_stamp(self, pane: str) -> tuple:
-        """The geometry a pane's BODY was laid out at: cells, rows, density."""
+        """The geometry a pane's BODY was laid out at: cells, rows, density.
+
+        The row the status strip owns rides along with the pane's own box, and it
+        is not redundant: the body's row budget runs from the top of its last
+        section DOWN to that row, so a footer that re-wraps -- its data line
+        growing a second one, the freshness text appearing or going -- changes
+        what the body may spend while leaving the pane's width, height and
+        density untouched. CI measured the difference: the pane had been handed
+        the rows it was owed, the box measured right, and yet the activity band
+        was still drawn for four rows more than the frame held, because the only
+        guard between "fitted" and "stale" had never seen the strip move. With
+        its row in the stamp, a footer that changes shape is a change the guard
+        cannot walk past.
+        """
         try:
             box = self.query_one(f"#pane-{pane}")
+            strip_row = self.query_one("#status", Static).region.y
         except NoMatches:  # painted before compose (early failure paths)
             return ()
-        return (box.content_region.width, box.content_region.height, self._compact)
+        return (box.content_region.width, box.content_region.height, self._compact,
+                strip_row)
 
     def _maybe_reread(self, pane: str, gen: int) -> None:
         if gen != self._gen:
@@ -3632,6 +3663,13 @@ class TokdashApp(App):
         stand for the rest of the session -- the squeeze a narrow terminal
         caused would outlive the narrow terminal.
         """
+        # Each size change gets the settle budget afresh. The bound is there to
+        # stop two widgets resizing EACH OTHER forever inside one settle; it was
+        # never meant to ration a session, and on a CI runner -- where every
+        # layout pass costs more, and where the first resize often arrives while
+        # the reads from the last one are still landing -- the leftovers from a
+        # previous resize were exactly what the chain needed and did not have.
+        self._fit_rearms = 0
         self._repaint_chrome()
         self._fit_panes()  # the strip's share of the screen just changed shape
         # Guarded, for the same reason the deferred pass below is: a pane with a
@@ -3733,9 +3771,17 @@ class TokdashApp(App):
         """
         pane = self._active_pane()
         if len(self.screen_stack) > 1:
-            return  # a chooser is on top: the page is measuring the frame being replaced
-        if self._state[pane] != "ok" or self._open_loads.get(pane):
+            # A chooser is on top: the page is measuring the frame being replaced.
+            # It is owed the pass the chooser prevented, and _screen_changed pays
+            # it on the way back.
+            self._refit_owed.add(pane)
             return
+        if self._open_loads.get(pane):
+            self._refit_owed.add(pane)  # _end_load re-arms this when it lands
+            return
+        if self._state[pane] != "ok":
+            return
+        self._refit_owed.discard(pane)  # this pass IS the refit it was owed
         if self._body_fitted.get(pane) == self._body_stamp(pane):
             return
         self._repaint_pane(pane)
@@ -4618,7 +4664,17 @@ class TokdashApp(App):
         The top is set by everything ABOVE the widget, never by its own height,
         so sizing a chart from this number cannot feed back into itself.
         """
-        limit = self.query_one("#status", Static).region.y
+        # The strip's row is WORKED OUT, exactly as _fit_panes works it out, and
+        # for the same reason: a measurement asks the layout for the frame as it
+        # stands, and in the tick a resize or a late footer re-wrap lands, the
+        # strip has no height yet. A measured zero used to fall through to the
+        # full-height default below, which is how a picture got sized for twelve
+        # rows in a frame holding nine and drew the rest of itself -- four rows of
+        # it -- underneath the status strip. Windows CI measured that; the local
+        # runner lays out the strip in time and never sees the gap.
+        rows = self._strip_rows
+        measured = self.query_one("#status", Static).region.y
+        limit = (self._pane_screen_height() - rows) if rows else measured
         top = widget.region.y
         if limit <= 0 or top <= 0:
             return 12  # nothing is laid out yet: take the full-height default

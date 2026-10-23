@@ -29,7 +29,7 @@ from rich.console import Console  # noqa: E402
 from rich.markup import escape  # noqa: E402
 from rich.text import Text  # noqa: E402  (round-4 cells: right-aligned digits, pills)
 from textual import events  # noqa: E402  (wheel events for the scroll test)
-from textual.widgets import DataTable, Static  # noqa: E402
+from textual.widgets import Button, DataTable, Static  # noqa: E402
 
 import tokdash.tui.app as app_mod  # noqa: E402  (import lives after the skip)
 from tokdash.tui.app import (  # noqa: E402
@@ -160,7 +160,13 @@ STATS_PAYLOAD = {
                     "messages": 60},
          "tokenBreakdown": {"input": 100, "output": 50, "cacheRead": 40,
                             "cacheWrite": 10, "reasoning": 5},
-         "sources": ["coding"],
+         # Contract shape: compute.py builds sources[] as OBJECTS carrying
+         # modelId/providerId/tokens, not names ("compute.py:1318 reads
+         # s.get("modelId")), so the fixture carries what the route sends.
+         "sources": [{"source": "coding", "modelId": "gpt-5-codex",
+                      "providerId": "openai", "cost": 3.0,
+                      "tokens": {"input": 100, "output": 50,
+                                 "cacheRead": 40, "cacheWrite": 10}}],
          "intensity": (day % 4) + 1}
         for day in range(1, 32)
     ],
@@ -287,11 +293,11 @@ def patch_fetchers(monkeypatch, calls=None, *, usage=USAGE_PAYLOAD,
     return calls
 
 
-def drive(app, steps):
-    """Run the app headless (80x24) and hand control to steps(pilot)."""
-
+def drive(app, steps, size=(80, 24)):
+    """Run the app headless (80x24 unless told otherwise) and hand
+    control to steps(pilot)."""
     async def main():
-        async with app.run_test(headless=True, size=(80, 24)) as pilot:
+        async with app.run_test(headless=True, size=size) as pilot:
             await pilot.pause()  # let on_mount / the initial worker start
             await steps(pilot)
 
@@ -307,6 +313,20 @@ async def wait_for(app, pilot, predicate, tries=100):
     return predicate()
 
 
+def css_rule(selector):
+    """One rule body from TokdashApp.CSS, whitespace-normalised."""
+    css = TokdashApp.CSS
+    at = css.index(selector)
+    return " ".join(css[at : css.index("}", at)].split())
+
+
+def screen_text(app):
+    """The whole screen as the terminal would show it, one line per row."""
+    return "\n".join(
+        strip.text for strip in app.screen._compositor.render_strips(app.screen.size)
+    )
+
+
 def static_text(app, widget_id):
     return str(app.query_one(f"#{widget_id}").content)
 
@@ -314,8 +334,19 @@ def static_text(app, widget_id):
 def cell(c):
     """Plain text of one DataTable cell. Round 4 made most cells rich Text
     (the right-aligned numerics of app._num, the quota status color, the
-    Detail section pills); str cells (escaped names) pass through."""
-    return c.plain if isinstance(c, Text) else str(c)
+    Detail section pills); str cells (escaped names) pass through.
+
+    A source cell is a BADGE -- the harness's own tint on an accent edge plus
+    the label (app._source_cell) -- and the edge is presentation, so it is read
+    back off here. The badge's colour has its own test, which asserts on the
+    cell's spans rather than its plain text."""
+    text = c.plain if isinstance(c, Text) else str(c)
+    return text.removeprefix(app_mod._BADGE_EDGE)
+
+
+def headers_of(table):
+    """The on-screen column labels, in order (what the user actually sees)."""
+    return [str(c.label) for c in table.ordered_columns]
 
 
 def plain_row(table, i):
@@ -340,72 +371,73 @@ def render_table_text(table, color=False):
 # Overview pane paint + status
 # ---------------------------------------------------------------------------
 
-def test_overview_paints_kpis_tables_status(monkeypatch):
+
+def test_overview_paints_window_cards_and_status(monkeypatch):
     calls = patch_fetchers(monkeypatch)
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
-        # Round 3: the date line IS the section header — the "header" Run
-        # (reverse fill) must reach the widget THROUGH emit_markup, wrapping
-        # the exact window text. (Raw "[header]" would be a MarkupError;
-        # this pins the translation to "reverse bold".)
-        assert static_text(app, "ov-range") == \
-            "[reverse bold]2026-09-14 → 2026-09-20 · 7 days[/]"
-        kpis = app.query_one("#ov-kpis").content
-        plain = render_table_text(kpis)
-        assert "12.4M" in plain and "$142.31" in plain and "4,820" in plain
-        assert "1h 30m" in plain  # agent SUM, not the 1h clock union
-        assert "71.0%" in plain and "gpt-5-codex" in plain
-        assert "↑ 8.2%" in plain and "↓ 3.1%" in plain
-        # Overview delta colors are the OPPOSITE of the report tab: up = RED
-        # (web renderDelta index.html:8323), down = GREEN — lock the split.
-        ansi = render_table_text(kpis, color=True)
-        assert "\x1b[31m" in ansi and "\x1b[32m" in ansi
-        tools = app.query_one("#ov-tools")
-        assert tools.row_count == len(USAGE_PAYLOAD["by_tool"])
-        # Round 3 statistics table: 9 columns, normalized names, per-tool
-        # Time joined from the active payload (codex 3_000_000 ms = "50m").
-        assert len(tools.columns) == 9
-        trows = [plain_row(tools, i) for i in range(tools.row_count)]
-        assert trows[0] == ["Codex", "6.0M", "2.0M", "4.0M", "8.0M", "66.0%",
-                            "$90.00", "3,000", "50m"]
-        assert trows[1] == ["Claude Code", "3.0M", "1.4M", "2.0M", "4.4M",
-                            "78.0%", "$52.31", "1,820", "40m"]
-        # Round 4 alignment law: every numeric cell is a right-aligned Text
-        # (8.2.8 DataTable has no column justify — alignment rides per cell).
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
+        # THE WINDOW PRINTS ONCE. The shared strip under the tabs owns the dates
+        # (the window the APP resolved, not the payload's echo of another
+        # window); the page head owns the page name. Repeating either one costs
+        # a row on a 24-row screen and buys a second place to disagree.
+        strip = static_text(app, "range-dates")
+        assert strip.startswith("2026-09-20"), strip
+        assert "Overview" not in strip
+        assert static_text(app, "ov-title") == "Overview"
+        assert static_text(app, "ov-scope") == "All tools"
+        cards = str(app.query_one("#ov-cards").content)
+        assert "12.4M" in cards and "$142.31" in cards and "4,820" in cards
+        assert "1h 30m" in cards  # agent SUM, not the 1h clock union
+        assert "71.0%" in cards and "gpt-5-codex" in cards
+        assert "+8.2%" in cards and "-3.1%" in cards
+        # Revision 5 palette law: the card VALUES carry the tints (the approved
+        # design colours each figure) while the labels and deltas stay grey. The
+        # pilot's terminal reports no colour, so the law is checked with the
+        # colour path forced -- the monochrome path has its own test.
+        app.no_color = False
+        app._repaint_pane("overview")
+        text = app.query_one("#ov-cards").content
+        assert any("#c4a1ff" in str(span.style) for span in text.spans), text.spans
+        assert not any("#b9a7ff" in str(span.style) for span in text.spans)
+        app.no_color = True
+        app._repaint_pane("overview")
+        assert not any(
+            "#c4a1ff" in str(span.style)
+            for span in app.query_one("#ov-cards").content.spans
+        )
+
+        table = app.query_one("#ov-table", DataTable)
+        assert table.row_count == len(USAGE_PAYLOAD["by_tool"])
+        # At 80 columns the harness table keeps its five load-bearing columns;
+        # the optional breakdown is what goes (see the width law below).
+        assert headers_of(table) == ["Tool", "Tokens", "Share", "Cost",
+                                     "Est. time"]
+        assert plain_row(table, 0) == ["Codex", "8.0M", "64.5%", "$90.00", "50m"]
+        assert plain_row(table, 1) == ["Claude Code", "4.4M", "35.5%", "$52.31",
+                                       "40m"]
+        # Alignment law: every numeric cell is a right-aligned Text, so the
+        # digits line down without a column of their own to lean on.
         assert all(isinstance(c, Text) and c.justify == "right"
-                   for c in tools.get_row_at(0)[1:])
-        models = app.query_one("#ov-models")
-        assert models.row_count == 2
-        # Round 4: the models table carries the FULL field set (8 columns).
-        assert len(models.columns) == 8
-        assert plain_row(models, 0) == ["gpt-5-codex", "6.0M", "2.0M", "4.0M",
-                                        "8.0M", "66.0%", "$90.00", "3,000"]
-        assert all(isinstance(c, Text) and c.justify == "right"
-                   for c in models.get_row_at(0)[1:])
-        # Round 3: the trailing-365 band and the daily sparkline are GONE —
-        # the Overview answers for the LOCAL window only.
+                   for c in table.get_row_at(0)[1:])
+        # The Overview answers for the LOCAL window only: no band, no daily
+        # sparkline, and no stats fetch of its own (Stats owns that read).
         assert not app.query("#ov-band")
         assert not app.query("#ov-daily")
         status = static_text(app, "status")
         assert "cache hit" in status and DB_LINE in status
         assert "computing" not in status  # idle: no stuck spinner
-        # Round 4 bottom hint: the compact echo of the top legend, words for
-        # the shift keys (the old "t/w/m/y/a [/]/0" was unreadable shorthand).
-        # escape() leaves "[ ]" bare (space after "[" can never be a tag —
-        # the old "[/]" case was the one that needed the backslash).
-        assert "t/w/m/y/a period · [ ] shift period · 0 today" in status
-        # Round 4 top-of-pane legend, painted at mount (mutated wording or a
-        # dropped Static both land here).
-        hints = static_text(app, "ov-hints")
-        assert "t today · w week · m month · y year · a all" in hints
-        assert "\\[ earlier · ] later · 0 back to today" in hints  # literal "["
-        # The serial web order actually ran: usage, active-time, stats.
-        assert calls.usage and calls.active and calls.stats
+        # The status line names the keys THIS pane answers to.
+        assert "/ search · s sort · enter open · esc close" in status
+        assert "[ ] range · c dates" in status
+        # Usage and active time load; stats is NOT the Overview's to ask for.
+        assert calls.usage and calls.active
         assert calls.usage[0] == ("today", False)
+        assert not calls.stats
 
     drive(app, steps)
+
 
 
 def test_skeleton_copy_until_first_answer(monkeypatch):
@@ -414,15 +446,25 @@ def test_skeleton_copy_until_first_answer(monkeypatch):
     app = TokdashApp("today")
 
     async def steps(pilot):
-        # The skeleton is composed in place and stays until the first paint.
+        # A pane that has never painted says what a first scan costs; a pane
+        # that only has to redraw says less. Both are set BEFORE the answer.
         assert "computing… first run scans session logs" in \
-            static_text(app, "ov-range")
-        assert "computing… first run scans session logs" in \
-            static_text(app, "rp-body")  # report skeleton too
+            static_text(app, "ov-note")
         gate.set()
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
-        assert "first run scans" not in static_text(app, "ov-range")
-        assert "2026-09-14 → 2026-09-20 · 7 days" in static_text(app, "ov-range")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
+        assert "first run scans" not in static_text(app, "ov-note")
+        # A healthy pane shows NO strip at all -- an empty tinted band is worse
+        # than none -- and the dates were never the strip's to print.
+        assert app.query_one("#ov-note").display is False
+        assert "2026-09-20" in static_text(app, "range-dates")
+
+        gate.clear()
+        await pilot.press("2")  # Report opens for the first time, still blocked
+        assert "computing… first run scans session logs" in \
+            static_text(app, "rp-body")
+        gate.set()
+        assert await wait_for(app, pilot, lambda: app._state["report"] == "ok")
+        assert "first run scans" not in static_text(app, "rp-body")
 
     drive(app, steps)
 
@@ -433,48 +475,43 @@ def test_skeleton_copy_until_first_answer(monkeypatch):
 # re-activation has to re-issue the fetch).
 # ---------------------------------------------------------------------------
 
+
 def test_reload_clears_painted_data_and_shows_computing(monkeypatch):
-    # ROUND-4 LOADING LAW (user request): a reload must never leave the
-    # PREVIOUS window's figures standing — the newest load clears its pane
-    # and shows a short dim "computing…" (the long first-run skeleton stays
-    # for the never-painted case). The old round-1 law ("refresh never
-    # blanks painted data") is REVERSED here: stale figures read as live
-    # data, which the user rejected.
+    # LOADING LAW: a reload never leaves the PREVIOUS window's figures standing
+    # behind the new one. The moment a load starts its pane clears to a short
+    # dim notice; the long first-run copy stays for the never-painted case.
     gate = threading.Event()
-    gate.set()  # the first load must pass through untouched
+    gate.set()  # the first load passes through untouched
     patch_fetchers(monkeypatch, usage_gate=gate)
-    app = TokdashApp("week")  # week paints the chart slot — clear must hide it
+    app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
-        tools = app.query_one("#ov-tools")
-        models = app.query_one("#ov-models")
-        detail = app.query_one("#ov-detail")
-        assert tools.row_count > 0 and detail.row_count > 0
-        assert app.query_one("#ov-chart").display is True
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
+        table = app.query_one("#ov-table", DataTable)
+        assert table.row_count > 0
+        app.query_one("#ov-table", DataTable).focus()
+        await pilot.press("enter")  # open one harness's detail
+        assert app.query_one("#ov-detail").display is True
 
         gate.clear()  # the reload's fetches block
         await pilot.press("r")
-        assert await wait_for(app, pilot, lambda: tools.row_count == 0)
-        assert models.row_count == 0 and detail.row_count == 0
-        assert "computing…" in static_text(app, "ov-range")
-        assert "first run scans" not in static_text(app, "ov-range")
-        assert str(app.query_one("#ov-kpis").content) == ""
-        assert app.query_one("#ov-chart").display is False
+        assert await wait_for(app, pilot, lambda: table.row_count == 0)
+        assert "[dim]computing…[/]" == static_text(app, "ov-note")
+        assert str(app.query_one("#ov-cards").content) == ""
+        assert static_text(app, "ov-activity") == ""
+        assert app.query_one("#ov-detail").display is False
         # the status bar already carried the spinner (unchanged behavior)
         assert "computing…" in static_text(app, "status")
 
         gate.set()
-        assert await wait_for(app, pilot, lambda: tools.row_count > 0)
-        assert await wait_for(app, pilot, lambda: detail.row_count > 0)
-        assert "2026-09-14 → 2026-09-20" in static_text(app, "ov-range")
-        assert "computing…" not in static_text(app, "ov-range")
-        # The week chart is repainted LAST (by the STATS payload's tail, after
-        # usage refilled the tables) — wait for the real postcondition instead
-        # of assuming it already landed: CI runners proved that window real.
-        assert await wait_for(app, pilot, lambda: app.query_one("#ov-chart").display is True)
+        assert await wait_for(app, pilot, lambda: table.row_count > 0)
+        # The window lives on the ONE shared strip (revision 5), not per pane.
+        assert "2026-09-20" in static_text(app, "range-dates")
+        assert "computing…" not in static_text(app, "range-dates")
+        assert str(app.query_one("#ov-cards").content) != ""
 
     drive(app, steps)
+
 
 
 def test_report_and_quota_panes_clear_on_reload(monkeypatch):
@@ -484,29 +521,29 @@ def test_report_and_quota_panes_clear_on_reload(monkeypatch):
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
 
         # --- report pane: rp-body is ONE Static, so the notice and the
         # clear are the same update.
         await pilot.press("2")
-        assert await wait_for(app, pilot, lambda: app._rp_state == "ok")
-        assert "Top agent" in static_text(app, "rp-body")
+        assert await wait_for(app, pilot, lambda: app._state["report"] == "ok")
+        assert "Tokdash report" in static_text(app, "rp-body")
         gate.clear()
         await pilot.press("r")  # r reloads the ACTIVE pane
         assert await wait_for(
             app, pilot,
-            lambda: "Top agent" not in static_text(app, "rp-body"),
+            lambda: "Tokdash report" not in static_text(app, "rp-body"),
         )
         assert "computing…" in static_text(app, "rp-body")
         assert "first run scans" not in static_text(app, "rp-body")
         gate.set()
         assert await wait_for(
-            app, pilot, lambda: "Top agent" in static_text(app, "rp-body")
+            app, pilot, lambda: "Tokdash report" in static_text(app, "rp-body")
         )
 
         # --- quota pane: table cleared AND the credits section hidden
         await pilot.press("3")
-        assert await wait_for(app, pilot, lambda: app._qp_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["quota"] == "ok")
         table = app.query_one("#quota-table")
         assert table.row_count > 0
         assert app.query_one("#quota-credits").display is True
@@ -522,21 +559,36 @@ def test_report_and_quota_panes_clear_on_reload(monkeypatch):
     drive(app, steps)
 
 
-def test_top_hints_report_and_quota_panes(monkeypatch):
+
+def test_the_status_line_names_the_keys_the_active_pane_answers_to(monkeypatch):
     patch_fetchers(monkeypatch)
     app = TokdashApp("today")
 
     async def steps(pilot):
-        rp = static_text(app, "rp-hints")
-        assert "w week · m month · y year" in rp
-        assert "\\[ earlier · ] later · 0 back to today" in rp  # literal "["
-        quota = static_text(app, "quota-hints")
-        assert "u poll now" in quota
-        assert "week" not in quota  # no period keys on Quota — one line only
-        # compact bottom echo on Report after activation
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
+        assert "[ ] range · c dates" in static_text(app, "status")
+
         await pilot.press("2")
-        assert await wait_for(app, pilot, lambda: app._rp_state == "ok")
-        assert "w/m/y period · [ ] shift period · 0 today" in static_text(app, "status")
+        assert await wait_for(app, pilot, lambda: app._state["report"] == "ok")
+        status = static_text(app, "status")
+        assert "s sorts projects" in status
+        assert "/ search" not in status  # the Overview hint left with its pane
+        # The section picker is the Report's own, and it says what 's' sorts.
+        hints = static_text(app, "rp-hints")
+        assert "sorts projects" in hints or "s sorts" in hints
+
+        await pilot.press("3")
+        assert await wait_for(app, pilot, lambda: app._state["quota"] == "ok")
+        status = static_text(app, "status")
+        assert "u poll" in status
+        assert "[ ] range" not in status  # Quota has no date axis at all
+        assert app.query_one("#rangebar").display is False
+
+        await pilot.press("1")  # back: the Overview hints return
+        assert await wait_for(
+            app, pilot, lambda: "s sort" in static_text(app, "status")
+        )
+        assert app.query_one("#rangebar").display is True
 
     drive(app, steps)
 
@@ -556,7 +608,7 @@ def test_quota_credits_are_provider_labeled(monkeypatch):
 
     async def steps(pilot):
         await pilot.press("3")
-        assert await wait_for(app, pilot, lambda: app._qp_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["quota"] == "ok")
         credits = app.query_one("#quota-credits")
         assert credits.display is True
         text = str(credits.content)
@@ -571,63 +623,104 @@ def test_quota_credits_are_provider_labeled(monkeypatch):
     drive(app, steps)
 
 
-def test_section_margins_and_hint_ids_in_css():
-    # Mutation guard for the round-4 layout: the margin block and every
-    # widget it names must exist (a dropped rule collapses the sections).
-    css = TokdashApp.CSS
-    assert "margin-top: 1" in css
-    for wid in ("#ov-hints", "#ov-chart", "#ov-tools", "#ov-models",
-                "#ov-detail", "#rp-hints", "#quota-hints", "#quota-table",
-                "#quota-credits"):
-        assert wid in css
+
+def test_the_surface_keeps_its_layout_laws_in_css():
+    # Revision 5's approved look is carried by a handful of stylesheet rules.
+    # A dropped rule collapses the sections or brings the outlines back, so the
+    # laws are pinned here rather than trusted to a screenshot.
+    # 1. Sections separate by SPACING, not by a rule above each one.
+    assert "margin-top: 1" in css_rule("Section")
+    # 2. No panel outlines: the tables and the strip buttons carry no border.
+    assert "border: none" in css_rule("#rangebar Button")
+    assert "border: none" in css_rule("DataTable {")
+    # 3. The active shortcut/tab is the lavender selection colour...
+    assert "#b9a7ff" in css_rule("Tab.-active")
+    assert "#b9a7ff" in css_rule("#rangebar Button.-active")
+    # ...and keyboard focus is still VISIBLE (underline) without being a border.
+    assert "underline" in css_rule("#controls Button:focus")
+    assert "#b9a7ff" in css_rule("Input:focus")  # an input says when it is live
+    # 4. The table header keeps its separator and weight; rows do not.
+    assert "bold" in css_rule("DataTable > .datatable--header")
+    # 5. The scope strip is a surface, and the dates are right-aligned so the
+    #    preset row cannot shove them around as it reflows.
+    assert "text-align: right" in css_rule("#range-dates")
+    assert "border: none" in css_rule("#rangebar Button")
 
 
-def test_no_row_cursor_on_any_table(monkeypatch):
-    # Round 5 (user: "the first item got background highlighted in tool /
-    # model / tool /model, remove this highlighting"): that band WAS the
-    # DataTable row cursor sitting on row 0 — every table now runs with
-    # cursor_type="none" (the wheel is the only scroll axis).
+
+def test_tables_mark_the_keyboard_position_with_a_quiet_row_tone(monkeypatch):
+    # Round 5 banned the accidental highlight of row 0; revision 5 keeps a
+    # VISIBLE cursor (it is the only keyboard-position affordance a DataTable
+    # has) but the band is the quiet surface tone and never the lavender the
+    # active tab wears, so a cursor can never be read as a selection.
+    #
+    # Rows DO alternate, one background step apart: a terminal cannot space its
+    # lines, and a reader tracking one figure across ten columns loses the row
+    # they started on. It is one step, one tone, and never a rule between rows.
     patch_fetchers(monkeypatch)
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
-        for wid in ("#ov-tools", "#ov-models", "#ov-detail", "#quota-table"):
-            assert app.query_one(wid, DataTable).cursor_type == "none"
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
+        tables = list(app.query(DataTable))
+        assert len(tables) >= 6  # every pane ships its table
+        for table in tables:
+            assert table.cursor_type == "row", table.id
+            assert table.zebra_stripes is True, table.id
+        band = css_rule("DataTable > .datatable--cursor")
+        assert "#263141" in band and "#b9a7ff" not in band
+        odd = css_rule("DataTable > .datatable--odd-row")
+        even = css_rule("DataTable > .datatable--even-row")
+        assert "#b9a7ff" not in odd and "#b9a7ff" not in even, (odd, even)
+        # One tone each, and no rule between rows -- the separation the approved
+        # design draws with space and surface, not with lines.
+        assert "background:" in odd and "background:" in even, (odd, even)
+        for rule in (odd, even):
+            assert "border" not in rule and "underline" not in rule, rule
 
     drive(app, steps)
 
 
-def test_overview_tables_share_one_column_grid(monkeypatch):
-    # Round 5 (user: "for these three sections, can you align the input
-    # output ... rows?"): the three Overview tables are SEPARATE auto-
-    # sizing DataTables — the only cross-table alignment lever is one
-    # identical FIXED-width grid, built by one helper. Assert the grids
-    # are literally equal, and equal to the module constants.
+
+def test_a_wide_pane_gains_the_breakdown_a_narrow_one_drops(monkeypatch):
+    # The Overview answers for one population in ONE table whose optional
+    # breakdown columns appear only when the pane can hold them. Numbers are
+    # fitted, never clipped: a narrow terminal loses Input..Msgs, not digits.
     patch_fetchers(monkeypatch)
-    app = TokdashApp("today")
+    narrow = TokdashApp("today")
 
-    async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
-        # `.columns` is a key→Column MAPPING (iterating it yields the
-        # ColumnKey namedtuples) — `ordered_columns` is the width-bearing
-        # Column objects, in on-screen order.
-        widths = {
-            wid: [c.width for c in app.query_one(wid, DataTable).ordered_columns]
-            for wid in ("#ov-tools", "#ov-models", "#ov-detail")
-        }
-        grid = [app_mod._COL_NAME, app_mod._COL_TOK, app_mod._COL_TOK,
-                app_mod._COL_TOK, app_mod._COL_TOK, app_mod._COL_PCT,
-                app_mod._COL_COST, app_mod._COL_MSGS, app_mod._COL_TIME]
-        assert widths["#ov-tools"] == grid
-        assert widths["#ov-detail"] == grid
-        assert widths["#ov-models"] == grid[:8]  # models drop only Time
-        assert all(w is not None for w in widths["#ov-tools"])  # FIXED, not auto
+    async def steps_narrow(pilot):
+        assert await wait_for(app := narrow, pilot,
+                              lambda: narrow._state["overview"] == "ok")
+        table = narrow.query_one("#ov-table", DataTable)
+        assert headers_of(table) == ["Tool", "Tokens", "Share", "Cost",
+                                     "Est. time"]
+        assert plain_row(table, 0) == ["Codex", "8.0M", "64.5%", "$90.00", "50m"]
+        assert all(c.width for c in table.ordered_columns)  # FIXED, not auto
 
-    drive(app, steps)
+    drive(narrow, steps_narrow)
+
+    wide = TokdashApp("today")
+
+    async def steps_wide(pilot):
+        assert await wait_for(app := wide, pilot,
+                              lambda: wide._state["overview"] == "ok")
+        table = wide.query_one("#ov-table", DataTable)
+        assert headers_of(table) == ["Tool", "Tokens", "Share", "Cost",
+                                     "Input", "Output", "Cache", "Hit", "Msgs",
+                                     "Est. time"]
+        assert plain_row(table, 0) == ["Codex", "8.0M", "64.5%", "$90.00",
+                                       "6.0M", "2.0M", "4.0M", "66.0%",
+                                       "3,000", "50m"]
+
+    drive(wide, steps_wide, size=(140, 40))
+
 
 
 def test_report_pane_recovers_after_other_pane_supersedes_it(monkeypatch):
+    # A gen bump must never strand the pane whose load it cancelled: the
+    # Overview's reload supersedes the Report's in-flight fetch, and coming back
+    # to the Report has to re-issue it rather than sit on the skeleton forever.
     gate = threading.Event()  # every fetch blocks until the test opens it
     calls = patch_fetchers(monkeypatch, usage_gate=gate)
     app = TokdashApp("today")
@@ -636,20 +729,25 @@ def test_report_pane_recovers_after_other_pane_supersedes_it(monkeypatch):
         await pilot.pause()
         await pilot.press("2")  # report lazy-load starts (blocked on gate)
         await pilot.press("1")  # back to Overview
-        await pilot.press("p")  # Overview-side gen bump: supersede the load
+        await pilot.press("r")  # Overview-side gen bump: supersede the load
         gate.set()
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
-        assert app._rp_state == "empty"  # superseded load painted nothing
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
+        assert app._state["report"] == "empty"  # superseded load painted nothing
+        assert "report" in app._stranded  # hidden: it waits for the tab hook
         insights_before = len(calls.insights)
         await pilot.press("2")  # re-activation must re-issue the fetch
-        assert await wait_for(app, pilot, lambda: app._rp_state == "ok")
-        assert "Top agent" in static_text(app, "rp-body")
+        assert await wait_for(app, pilot, lambda: app._state["report"] == "ok")
+        assert "Tokdash report" in static_text(app, "rp-body")
         assert len(calls.insights) > insights_before  # a fetch really ran
 
     drive(app, steps)
 
 
+
 def test_overview_pane_recovers_after_other_pane_supersedes_it(monkeypatch):
+    # The same law seen from the other side: a Report-side reload supersedes the
+    # Overview load that is still in flight, and the Overview is off screen, so
+    # the recovery belongs to the tab hook rather than to a silent repaint.
     gate = threading.Event()
     calls = patch_fetchers(monkeypatch, usage_gate=gate)
     app = TokdashApp("today")
@@ -657,15 +755,18 @@ def test_overview_pane_recovers_after_other_pane_supersedes_it(monkeypatch):
     async def steps(pilot):
         await pilot.pause()  # initial Overview load in flight (blocked)
         await pilot.press("2")  # report lazy-load starts
-        await pilot.press("p")  # Report-side gen bump: supersede Overview's
+        await pilot.pause(0.05)
+        assert "overview" not in app._stranded  # nothing has superseded it yet
+        await pilot.press("r")  # Report-side reload: gen bump supersedes Overview
         gate.set()
-        assert await wait_for(app, pilot, lambda: app._rp_state == "ok")
-        assert app._ov_state == "empty"  # superseded load painted nothing
+        assert await wait_for(app, pilot, lambda: app._state["report"] == "ok")
+        assert app._state["overview"] == "empty"  # superseded load painted nothing
+        assert "overview" in app._stranded
         usage_before = len(calls.usage)
         await pilot.press("1")  # re-activation must re-issue the fetch
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
-        assert "first run scans" not in static_text(app, "ov-range")
-        assert "→ 2026-09-20" in static_text(app, "ov-range")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
+        assert "first run scans" not in static_text(app, "ov-note")
+        assert "2026-09-20" in static_text(app, "range-dates")
         assert len(calls.usage) > usage_before
 
     drive(app, steps)
@@ -675,29 +776,35 @@ def test_overview_pane_recovers_after_other_pane_supersedes_it(monkeypatch):
 # Report pane lazy-load + keys
 # ---------------------------------------------------------------------------
 
+
 def test_report_tab_lazy_loads_with_shared_seam(monkeypatch):
     calls = patch_fetchers(monkeypatch)
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         assert not calls.insights  # lazy: no report fetch before activation
         await pilot.press("2")
         assert app.query_one("#tabs").active == "pane-report"
-        assert await wait_for(app, pilot, lambda: app._rp_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["report"] == "ok")
         body = static_text(app, "rp-body")
-        assert "Top agent" in body
-        assert "2026-09-14 → 2026-09-20 · 7 days" in body
+        assert "Tokdash report" in body
+        # The body prints the window the shared strip names, not its own guess.
+        assert "2026-09-20" in body
         # Final paint: every source filled → no soft-fail warn lines left.
         assert "\\[warn]" not in body
         # The exact warm triples (spec §6): usage("today", f, t),
-        # insights("year", f, t, REPORT_FACETS, True), active("today", f, t, True).
+        # insights("year", f, t, REPORT_FACETS, True), active("today", f, t).
         assert calls.usage[-1] == ("today", False)
         assert calls.insights[0][0] == "year"
         assert calls.active[0][0] == "today"
-        assert "Report · week" in static_text(app, "status")
+        # The foot answers "what can I press here" -- the page name belongs to
+        # the head, and the report body spells the document out for itself.
+        assert static_text(app, "rp-title") == "Report"
+        assert "← → section" in static_text(app, "status")
 
     drive(app, steps)
+
 
 
 def test_report_mid_load_says_running_not_failed(monkeypatch):
@@ -717,18 +824,19 @@ def test_report_mid_load_says_running_not_failed(monkeypatch):
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         await pilot.press("2")
         # Usage answered → first progressive paint; insights still blocked.
-        assert await wait_for(app, pilot, lambda: "Tokdash report" in static_text(app, "rp-body"))
+        assert await wait_for(
+            app, pilot, lambda: "Tokdash report" in static_text(app, "rp-body"))
         mid = static_text(app, "rp-body")
         assert "scan failed" not in mid
         assert "analytics scan running" in mid
         gate.set()
-        assert await wait_for(app, pilot, lambda: app._rp_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["report"] == "ok")
         final = static_text(app, "rp-body")
         assert "scan failed" not in final and "running" not in final
-        assert "Top agent" in final
+        assert "Tokdash report" in final
 
     drive(app, steps)
 
@@ -747,11 +855,16 @@ def test_report_pane_footer_uses_cached_db_line_and_never_opens_store(monkeypatc
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         await pilot.press("2")
-        assert await wait_for(app, pilot, lambda: app._rp_state == "ok")
-        body = static_text(app, "rp-body")
-        assert DB_LINE in body  # the app's cached line reached the footer
+        assert await wait_for(app, pilot, lambda: app._state["report"] == "ok")
+        # Revision 5 moved the store line off the report body and onto the strip
+        # at the foot of EVERY pane: the database a figure came from belongs to
+        # all the numbers on screen, not to the one section that prints last.
+        # What this test still carries is the guard above -- the cached string
+        # arrives here, and the builder never opens the store to get it.
+        assert DB_LINE in static_text(app, "status")
+        assert DB_LINE not in static_text(app, "rp-body")
 
     drive(app, steps)
 
@@ -805,16 +918,17 @@ def test_status_shows_pending_until_the_db_line_lands(monkeypatch):
     drive(app, steps)
 
 
+
 def test_db_line_landing_mid_report_reload_never_repaints_stale_body(
     monkeypatch,
 ):
     # The watcher repaints the report footer when its read lands — but ONLY
-    # while the pane is idle. _rp_state is sticky across reloads, so an
+    # while the pane is idle. The pane's state is sticky across reloads, so an
     # unguarded repaint would re-emit the PREVIOUS window's body right on top
-    # of the round-4 loading clear (the exact stale-figures violation the
-    # reload law forbids). Deterministic interleaving: block the report's
-    # fetches, start the reload, THEN land the db line — the body must stay
-    # on "computing…" until the reload itself refills it.
+    # of the loading clear (the exact stale-figures violation the reload law
+    # forbids). Deterministic interleaving: block the report's fetches, start
+    # the reload, THEN land the db line — the body must stay on "computing…"
+    # until the reload itself refills it.
     gate = threading.Event()
     gate.set()  # opens for the first load; cleared for the reload below
     db_gate = threading.Event()  # closed: the refresh's db read blocks
@@ -828,10 +942,10 @@ def test_db_line_landing_mid_report_reload_never_repaints_stale_body(
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         await pilot.press("2")
-        assert await wait_for(app, pilot, lambda: app._rp_state == "ok")
-        assert "Top agent" in static_text(app, "rp-body")
+        assert await wait_for(app, pilot, lambda: app._state["report"] == "ok")
+        assert "Tokdash report" in static_text(app, "rp-body")
         gate.clear()  # the reload's fetches will block
         await pilot.press("r")  # refresh: reload starts + db re-read fires
         assert await wait_for(app, pilot, lambda: (
@@ -840,18 +954,20 @@ def test_db_line_landing_mid_report_reload_never_repaints_stale_body(
         for _ in range(20):
             await pilot.pause(0.02)
             body = static_text(app, "rp-body")
-            assert "Top agent" not in body  # the stale body stays dead
+            assert "Tokdash report" not in body  # the stale body stays dead
         gate.set()  # let the reload finish; ITS paints refill the body
         assert await wait_for(app, pilot, lambda: (
-            "Top agent" in static_text(app, "rp-body")))
+            "Tokdash report" in static_text(app, "rp-body")))
 
     drive(app, steps)
 
 
+
 def test_markup_hostile_names_render_literally(monkeypatch):
-    # Model/tool names flow into rich Table cells and DataTable str cells,
-    # both of which parse markup — a name like "claude [bold]…" would either
-    # raise MarkupError (pane drops to error state) or silently restyle.
+    # Model names flow into the card block, the table cells and the detail
+    # panel, all of which parse rich markup: a name like "claude [bold]…" would
+    # either raise MarkupError (the pane drops to its error state) or silently
+    # restyle. Both surfaces must print it as TEXT.
     usage = copy.deepcopy(USAGE_PAYLOAD)
     usage["top_models"] = [{"name": "claude [bold]1m[/]", "tokens": 8_000_000,
                             "cost": 90.0}]
@@ -861,38 +977,65 @@ def test_markup_hostile_names_render_literally(monkeypatch):
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
-        assert app.is_running and app._ov_state == "ok"  # no pane-fail fallback
-        kpi_text = render_table_text(app.query_one("#ov-kpis").content)
-        assert "claude [bold]1m[/]" in kpi_text  # literal, not restyled
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
+        assert app.is_running  # no MarkupError → no pane-fail fallback
+        assert "claude [bold]1m[/]" in str(app.query_one("#ov-cards").content)
+        app.query_one("#ov-tab-models", Button).press()
+        await pilot.pause(0.1)
+        table = app.query_one("#ov-table", DataTable)
+        # The stored cell keeps the escape (a DataTable parses markup in str
+        # cells); what matters is that the SCREEN shows the name as typed.
+        assert "claude [bold]1m[/]" in screen_text(app)
+        assert plain_row(table, 0)[0].startswith("claude ")
 
     drive(app, steps)
 
 
-def test_window_cycle_p_forward_only(monkeypatch):
+
+def test_p_is_the_stats_year_key_and_never_moves_the_shared_window(monkeypatch):
+    # 'p' is the strip's "More" on the four panes that have a strip, and Stats'
+    # year key on the one pane that does not. Neither meaning MOVES a window by
+    # itself: the chooser opens and waits, because a letter that quietly
+    # re-anchored whatever was on screen is the surprise this strip removes.
     calls = patch_fetchers(monkeypatch)
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
-        assert calls.usage[0] == ("today", False)
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
+        window_before = app._win
+        usage_before = len(calls.usage)
         await pilot.press("p")
-        assert await wait_for(app, pilot, lambda: len(calls.usage) >= 2)
-        # Round-2 cycle order is data.OVERVIEW_PERIODS — the calendar "week"
-        # replaced the rolling "7d" so p and the t/w/m/y/a keys and the
-        # warmer all mean the same window (semantics change, plan §Locked).
-        # The fetch PERIOD is "today" (the resolved route period); the token
-        # lives on _ov_period and the pair on usage_full.
-        assert app._ov_period() == "week"
-        assert calls.usage_full[1] == ("today", "2026-09-14", "2026-09-20")
+        await pilot.pause(0.15)
+        # The strip's fifth control is "p More": the window does not change, the
+        # list of the rest of them opens.
+        assert type(app.screen).__name__ == "PresetPicker", type(app.screen).__name__
+        assert app._win == window_before
+        assert len(calls.usage) == usage_before  # no reload, no refetch
+        await pilot.press("escape")
+        await pilot.pause(0.15)
+
+        app.action_show_pane("stats")
+        assert await wait_for(app, pilot, lambda: app._state["stats"] == "ok")
+        assert app._stats_win.year is None  # trailing 365 is the top rung
+        assert "Trailing 365 Days" in static_text(app, "st-scope")
+        # 'p' walks DOWN the ladder, and the rung below the trailing window is
+        # the calendar year the reader is standing in.
         await pilot.press("p")
-        assert await wait_for(app, pilot, lambda: len(calls.usage) >= 3)
-        # Round 3 REMOVED Shift+P: p cycles FORWARD ONLY; the backward axis
-        # is the DATE shift ( [ ] ), never a reverse period cycle.
-        assert app._ov_period() == "month"
-        assert calls.usage_full[2] == ("today", "2026-09-01", "2026-09-20")
-        # Cycling is NEVER forced: new keys recompute naturally.
-        assert all(refresh is False for _, refresh in calls.usage)
+        assert app._stats_win.year == TODAY.year
+        assert await wait_for(app, pilot, lambda: (TODAY.year, False) in calls.stats)
+        assert app._win == window_before  # Stats' year stays inside Stats
+        await pilot.press("p")
+        assert app._stats_win.year == TODAY.year - 1
+        assert await wait_for(app, pilot, lambda: (TODAY.year - 1, False) in calls.stats)
+        # 'P' walks back UP, and comes to rest on the trailing rung: a year
+        # nobody has lived through is not a window.
+        await pilot.press("P")
+        assert app._stats_win.year == TODAY.year
+        await pilot.press("P")
+        assert app._stats_win.year is None
+        await pilot.press("P")
+        assert app._stats_win.year is None
+        assert app._win == window_before
 
     drive(app, steps)
 
@@ -918,8 +1061,10 @@ def test_worker_error_is_pane_local_and_app_survives(monkeypatch):
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "error")
-        assert "error: boom" in static_text(app, "ov-range")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "error")
+        assert "error: boom" in static_text(app, "ov-note")
+        # ONE prefix, not "error: error: boom".
+        assert static_text(app, "ov-note").count("error:") == 1
         assert app.is_running  # app stays alive on ordinary worker errors
         await pilot.press("q")
 
@@ -933,8 +1078,11 @@ def test_backpressure_is_busy_line_press_r(monkeypatch):
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "error")
-        assert "busy computing — press r" in static_text(app, "ov-range")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "error")
+        note = static_text(app, "ov-note")
+        assert "busy computing — press r" in note
+        # Back-pressure is not a fault: the strip says what to do, not "error".
+        assert "error:" not in note
 
     drive(app, steps)
 
@@ -1005,7 +1153,7 @@ def test_stale_reread_once_per_load(monkeypatch):
 
     async def steps(pilot):
         # A stale answer schedules exactly one silent 12 s re-read…
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         assert await wait_for(app, pilot, lambda: len(timers) == 1)
         delay, callback = timers[0]
         assert delay == STALE_REREAD_SECONDS
@@ -1034,7 +1182,7 @@ def test_day_rollover_on_keypress_restarts_active_pane(monkeypatch):
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         before = len(calls.usage)
         holder["today"] = TODAY + datetime.timedelta(days=1)
         await pilot.press("r")  # keypress-triggered — no midnight timer
@@ -1075,16 +1223,17 @@ def test_smoke_rendered_screen_both_panes(monkeypatch):
     captured = {}
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         await pilot.press("2")
-        assert await wait_for(app, pilot, lambda: app._rp_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["report"] == "ok")
         await pilot.pause(0.05)
         captured["lines"] = [
             strip.text for strip in app.screen._compositor.render_strips()
         ]
         await pilot.press("1")
         assert await wait_for(
-            app, pilot, lambda: static_text(app, "status").startswith("Overview")
+            app, pilot,
+            lambda: static_text(app, "status").startswith("/ search · s sort")
         )
 
     drive(app, steps)
@@ -1098,50 +1247,50 @@ def test_smoke_rendered_screen_both_panes(monkeypatch):
 # Round 2: period keys (t/w/m/y/a) — token, call-site normalization, status
 # ---------------------------------------------------------------------------
 
+
 def test_period_keys_set_token_and_normalize_fetch_args(monkeypatch):
-    # Mutation proof #1: normalization happens AT THE FETCH CALL SITE. If
-    # _load_overview passed the raw token to fetch_usage, the triples below
-    # would read ("week", None, None) instead of the warmer's calendar pair.
+    # Mutation proof #1: normalization happens AT THE FETCH CALL SITE. A preset
+    # never travels as its own name -- an endpoint label the resolver does not
+    # know would quietly widen to all time -- so every dated window travels as
+    # an explicit (date_from, date_to) pair under the route's default period.
     calls = patch_fetchers(monkeypatch)
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         # Initial "today": the explicit (D, D) pair _usage_warm_target warms.
         assert calls.usage_full[0] == ("today", "2026-09-20", "2026-09-20")
-        assert "t/w/m/y/a" in static_text(app, "status")
 
         seen = len(calls.active_full)
-        await pilot.press("w")
+        await pilot.press("d")
         # Active time loads after usage; seeing the usage call does not mean
-        # the active-time arguments below belong to the new period yet.
+        # the active-time arguments below belong to the new window yet.
         assert await wait_for(app, pilot, lambda: len(calls.active_full) > seen)
-        assert app._ov_period() == "week"
-        assert calls.usage_full[-1] == ("today", "2026-09-14", "2026-09-20")
-        assert calls.active_full[-1] == ("today", "2026-09-14", "2026-09-20", None)
+        assert app._win.preset == "yesterday"
+        assert calls.usage_full[-1] == ("today", "2026-09-19", "2026-09-19")
+        assert calls.active_full[-1] == ("today", "2026-09-19", "2026-09-19", None)
 
-        seen = len(calls.usage)
-        await pilot.press("m")
-        assert await wait_for(app, pilot, lambda: len(calls.usage) > seen)
-        assert app._ov_period() == "month"
-        assert calls.usage_full[-1] == ("today", "2026-09-01", "2026-09-20")
-
-        seen = len(calls.usage)
-        await pilot.press("y")
-        assert await wait_for(app, pilot, lambda: len(calls.usage) > seen)
-        assert app._ov_period() == "year"
-        assert calls.usage_full[-1] == ("today", "2026-01-01", "2026-09-20")
+        for key, preset, pair in (
+            ("w", "thisweek", ("2026-09-14", "2026-09-20")),  # Monday so far
+            ("m", "month", ("2026-09-01", "2026-09-20")),   # calendar month so far
+            ("y", "year", ("2026-01-01", "2026-09-20")),    # calendar year so far
+        ):
+            seen = len(calls.usage)
+            await pilot.press(key)
+            assert await wait_for(app, pilot, lambda: len(calls.usage) > seen)
+            assert app._win.preset == preset, key
+            assert calls.usage_full[-1] == ("today", *pair), key
 
         seen = len(calls.usage)
         await pilot.press("a")
         assert await wait_for(app, pilot, lambda: len(calls.usage) > seen)
-        assert app._ov_period() == "all"
+        assert app._win.preset == "all"
         assert calls.usage_full[-1] == ("all", None, None)
 
         seen = len(calls.usage)
         await pilot.press("t")
         assert await wait_for(app, pilot, lambda: len(calls.usage) > seen)
-        assert app._ov_period() == "today"
+        assert app._win.preset == "today"
         assert calls.usage_full[-1] == ("today", "2026-09-20", "2026-09-20")
         # Keys never force: warm keys recompute on their own.
         assert all(refresh is False for _, refresh in calls.usage)
@@ -1149,55 +1298,45 @@ def test_period_keys_set_token_and_normalize_fetch_args(monkeypatch):
     drive(app, steps)
 
 
-def test_direct_period_keys_both_panes_and_status_hints(monkeypatch):
-    # Round 3 contract, REPLACING round 2's pane-only rule: t/w/m/y/a pick
-    # the period directly on BOTH period panes — on Report the same letter
-    # picks the calendar window AND RELOADS IT (the old test asserted "no
-    # reload" — inverted here on purpose, see plan). t/a stay inert on
-    # Report (its windows are week/month/year only); Quota has no period
-    # axis at all. The status hint names exactly what the pane answers to.
+
+def test_range_keys_move_the_shared_window_and_are_inert_elsewhere(monkeypatch):
+    # One window for the dated panes: a letter picked on Report re-anchors the
+    # Overview too (they read the same window), and the panes with no date axis
+    # -- Stats, Quota, Pricing -- refuse the keys rather than pretending.
     calls = patch_fetchers(monkeypatch)
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
-        assert "t/w/m/y/a" in static_text(app, "status")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
 
         await pilot.press("2")
-        assert await wait_for(app, pilot, lambda: app._rp_state == "ok")
-        status = static_text(app, "status")
-        assert "Report · week" in status and "w/m/y" in status
-        assert "t/w/m/y/a" not in status  # the Overview hint left with its pane
-
-        ov_before = app._ov_period()
+        assert await wait_for(app, pilot, lambda: app._state["report"] == "ok")
         before = len(calls.usage)
-        await pilot.press("y")  # direct year window ON THE REPORT PANE
+        await pilot.press("y")  # a calendar-year window, asked from Report
         assert await wait_for(app, pilot, lambda: len(calls.usage) > before)
         assert calls.usage_full[-1] == ("today", "2026-01-01", "2026-09-20")
-        assert "Report · year" in static_text(app, "status")
-        assert app._ov_period() == ov_before  # the Overview token is untouched
+        assert app._win.preset == "year"  # Overview shares what Report asked for
 
+        # "a" is a window like any other now: the old "no such report window"
+        # asymmetry belonged to the per-pane period tokens that are gone.
         before = len(calls.usage)
-        await pilot.press("t")  # t/a: no such report window → inert
         await pilot.press("a")
-        await pilot.pause(0.15)
-        assert len(calls.usage) == before
-        assert "Report · year" in static_text(app, "status")
+        assert await wait_for(app, pilot, lambda: len(calls.usage) > before)
+        assert calls.usage_full[-1] == ("all", None, None)
 
         await pilot.press("3")
-        assert await wait_for(app, pilot, lambda: app._qp_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["quota"] == "ok")
         before = len(calls.usage)
-        await pilot.press("m")
+        for key in ("m", "w", "t"):
+            await pilot.press(key)
         await pilot.pause(0.15)
-        assert len(calls.usage) == before
-        assert app._ov_period() == ov_before
-        assert "t/w/m/y/a" not in static_text(app, "status")
-        assert "Quota · quota · u poll" in static_text(app, "status")
+        assert len(calls.usage) == before  # Quota answers to no range key
+        assert app._win.preset == "all"
+        assert app.query_one("#rangebar").display is False
 
-        await pilot.press("1")  # back: hint returns
-        assert await wait_for(
-            app, pilot, lambda: "t/w/m/y/a" in static_text(app, "status")
-        )
+        await pilot.press("1")  # the dated pane takes its strip back
+        assert await wait_for(app, pilot, lambda: app._win.preset == "all")
+        assert app.query_one("#rangebar").display is True
 
     drive(app, steps)
 
@@ -1206,91 +1345,52 @@ def test_direct_period_keys_both_panes_and_status_hints(monkeypatch):
 # Round 2: adaptive chart slot
 # ---------------------------------------------------------------------------
 
-def test_chart_slot_per_token(monkeypatch):
+def test_the_overview_never_borrows_the_annual_read(monkeypatch):
+    # /api/stats answers for a trailing year and for nothing else, so the
+    # Overview may not ask for it: its figures all carry the LOCAL window's
+    # label. Stats owns that route, and its own test drives the year ladder.
     calls = patch_fetchers(monkeypatch)
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
-        # Round 3: NO chart on the day view (the user picked "no chart on
-        # day view" — per-tool time lives in the tools table's Time column),
-        # and the trailing sparkline is gone with the band: neither widget
-        # exists any more, only the adaptive #ov-chart slot remains.
-        assert not app.query("#ov-daily")
-        assert not app.query("#ov-band")
-        assert app.query_one("#ov-chart").display is False
-        assert len(calls.active) == 1  # active still loads once (Time column)
-
-        await pilot.press("w")
-        assert await wait_for(
-            app, pilot, lambda: "Mon 14" in static_text(app, "ov-chart")
-        )
-        chart = static_text(app, "ov-chart")
-        # Day bars are LOCAL to the resolved window: STATS_PAYLOAD contribs
-        # are all August — every September day is a gap → em-dash day rows
-        # (day enumeration, not active-days-only).
-        assert EM_DASH in chart
-        assert len(chart.splitlines()) >= 7
-        assert app.query_one("#ov-chart").display
-
-        await pilot.press("m")
-        assert await wait_for(
-            app, pilot,
-            lambda: "Mon Tue Wed Thu Fri Sat Sun" in static_text(app, "ov-chart"),
-        )
-
-        await pilot.press("y")
-        assert await wait_for(
-            app, pilot, lambda: "Jan" in static_text(app, "ov-chart")
-        )
-
-        await pilot.press("a")  # "all": no local chart — the slot hides
-        assert await wait_for(
-            app, pilot, lambda: app.query_one("#ov-chart").display is False
-        )
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
+        for key in "dmwya":
+            await pilot.press(key)
+            await pilot.pause(0.05)
+        assert app._win.preset == "all"
+        assert not calls.stats
+        assert calls.usage and calls.active
 
     drive(app, steps)
 
 
-def test_year_period_fires_second_stats_fetch_only_for_year(monkeypatch):
-    # Mutation proof #2: the extra fetch_stats(CY) job runs for token "year"
-    # and for nothing else (month below must stay at one stats call).
-    calls = patch_fetchers(monkeypatch)
-    app = TokdashApp("today")
 
-    async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
-        assert [c[0] for c in calls.stats] == [None]  # trailing-365 only
-        await pilot.press("m")
-        assert await wait_for(app, pilot, lambda: app._ov_period() == "month")
-        await pilot.pause(0.2)
-        assert [c[0] for c in calls.stats] == [None, None]  # still no CY fetch
-        await pilot.press("y")
-        # The year load = trailing-365 stats + the ONE calendar-year fetch.
-        assert await wait_for(app, pilot, lambda: any(c[0] == 2026 for c in calls.stats))
-        assert [c[0] for c in calls.stats] == [None, None, None, 2026]
-        assert calls.stats[3] == (2026, False)  # the calendar-year fetch
-        assert await wait_for(
-            app, pilot, lambda: "Jan" in static_text(app, "ov-chart")
-        )  # heatmap month header row rendered
-
-    drive(app, steps)
-
-
-def test_year_empty_contribs_still_render_skeleton(monkeypatch):
+def test_an_empty_annual_window_keeps_the_calendar(monkeypatch):
+    # An annual window with no recorded days is a MEASURED zero: the calendar
+    # keeps its grid and the summary keeps its dashes. It does not collapse into
+    # an empty pane, and it does not invent a day the route never reported.
     empty_stats = {"summary": {}, "contributions": [], "stats": {}}
     patch_fetchers(monkeypatch, stats=empty_stats)
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
-        await pilot.press("y")
-        assert await wait_for(
-            app, pilot, lambda: "no activity 2026" in static_text(app, "ov-chart")
-        )
-        # skeleton = header + 7 weekday rows: an empty year is a MEASURED
-        # zero, so the grid stays visible, it does not collapse.
-        assert len(static_text(app, "ov-chart").splitlines()) == 9
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
+        app.action_show_pane("stats")
+        assert await wait_for(app, pilot, lambda: app._state["stats"] == "ok")
+        calendar = static_text(app, "st-calendar")
+        # The grid is still drawn: month title, weekday row, and every day of
+        # the window carrying its number with the "none" glyph.
+        assert calendar.strip(), calendar
+        assert "September 2026" in calendar, calendar
+        assert "M  T  W  T  F  S  S" in calendar, calendar
+        # Every day of the window prints its number under the "none" glyph:
+        # a day that recorded nothing still shows that it was looked at.
+        none_glyph = calendar.split()[0][0]
+        packed = calendar.replace(" ", "")
+        assert f"{none_glyph}1" in packed and f"{none_glyph}20" in packed, calendar
+        assert EM_DASH in static_text(app, "st-summary")  # nothing was measured
+        # A window with no days has no rows to invent either.
+        assert app.query_one("#st-days", DataTable).row_count == 0
 
     drive(app, steps)
 
@@ -1298,87 +1398,6 @@ def test_year_empty_contribs_still_render_skeleton(monkeypatch):
 # ---------------------------------------------------------------------------
 # Round 2: Detail table (Tool / Model)
 # ---------------------------------------------------------------------------
-
-def test_ov_detail_sections_rows_openclaw_and_escaping(monkeypatch):
-    usage = copy.deepcopy(USAGE_PAYLOAD)
-    usage["by_tool"]["openclaw"] = {
-        "tokens": 1_000_000, "cost": 3.0, "cache_hit_rate": None,
-    }
-    # Markup-hostile tool key: a raw "[bold]" would raise MarkupError at
-    # render or silently restyle; escaped at the add_row site it renders
-    # literally.
-    usage["by_tool"]["weird [bold]name[/]"] = {
-        "tokens": 500_000, "cost": 1.0, "cache_hit_rate": None,
-    }
-    usage["apps"] = {
-        "codex": {"models": [
-            {"name": "gpt-5", "tokens": 5_000_000, "cost": 10.0, "cache_hit_rate": 0.5},
-            {"name": "gpt-5-codex", "tokens": 3_000_000, "cost": 80.0,
-             "cache_hit_rate": 0.7},
-        ]},
-        "claude": {"models": [
-            {"name": f"m{i}", "tokens": i * 1_000, "cost": float(i),
-             "cache_hit_rate": None}
-            for i in range(1, 6)
-        ]},
-    }
-    usage["openclaw_models"] = [
-        {"name": "ocl-a", "tokens": 400, "cost": 1.0},
-        {"name": "ocl-b", "tokens": 600, "cost": 2.0},
-    ]
-    patch_fetchers(monkeypatch, usage=usage)
-    app = TokdashApp("today")
-
-    async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
-        assert app.is_running  # no MarkupError → no pane-fail fallback
-        table = app.query_one("#ov-detail", DataTable)
-        # rows: codex 1+2, claude 1+5, openclaw 1+2, weird 1+0 — round 3 has
-        # NO cap ("always display full page"), so the old claude "…+2 more"
-        # overflow row is gone (13 rows, not the round-2 12).
-        assert table.row_count == 13
-        assert len(table.columns) == 9  # round 4: the full field set
-        rows = [table.get_row_at(i) for i in range(table.row_count)]
-        # Round 4: section name cells are background PILLS (the user asked
-        # to separate tools). Round 5: the pill pads to _COL_NAME — the
-        # shared name-column width — so every band is exactly as wide as
-        # the column (and the other two tables' name column), no longer to
-        # whichever section name happened to be longest.
-        pill = rows[0][0]
-        assert isinstance(pill, Text) and "on #334155" in str(pill.style)
-        pill_widths = {cell(rows[i][0]).rstrip() for i in range(13)
-                       if isinstance(rows[i][0], Text)}
-        assert "Codex" in pill_widths and "Claude Code" in pill_widths
-        assert {len(cell(rows[i][0])) for i in range(13)
-                if isinstance(rows[i][0], Text)} == {app_mod._COL_NAME}
-        # Section cells: full field set (9). The overridden apps rows carry
-        # no breakdown — Input/Cache still land via the by_tool fallback,
-        # Output/Msgs have no fallback and dash; total/hit/cost from by_tool;
-        # Time from the active payload (codex 50m) — the detail repaint.
-        assert plain_row(table, 0) == [
-            "Codex" + " " * (app_mod._COL_NAME - len("Codex")),
-            "6.0M", "—", "4.0M", "8.0M", "66.0%", "$90.00", "—", "50m",
-        ]
-        assert all(isinstance(c, Text) and c.justify == "right"
-                   for c in rows[0][1:])
-        # cost desc inside the section: gpt-5-codex ($80) before gpt-5 ($10)
-        assert rows[1][0] == "  gpt-5-codex"  # model rows: plain escaped str
-        assert cell(rows[1][-1]) == EM_DASH  # model Time ALWAYS dash (no source)
-        assert not [r for r in rows if "more" in cell(r[0])]  # no overflow ever
-        # the WHOLE claude list, cost desc
-        assert [r[0] for r in rows
-                if isinstance(r[0], str) and r[0].startswith("  m")] == [
-            "  m5", "  m4", "  m3", "  m2", "  m1"]
-        assert any(cell(r[0]).rstrip() == "OpenClaw"
-                   for r in rows)  # synthesized section
-        # Markup-hostile name: the Text pill is LITERAL (never markup-parsed),
-        # so the raw brackets arrive un-escaped and render literally — the
-        # Text path needs no escape(), the str path (model names) does.
-        assert any(cell(r[0]).rstrip() == "Weird [bold]name[/]"
-                   for r in rows)
-
-    drive(app, steps)
-
 
 # ---------------------------------------------------------------------------
 # Round 3: wheel scrolling (the pane is the scroll container, not the screen)
@@ -1399,15 +1418,21 @@ def test_wheel_scrolls_the_pane_not_the_screen(monkeypatch):
     async def main():
         async with app.run_test(headless=True, size=(80, 14)) as pilot:
             await pilot.pause()
-            assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+            assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
             pane = app.query_one("#pane-overview")
             assert pane.show_vertical_scrollbar  # content overflows the pane
             base = pane.scroll_y
-            for _ in range(3):
+            # Wheel until the pane answers, within a bound: the scroll is applied
+            # on the next refresh, and inside a full suite that refresh can lose
+            # the race with a fixed two-hundredth pause. A wheel that never moves
+            # the pane still fails here, it just gets leave to be late.
+            for _ in range(12):
                 pane.post_message(
                     events.MouseScrollDown(pane, 10, 5, 0, 1, 0, False, False, False)
                 )
-                await pilot.pause(0.02)
+                await pilot.pause(0.05)
+                if pane.scroll_y > base:
+                    break
             assert pane.scroll_y > base
             assert app.screen.scroll_y == 0  # the tab strip never slides off
             top = pane.scroll_y
@@ -1427,28 +1452,31 @@ def test_wheel_scrolls_the_pane_not_the_screen(monkeypatch):
 # view whole weeks, year view whole years, "today" view single days.
 # ---------------------------------------------------------------------------
 
+
 def test_date_shift_brackets_and_zero(monkeypatch):
-    # The "today" token keeps the day-by-day walk (its period IS a day).
+    # ``[``/``]`` walk the shared window one WHOLE step at a time and ``0``
+    # returns it to the present. The window text names the shifted window in
+    # exact dates, so a step is never a mystery move.
     calls = patch_fetchers(monkeypatch)
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         assert calls.usage_full[-1] == ("today", "2026-09-20", "2026-09-20")
         # ] at today is INERT — the window never moves into the future.
         before = len(calls.usage)
         await pilot.press("right_square_bracket")
         await pilot.pause(0.15)
-        assert len(calls.usage) == before and app._period_shift == 0
+        assert len(calls.usage) == before and app._win.shift == 0
 
         await pilot.press("left_square_bracket")  # yesterday
         assert await wait_for(
             app, pilot,
             lambda: calls.usage_full[-1] == ("today", "2026-09-19", "2026-09-19"),
         )
-        assert app._period_shift == 1
-        assert "· -1d" in static_text(app, "status")  # ASCII marker (cp1252 law)
-        assert "viewing 1d back" in static_text(app, "ov-range")
+        assert app._win.shift == 1
+        assert "2026-09-19" in static_text(app, "range-dates")
+        assert "Yesterday" in static_text(app, "range-dates")
 
         await pilot.press("left_square_bracket")  # two days back
         assert await wait_for(
@@ -1460,116 +1488,131 @@ def test_date_shift_brackets_and_zero(monkeypatch):
             app, pilot,
             lambda: calls.usage_full[-1] == ("today", "2026-09-19", "2026-09-19"),
         )
-        assert app._period_shift == 1
+        assert app._win.shift == 1
 
         await pilot.press("0")  # 0 = back to today
         assert await wait_for(
             app, pilot,
             lambda: calls.usage_full[-1] == ("today", "2026-09-20", "2026-09-20"),
         )
-        assert app._period_shift == 0
-        assert "-1d" not in static_text(app, "status")
-        assert "viewing" not in static_text(app, "ov-range")
+        assert app._win.shift == 0
+        assert "Yesterday" not in static_text(app, "range-dates")
 
     drive(app, steps)
 
 
+
 def test_period_shift_steps_whole_calendar_periods(monkeypatch):
     # THE BUG this replaced: ``[`` pulled the window's END DATE one day back
-    # (Sep view 9.1→9.24 became 9.1→9.23). A step is a WHOLE period: from any
-    # September day one ``[`` = the ENTIRE previous month, Aug 1 → Aug 31 —
-    # never clamped to the anchor day — and ``]`` walks forward again.
+    # (a September view 09-01..09-20 became 09-01..09-19). A step is a WHOLE
+    # calendar window: from any September day one ``[`` is the ENTIRE previous
+    # month, Aug 1 → Aug 31 — never clamped to the anchor day — and ``]`` walks
+    # forward into the partial current month again.
     calls = patch_fetchers(monkeypatch)
-    app = TokdashApp("month")
+    app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
+        await pilot.press("m")  # calendar month so far
+        assert await wait_for(app, pilot, lambda: app._win.preset == "month")
         assert calls.usage_full[-1] == ("today", "2026-09-01", "2026-09-20")
         await pilot.press("left_square_bracket")
         assert await wait_for(
             app, pilot,
             lambda: calls.usage_full[-1] == ("today", "2026-08-01", "2026-08-31"),
         )
-        assert app._period_shift == 1
-        assert "· -1m" in static_text(app, "status")  # marker counts MONTHS
-        assert "viewing 1m back" in static_text(app, "ov-range")
+        assert app._win.shift == 1
+        assert "Last Month" in static_text(app, "range-dates")
 
         await pilot.press("left_square_bracket")  # two months back: July, full
         assert await wait_for(
             app, pilot,
             lambda: calls.usage_full[-1] == ("today", "2026-07-01", "2026-07-31"),
         )
-        assert "· -2m" in static_text(app, "status")
         await pilot.press("right_square_bracket")  # forward one whole period
         assert await wait_for(
             app, pilot,
             lambda: calls.usage_full[-1] == ("today", "2026-08-01", "2026-08-31"),
         )
-        await pilot.press("0")  # back to the current window (today-clamped)
+        await pilot.press("0")  # 0 = the shared default: Today
+        assert await wait_for(
+            app, pilot,
+            lambda: calls.usage_full[-1] == ("today", "2026-09-20", "2026-09-20"),
+        )
+        assert app._win.preset == "today" and app._win.shift == 0
+        # The preset itself is one key away, and lands on its own current window.
+        await pilot.press("m")
         assert await wait_for(
             app, pilot,
             lambda: calls.usage_full[-1] == ("today", "2026-09-01", "2026-09-20"),
         )
-        assert app._period_shift == 0
-        assert "-1m" not in static_text(app, "status")
-        assert "viewing" not in static_text(app, "ov-range")
 
     drive(app, steps)
 
 
-def test_period_shift_week_view_is_the_full_previous_week(monkeypatch):
-    # Fixture today = Sun 2026-09-20, so the CURRENT week (9.14→9.20) is
-    # already full at shift 0 — one ``[`` lands on the whole week BEFORE it.
+
+def test_rolling_seven_days_steps_a_whole_seven_days(monkeypatch):
+    # A rolling window steps by its own inclusive length: one ``[`` from the
+    # last seven days is the seven days before them, never six and never the
+    # calendar week (which is its own named preset).
     calls = patch_fetchers(monkeypatch)
     app = TokdashApp("week")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
+        assert app._win.preset == "7d"
         assert calls.usage_full[-1] == ("today", "2026-09-14", "2026-09-20")
         await pilot.press("left_square_bracket")
         assert await wait_for(
             app, pilot,
             lambda: calls.usage_full[-1] == ("today", "2026-09-07", "2026-09-13"),
         )
-        assert "· -1w" in static_text(app, "status")
-        assert "viewing 1w back" in static_text(app, "ov-range")
+        assert app._win.days == 7
+        assert "2026-09-07" in static_text(app, "range-dates")
+        # ...and the calendar week is still a window of its own, one key away.
+        await pilot.press("0")
+        assert app._win.preset == "today"
 
     drive(app, steps)
 
 
-def test_period_shift_fans_out_to_report(monkeypatch):
-    # The date-pinned panes reload TOGETHER (a stale-shift Report body would
-    # show another window's data — the same bug class as midnight), and EACH
-    # pane steps its OWN period: Overview on "today" walks a day, the Report
-    # (week window) walks the whole previous Mon→Sun week.
+
+def test_the_shared_window_steps_the_visible_pane_and_marks_the_rest(monkeypatch):
+    # A pane left standing on the old window would show another window's data,
+    # so a date step has to reach every pane that reads the range. It does that
+    # by RELOADING the one on screen and marking the visited-but-hidden ones out
+    # of date: refetching them in the background used to include Speed's read,
+    # which can queue a timing build for a view nobody is looking at.
     calls = patch_fetchers(monkeypatch)
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
-        await pilot.press("2")  # lazy-load the Report (week window, shift 0)
-        assert await wait_for(app, pilot, lambda: app._rp_state == "ok")
-        assert ("today", "2026-09-14", "2026-09-20") in calls.usage_full
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
+        await pilot.press("2")
+        assert await wait_for(app, pilot, lambda: app._state["report"] == "ok")
+        await pilot.press("1")  # visit Report, then leave it hidden
+        assert await wait_for(app, pilot, lambda: app._active_pane() == "overview")
         before = len(calls.usage)
         await pilot.press("left_square_bracket")
-        # Overview (today token) stepped a DAY…
         assert await wait_for(
             app, pilot,
             lambda: ("today", "2026-09-19", "2026-09-19") in calls.usage_full,
         )
-        # …and the Report (week token) stepped a WHOLE WEEK — full Mon→Sun,
-        # not the current week pulled one day shorter. Every job of the load
-        # uses the same pair: the active-time fetch carried it too.
-        assert await wait_for(
-            app, pilot,
-            lambda: ("today", "2026-09-07", "2026-09-13") in calls.usage_full,
-        )
-        assert any(t[:3] == ("today", "2026-09-07", "2026-09-13")
+        assert app._win.label == "Yesterday" and app._win.shift == 1
+        # The active-time job carried the pair too.
+        assert any(t[:3] == ("today", "2026-09-19", "2026-09-19")
                    for t in calls.active_full)
-        assert await wait_for(app, pilot, lambda: app._rp_state == "ok")
-        assert len(calls.usage) >= before + 2  # both panes refetched
-        # The Report pane is active: its marker counts WEEKS.
-        assert "· -1w" in static_text(app, "status")
+        # Only the visible pane re-read; Report waits for the tab.
+        assert len(calls.usage) == before + 1, calls.usage
+        assert "report" in app._stranded
+        # Going back pays the debt at the NEW window, and the body prints the
+        # window the strip names.
+        await pilot.press("2")
+        assert await wait_for(
+            app, pilot, lambda: "2026-09-19" in static_text(app, "rp-body")
+        )
+        assert "report" not in app._stranded
+        assert len(calls.usage) >= before + 2, calls.usage
 
     drive(app, steps)
 
@@ -1583,18 +1626,18 @@ def test_date_shift_inert_on_rolling_all(monkeypatch):
     app = TokdashApp("all")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
-        assert app._ov_period() == "all"
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
+        assert app._win.preset == "all"
         before = len(calls.usage)
         gen_before = app._gen
         await pilot.press("left_square_bracket")
         await pilot.press("left_square_bracket")
         await pilot.pause(0.15)
-        assert app._period_shift == 0
+        assert app._win.shift == 0
         assert app._gen == gen_before  # no supersede: the finished load stands
         assert len(calls.usage) == before  # no Overview reload fired
         assert calls.usage[-1] == ("all", False)
-        assert app._ov_state == "ok" and not app._stranded
+        assert app._state["overview"] == "ok" and not app._stranded
 
     drive(app, steps)
 
@@ -1613,19 +1656,21 @@ def test_shift_during_inflight_all_load_does_not_strand_the_pane(monkeypatch):
         await pilot.press("left_square_bracket")
         await pilot.press("right_square_bracket")
         gate.set()
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         assert not app._stranded
         assert calls.usage  # the ORIGINAL load's result still stands
 
     drive(app, steps)
 
 
-def test_gen_bump_during_quota_flight_reissues_the_visible_pane(monkeypatch):
-    # The same finding's second shape: ``p`` while the VISIBLE Quota pane's
-    # load is in flight bumps the gen (the hidden Report reloads); the quota
-    # flight is superseded with no successor for the pane on screen. _end_load
-    # re-issues a stranded load IMMEDIATELY when its pane is the active one —
-    # quota lands without needing a tab round-trip.
+
+def test_a_superseded_load_on_the_visible_pane_is_re_issued_at_once(monkeypatch):
+    # The visible half of the stranded law: when a gen bump cancels the load of
+    # the pane on screen and nothing else reloads it, the pane must get a fresh
+    # load immediately rather than wait for a tab round-trip. Revision 5 gives
+    # each pane its own keys, so no single keystroke bumps the generation out
+    # from under a Quota load any more -- the bump is delivered directly, which
+    # is what the race between two panes actually looks like.
     gate = threading.Event()
     calls = patch_fetchers(monkeypatch, usage_gate=gate)
     app = TokdashApp("today")
@@ -1633,25 +1678,35 @@ def test_gen_bump_during_quota_flight_reissues_the_visible_pane(monkeypatch):
     async def steps(pilot):
         await pilot.pause(0.05)
         await pilot.press("3")  # Quota tab: its first load starts, blocked
-        await pilot.pause(0.05)
-        await pilot.press("p")  # cycles the HIDDEN Report: gen bump supersedes
+        await pilot.pause(0.1)
+        assert "quota" in app._inflight or app._open_loads.get("quota")
+        # Overview has to be MID-FLIGHT for the bump to supersede anything. On a
+        # busy runner its worker can still be queued here, and a load that STARTS
+        # after the bump belongs to the new generation -- nothing to strand, so
+        # the last assertion below would be checking nothing.
+        assert await wait_for(app, pilot, lambda: "overview" in app._inflight)
+        app._gen += 1  # the bump a rival pane's reload would deliver
         gate.set()
-        assert await wait_for(app, pilot, lambda: app._qp_state == "ok")
-        # Quota (the VISIBLE pane) is re-issued immediately. Overview — also
-        # superseded, but OUT OF SIGHT — stays correctly stranded for the
-        # TabActivated hook (the existing hidden-pane rule).
-        assert "quota" not in app._stranded
-        assert "overview" in app._stranded
+        assert await wait_for(app, pilot, lambda: app._state["quota"] == "ok")
+        assert "quota" not in app._stranded  # the visible pane was served again
         assert len(calls.quota_state) >= 2  # superseded flight + re-issue
+        # Overview — superseded by the same bump but OUT OF SIGHT — correctly
+        # waits for the tab hook instead of reloading behind the user's back. It
+        # gets there when the blocked thread wakes, which is not tied to when
+        # Quota's re-issue lands, so the bookkeeping is awaited rather than
+        # inferred from the other pane's timing.
+        assert await wait_for(app, pilot, lambda: "overview" in app._stranded)
+        assert len(calls.usage) == 1  # no re-read while the pane sat unwatched
 
     drive(app, steps)
 
 
+
 def test_reload_resets_late_payload_slots(monkeypatch):
-    # Round-4 loading law at the SLOT level: the late-joining payloads
-    # (Overview active, Report insights) keep the PREVIOUS window's dicts
-    # unless the load START drops them — otherwise the mid-reload usage
-    # repaint mixes last window's Time/KPI/insight figures into the new one.
+    # The loading law at the SLOT level: the late-joining payloads (Overview
+    # active time, Report insights) keep the PREVIOUS window's dicts unless the
+    # load START drops them — otherwise the mid-reload usage repaint mixes last
+    # window's Time/KPI/insight figures into the new one.
     calls = patch_fetchers(monkeypatch)
     slow = threading.Event()  # CLOSED: the re-patched fetcher below blocks
 
@@ -1661,73 +1716,75 @@ def test_reload_resets_late_payload_slots(monkeypatch):
             return _outcome(payload)
         return fetch
 
-    app = TokdashApp("month")
+    app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         assert app._ov_active is not None
-        tools = app.query_one("#ov-tools")
-        assert plain_row(tools, 0)[-1] == "50m"  # codex Time from the payload
+        table = app.query_one("#ov-table", DataTable)
+        assert plain_row(table, 0)[-1] == "50m"  # codex Time from the payload
         monkeypatch.setattr(app_mod, "fetch_active_time",
                             gated(ACTIVE_TIME_PAYLOAD))
-        await pilot.press("w")  # period change reloads Overview
+        await pilot.press("w")  # a window change reloads Overview
         assert await wait_for(app, pilot, lambda: app._ov_active is None)
         # Usage repaints while active is still in flight: the Time column is
         # DASHES, not the previous window's "50m".
         assert await wait_for(app, pilot, lambda: (
-            tools.row_count > 0
-            and plain_row(tools, 0)[-1] == EM_DASH))
+            table.row_count > 0 and plain_row(table, 0)[-1] == EM_DASH))
         slow.set()
-        # NOTE: _ov_state stays "ok" across reloads (only failures move it) —
-        # completion must be watched at the SLOT, never at the state.
+        # NOTE: the pane state stays "ok" across reloads (only failures move it)
+        # — completion must be watched at the SLOT, never at the state.
         assert await wait_for(app, pilot, lambda: (
-            app._ov_active is not None and app._ov_state == "ok"))
+            app._ov_active is not None and app._state["overview"] == "ok"))
         assert await wait_for(
-            app, pilot, lambda: plain_row(tools, 0)[-1] == "50m")
+            app, pilot, lambda: plain_row(table, 0)[-1] == "50m")
 
         # The Report half: a blocked insights fetch must put the "running…"
         # note back (pending = slots dropped at load start), and the slots
         # refill when it lands.
         await pilot.press("2")
-        assert await wait_for(app, pilot, lambda: app._rp_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["report"] == "ok")
         monkeypatch.setattr(app_mod, "fetch_insights",
                             gated(INSIGHTS_PAYLOAD))
         slow.clear()  # CLOSE the gate again (the overview half opened it)
-        await pilot.press("y")  # Report window week→year: reload
+        await pilot.press("y")  # the shared window widens: Report reloads
         assert await wait_for(app, pilot, lambda: app._rp_insights is None)
         assert await wait_for(app, pilot, lambda: (
             "running…" in static_text(app, "rp-body")))
         slow.set()
         assert await wait_for(app, pilot, lambda: (
-            app._rp_insights is not None and app._rp_state == "ok"))
+            app._rp_insights is not None and app._state["report"] == "ok"))
 
     drive(app, steps)
 
 
+
+
 def test_period_shift_year_steps_one_whole_year(monkeypatch):
-    # Mutation lock for the New Year gotcha: ONE ``[`` on year view lands on
-    # the FULL previous calendar year (2025-01-01 → 2025-12-31 — under the
-    # old day-shift this took 371 presses), and the year heatmap's CY fetch
-    # follows the resolved window's END, never _today (which would render the
-    # wrong CY across New Year).
+    # Mutation lock for the New Year gotcha: ONE ``[`` on a calendar-year window
+    # lands on the FULL previous year (2025-01-01 → 2025-12-31 — under the old
+    # day-shift this took 371 presses), and it does so on 5 January too, when
+    # the current window is only five days long.
     calls = patch_fetchers(monkeypatch)
     monkeypatch.setattr(app_mod, "_local_today",
                         lambda: datetime.date(2026, 1, 5))
-    app = TokdashApp("year")
+    app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
-        assert [c for c in calls.stats if c[0] is not None] == [(2026, False)]
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
+        await pilot.press("y")  # the calendar year so far
+        assert await wait_for(
+            app, pilot,
+            lambda: calls.usage_full[-1] == ("today", "2026-01-01", "2026-01-05"),
+        )
         await pilot.press("left_square_bracket")
         assert await wait_for(
             app, pilot,
             lambda: calls.usage_full[-1] == ("today", "2025-01-01", "2025-12-31"),
         )
-        # The year stats job runs after usage, active time, and trailing stats;
-        # observing the usage call alone does not mean it has started yet.
-        assert await wait_for(app, pilot, lambda: (2025, False) in calls.stats)
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
-        assert "· -1y" in static_text(app, "status")
+        assert app._win.days == 365
+        assert "Last Year" in static_text(app, "range-dates")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
 
     drive(app, steps)
 
@@ -1739,18 +1796,19 @@ def test_day_rollover_preserves_the_shift(monkeypatch):
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         await pilot.press("left_square_bracket")
-        assert await wait_for(app, pilot, lambda: app._period_shift == 1)
+        assert await wait_for(app, pilot, lambda: app._win.shift == 1)
         holder["today"] = TODAY + datetime.timedelta(days=1)
         before = len(calls.usage)
         await pilot.press("r")  # midnight crossed; detected on the keypress
         assert await wait_for(app, pilot, lambda: len(calls.usage) > before)
         assert app._today == holder["today"]
-        # "viewing yesterday" is the user's standing intent — midnight must
-        # not silently reset it; the shifted window moves with the new day.
-        assert app._period_shift == 1
-        assert "· -1d" in static_text(app, "status")
+        # "yesterday" is the user's standing intent — midnight must not silently
+        # reset it; the shifted window moves with the new day instead.
+        assert app._win.shift == 1
+        assert calls.usage_full[-1] == ("today", "2026-09-20", "2026-09-20")
+        assert "Yesterday" in static_text(app, "range-dates")
 
     drive(app, steps)
 
@@ -1759,12 +1817,15 @@ def test_day_rollover_preserves_the_shift(monkeypatch):
 # Round 3: tools-table Time column — the null-vs-zero OVERRIDE (dash for 0)
 # ---------------------------------------------------------------------------
 
-def test_tools_table_time_zero_and_missing_are_dashes(monkeypatch):
-    # ROUND-3 OVERRIDE of the null-vs-zero law, Time column ONLY: a MEASURED
-    # 0 and a missing active row BOTH print EM_DASH (user: "0s should not be
-    # displayed"). The report agents table keeps "0s" (null-vs-zero law intact
-    # there) — locked opposite in test_tui_report.py; do not unify.
-    # openclaw has no apps entry: Input/Output/Cache/Msgs dashes, hit n/a.
+
+def test_harness_table_keeps_a_measured_zero_apart_from_no_measurement(monkeypatch):
+    # The null-vs-zero law, Time column: a MEASURED 0 prints "0s" and a tool the
+    # active-time scan never answered prints EM_DASH. Revision 5 restored the
+    # difference on purpose -- a dash for a measured zero made "we timed you and
+    # you did nothing" indistinguishable from "we have no timing for you" -- and
+    # the piped report agrees.
+    # openclaw is a usage-only source: no apps entry, so Input/Output/Cache/Msgs
+    # dash and the hit rate says n/a rather than 0%.
     usage = copy.deepcopy(USAGE_PAYLOAD)
     usage["by_tool"]["openclaw"] = {"tokens": 500_000, "cache_hit_rate": None}
     active = copy.deepcopy(ACTIVE_TIME_PAYLOAD)
@@ -1774,69 +1835,93 @@ def test_tools_table_time_zero_and_missing_are_dashes(monkeypatch):
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
-        table = app.query_one("#ov-tools")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
+        table = app.query_one("#ov-table", DataTable)
+        at = {label: i for i, label in enumerate(headers_of(table))}
+        assert "Input" in at, headers_of(table)  # the wide pane shows the split
         rows = {
             cell(table.get_row_at(i)[0]): plain_row(table, i)
             for i in range(table.row_count)
         }
-        assert rows["Codex"][8] == EM_DASH  # missing active row → dash
-        assert rows["Claude Code"][8] == EM_DASH  # measured 0 → dash (override)
+        assert rows["Codex"][at["Est. time"]] == EM_DASH  # never timed at all
+        assert rows["Claude Code"][at["Est. time"]] == "0s"  # timed, and zero
         oc = rows["OpenClaw"]
-        assert oc[1] == oc[2] == oc[3] == EM_DASH  # Input/Output/Cache
-        assert oc[7] == EM_DASH  # Msgs
-        assert oc[5] == "n/a"  # hit rate: the formatting law's own sentinel
-        assert oc[6] == EM_DASH  # no cost → dash (fmt_cost_row)
+        assert oc[at["Input"]] == oc[at["Output"]] == oc[at["Cache"]] == EM_DASH
+        assert oc[at["Msgs"]] == EM_DASH
+        assert oc[at["Hit"]] == "n/a"  # the formatting law's own sentinel
+        assert oc[at["Cost"]] == EM_DASH  # no cost → dash (fmt_cost_row)
+        assert oc[at["Tokens"]] == "500.0K"  # the gap never eats the total
 
-    drive(app, steps)
+    drive(app, steps, size=(140, 40))
 
 
 # ---------------------------------------------------------------------------
 # Round 2: Quota pane
 # ---------------------------------------------------------------------------
 
+
+def _quota_cell(table, label, header):
+    """One quota cell by column LABEL, at the row whose provider matches."""
+    at = {str(c.label): i for i, c in enumerate(table.ordered_columns)}
+    for row in range(table.row_count):
+        cells = table.get_row_at(row)
+        if cell(cells[0]) == label:  # cell() reads the label off the badge
+            return cells[at[header]]
+    raise AssertionError(f"no quota row for {label!r}")
+
+
+
 def test_quota_tab_lazy_once_and_renders_companion_cells(monkeypatch):
-    # Mutation proof #3: the load is lazy (nothing fetched before "3") and
-    # fires EXACTLY once (re-activation must not re-fetch).
+    # Mutation proof: the load is lazy (nothing fetched before "3") and fires
+    # EXACTLY once (re-activation must not re-fetch). The table itself keeps the
+    # companion's readings: provider grouping with spacers between groups, a
+    # normalized window label, "LEFT" phrasing with the meter, and the ok/not-ok
+    # status colours. Credits live in their own section, never as a row.
     calls = patch_fetchers(monkeypatch)
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         assert not calls.quota_state and not calls.quota_history  # lazy
         await pilot.press("3")
         assert app.query_one("#tabs").active == "pane-quota"
-        assert await wait_for(app, pilot, lambda: app._qp_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["quota"] == "ok")
         assert len(calls.quota_state) == 1 and len(calls.quota_history) == 1
+        # Widening the terminal re-fits the table: the optional columns come
+        # back, so a squeeze can never outlive the narrow window that caused it.
+        await pilot.resize_terminal(140, 40)
+        await pilot.pause(0.1)
         # Banner runs are styled separately ("[bold]quota [/][green]enabled…")
         # — assert the enabled reading + the poll interval, not a joined string.
         note = static_text(app, "quota-note")
         assert "enabled" in note and "poll every 30 min" in note
 
         table = app.query_one("#quota-table", DataTable)
-        rows = [table.get_row_at(i) for i in range(table.row_count)]
-        # Round 5 provider grouping: claude OPENS (claude@work) and its
-        # second account CONTINUES ("@home"), then an ALL-EMPTY spacer,
-        # codex, spacer, kimi — 6 rows, not the round-2 flat 4. Codex
-        # credits are a BOTTOM SECTION now, never a row of the table.
+        headers = headers_of(table)
+        assert headers == ["Provider", "Window", "Remaining", "Resets in", "24h",
+                           "Status"], headers  # the wide pane shows all six
+        rows = [plain_row(table, i) for i in range(table.row_count)]
+        # Provider grouping: claude OPENS (claude@work) and its second account
+        # CONTINUES ("@home"), then an ALL-EMPTY spacer, codex, spacer, kimi.
         assert table.row_count == 6
         assert not [r for r in rows if r[1] == "credits"]
-        spacers = [i for i, r in enumerate(rows) if not any(str(c) for c in r)]
+        spacers = [i for i, r in enumerate(rows) if not any(str(c).strip() for c in r)]
         assert spacers == [2, 4]  # between groups only — never first/last
         codex = next(r for r in rows if r[0] == "codex" and r[1] == "5-hour")
         assert "58.0% left" in codex[2] and "█" * 6 in codex[2]  # LEFT, not used
         assert codex[1] == "5-hour"  # normalized, not raw "5-hour window"
         assert len(codex[4]) == 3  # 3 history points → 3 trend glyphs
-        # Companion status colors: ok GREEN, anything else RED. The spacer
-        # rows carry an EMPTY status and stay plain (no red-Text override).
-        assert codex[5].plain == "ok" and codex[5].style == "green"
-        kimi = next(r for r in rows if r[0] == "kimi")[5]
-        assert kimi.plain == "unavailable" and kimi.style == "red"
-        assert [c for c in rows[spacers[0]]] == [""] * 6
+        # Companion status colors: ok GREEN, anything else RED. Spacer rows
+        # carry no status and stay plain (no red-Text override).
+        assert _quota_cell(table, "codex", "Status").plain == "ok"
+        assert _quota_cell(table, "codex", "Status").style == "green"
+        assert _quota_cell(table, "kimi", "Status").plain == "unavailable"
+        assert _quota_cell(table, "kimi", "Status").style == "red"
+        assert not any(str(c).strip() for c in table.get_row_at(spacers[0]))
         assert any(r[0] == "claude@work" for r in rows)  # group opener folded
         assert any(r[0] == "@home" for r in rows)  # bare-account continuation
-        # Runs are styled separately ("[bold]reset credits [/][green]2 …"),
-        # so assert the fragments, not a joined string (banner-test precedent).
+        # Runs are styled separately ("[bold]reset credits [/][green]2 …"), so
+        # assert the fragments, not a joined string (banner-test precedent).
         credits = static_text(app, "quota-credits")
         assert "reset credits" in credits and "2 available" in credits
         assert "Full reset" in credits and "expires" in credits
@@ -1845,29 +1930,35 @@ def test_quota_tab_lazy_once_and_renders_companion_cells(monkeypatch):
         await pilot.press("3")
         await pilot.pause(0.2)
         assert len(calls.quota_state) == 1  # lazy-ONCE
-        assert "Quota · quota · u poll" in static_text(app, "status")
+        assert "u poll" in static_text(app, "status")
 
-    drive(app, steps)
+    drive(app, steps, size=(140, 40))
+
 
 
 def test_quota_status_stale_token_is_red(monkeypatch):
-    # The reported pairing: stale_token RED, ok GREEN (companion colors).
+    # The reported pairing: stale_token RED, ok GREEN (companion colors). The
+    # lookup is by column LABEL because a narrow terminal legitimately drops the
+    # optional columns -- which must never change what a status LOOKS like.
     payload = _quota_state_payload()
     payload["providers"]["codex"]["status"] = "stale_token"
     patch_fetchers(monkeypatch, quota_state=payload)
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         await pilot.press("3")
-        assert await wait_for(app, pilot, lambda: app._qp_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["quota"] == "ok")
         table = app.query_one("#quota-table", DataTable)
-        rows = [table.get_row_at(i) for i in range(table.row_count)]
-        stale = next(r for r in rows if r[0] == "codex")[5]
+        assert "Status" in headers_of(table)
+        stale = _quota_cell(table, "codex", "Status")
         assert stale.plain == "stale_token" and stale.style == "red"
-        assert next(r for r in rows if r[0].startswith("claude"))[5].style == "green"
+        fresh = _quota_cell(table, "claude@work", "Status")
+        assert fresh.plain == "ok" and fresh.style == "green"
 
-    drive(app, steps)
+    # A squeezed pane loses the OPTIONAL columns (Status among them) before it
+    # touches a number, so the colour law is checked where the column lives.
+    drive(app, steps, size=(140, 40))
 
 
 def test_quota_credits_section_hidden_without_credits(monkeypatch):
@@ -1877,9 +1968,9 @@ def test_quota_credits_section_hidden_without_credits(monkeypatch):
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         await pilot.press("3")
-        assert await wait_for(app, pilot, lambda: app._qp_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["quota"] == "ok")
         assert app.query_one("#quota-credits").display is False
 
     drive(app, steps)
@@ -1892,7 +1983,7 @@ def test_quota_stranded_recovery(monkeypatch):
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         gate.clear()
         await pilot.press("3")            # quota load starts, blocks on gate
         await pilot.pause(0.1)
@@ -1901,14 +1992,15 @@ def test_quota_stranded_recovery(monkeypatch):
         gate.set()
         assert await wait_for(
             app, pilot,
-            lambda: "quota" in app._stranded and app._qp_state == "empty",
+            lambda: "quota" in app._stranded and app._state["quota"] == "empty",
         )
         before = len(calls.quota_state)
         await pilot.press("3")            # re-activation must re-issue it
-        assert await wait_for(app, pilot, lambda: app._qp_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["quota"] == "ok")
         assert len(calls.quota_state) > before
 
     drive(app, steps)
+
 
 
 def test_schema_too_new_from_quota_exits_one(monkeypatch):
@@ -1918,12 +2010,12 @@ def test_schema_too_new_from_quota_exits_one(monkeypatch):
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         # This load intentionally shuts the app down. Pilot.press/pause wait
         # for screen messages that shutdown can discard, so do not await a
         # rendering barrier after triggering the fatal error. The ordinary
         # quota tests above already cover the "3" key binding.
-        app.action_show_pane("pane-quota")
+        app.action_show_pane("quota")  # the pane name, not the widget id
 
         async def exited():
             while app.return_code != 1:
@@ -1962,9 +2054,9 @@ def test_quota_poll_notes_before_polling_then_reloads_refreshed(monkeypatch):
     monkeypatch.setattr(cli_mod, "_quota_poll_once", fake_poll)
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         await pilot.press("3")
-        assert await wait_for(app, pilot, lambda: app._qp_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["quota"] == "ok")
         note = app.query_one("#quota-note", Static)
         updates = []
         real_update = note.update
@@ -2002,9 +2094,9 @@ def test_quota_poll_disabled_is_said_never_faked_ok(monkeypatch):
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         await pilot.press("3")
-        assert await wait_for(app, pilot, lambda: app._qp_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["quota"] == "ok")
         before = len(calls.quota_state)
         await pilot.press("u")
         assert await wait_for(
@@ -2039,9 +2131,9 @@ def test_quota_poll_error_keeps_app_alive(monkeypatch):
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         await pilot.press("3")
-        assert await wait_for(app, pilot, lambda: app._qp_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["quota"] == "ok")
         before = len(calls.quota_state)
         await pilot.press("u")
         assert await wait_for(
@@ -2074,9 +2166,9 @@ def test_quota_poll_reentrancy_guard(monkeypatch):
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         await pilot.press("3")
-        assert await wait_for(app, pilot, lambda: app._qp_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["quota"] == "ok")
         await pilot.press("u")
         await pilot.pause(0.1)
         assert app._polling
@@ -2114,9 +2206,9 @@ def test_no_timer_ever_polls_quota(monkeypatch):
     app.set_timer = spy
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         await pilot.press("3")
-        assert await wait_for(app, pilot, lambda: app._qp_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["quota"] == "ok")
         await pilot.press("u")
         assert await wait_for(app, pilot, lambda: len(hits) == 1)
         await pilot.pause(0.3)
@@ -2137,7 +2229,7 @@ def test_quota_poll_inert_on_other_panes(monkeypatch):
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         await pilot.press("u")   # Overview: inert
         await pilot.pause(0.15)
         assert not calls.quota_state and not app._polling
@@ -2166,7 +2258,7 @@ def test_refresh_resets_remote_probe_then_reloads(monkeypatch):
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         before = len(calls.usage)
         await pilot.press("r")
         assert await wait_for(app, pilot, lambda: len(calls.usage) > before)
@@ -2183,9 +2275,9 @@ def test_day_rollover_reloads_started_quota(monkeypatch):
     app = TokdashApp("today")
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         await pilot.press("3")
-        assert await wait_for(app, pilot, lambda: app._qp_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["quota"] == "ok")
         before = len(calls.quota_state)
         holder["today"] = TODAY + datetime.timedelta(days=1)
         await pilot.press("z")  # unbound key: on_key rollover path
@@ -2210,6 +2302,7 @@ def test_clamp_report_width_pure():
     assert _clamp_report_width(9999) == 200  # ceiling: the builder caps here too
 
 
+
 def test_report_width_follows_pane_size(monkeypatch):
     patch_fetchers(monkeypatch)
     widths = []
@@ -2226,17 +2319,17 @@ def test_report_width_follows_pane_size(monkeypatch):
         return app.query_one("#pane-report").content_region.width
 
     async def steps(pilot):
-        assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
         await pilot.press("2")
-        assert await wait_for(app, pilot, lambda: app._rp_state == "ok")
+        assert await wait_for(app, pilot, lambda: app._state["report"] == "ok")
         # The first load paints can legitimately race the activation layout
         # (instant canned fetches finish before Textual lays the pane out) —
         # then it is the documented un-laid-out 80 fallback; either way the
         # round-1 FIXED 72 is gone (a 78/76 paint proves dynamic reading).
         assert widths and all(w != 72 for w in widths)
         await pilot.pause(0.1)              # let the pane lay out
-        await pilot.press("p")              # report-side cycle → repaint
-        assert await wait_for(app, pilot, lambda: len(widths) >= 4)
+        await pilot.press("s")              # report-side sort cycle → repaint
+        assert await wait_for(app, pilot, lambda: len(widths) >= 3)
         # Laid out: the BUILDER width equals the pane's content width
         # (padding and any scrollbar included — asserted against the live
         # geometry, so it cannot rot with theme details). 78/76 ≠ 72: dynamic.
@@ -2244,11 +2337,11 @@ def test_report_width_follows_pane_size(monkeypatch):
         assert widths[-1] != 72
         await pilot.resize_terminal(300, 40)
         await pilot.pause(0.1)
-        await pilot.press("p")
+        await pilot.press("s")
         assert await wait_for(app, pilot, lambda: widths[-1] == 200)  # ceiling
         await pilot.resize_terminal(60, 30)
         await pilot.pause(0.1)
-        await pilot.press("p")
+        await pilot.press("s")
         assert await wait_for(app, pilot, lambda: widths[-1] == 60)   # floor
 
     drive(app, steps)

@@ -1107,7 +1107,14 @@ def cli(argv: list[str] | None = None, prog: str = "tokdash") -> int:
         return run_report(args)
 
     if args.command == "tui":
+        # BEFORE the TUI module loads, because Textual reads its colour ceiling
+        # once, at import: inside tmux the environment usually under-sells the
+        # terminal, and eight ANSI colours is not this dashboard's design.
+        from .tui.terminal import configure_color_system
+
+        configure_color_system()
         from .tui.app import run_tui
+
         return run_tui(args)
 
     parser.error(f"Unknown command: {args.command}")

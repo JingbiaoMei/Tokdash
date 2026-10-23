@@ -73,13 +73,35 @@ _NAME_CAP = 22
 # window["days"] claim says (defense-in-depth against a malformed range block).
 _DAILY_MAX_ROWS = 31
 
+# "series" is the colour of a drawn SERIES (the activity bars, the Speed picture):
+# the web design draws both in the lavender of the token KPI, not the cyan of an
+# accent. The piped report never draws a picture, so the ANSI lane borrows the
+# engine's only cool colour rather than inventing a second palette here.
 _ANSI_STYLES = {"ok": _ok, "bad": _bad, "warn": _warn, "bold": _bold,
-                "accent": _accent, "header": _bold}
+                "accent": _accent, "header": _bold, "series": _accent}
 # "muted"/None render plain in ANSI (the engine has no dim code); markup has one.
-# "header" is the section-header fill: reverse-video on the TUI panes (the
-# engine has no reverse helper, so the piped report just keeps it bold).
+# "header" is the section heading. The piped report keeps it bold (the engine has
+# no colour helper for a piped stdout), and the TUI pane paints it in the
+# approved palette's heading colour: the revision-5 design separates sections
+# with a quiet heading and the surface tone under them, not with a filled band
+# across the pane, which reads as one giant selection.
 _MARKUP_STYLES = {"ok": "green", "bad": "red", "warn": "yellow", "bold": "bold",
-                  "accent": "cyan", "muted": "dim", "header": "reverse bold"}
+                  # The pane's status strip. A full-width band of terminal yellow
+                  # is the loudest thing on the page whatever it says, and a
+                  # partial read is news, not an alarm: the SAME amber, at the
+                  # weight of a sentence.
+                  "amber": "#d8ae6c",
+                  "accent": "cyan", "muted": "dim", "header": "bold #c5d2e3",
+                  "series": "#a8b1ff"}
+
+
+#: The report's sections, in the order the piped report emits them. The TUI's
+#: section picker names a subset; the header/note/warnings/footer belong to no
+#: one section and always print.
+REPORT_SECTION_ORDER: tuple[str, ...] = (
+    "header", "summary", "when", "podium", "projects", "note", "warnings", "footer",
+)
+_ALWAYS_SECTIONS = frozenset({"header", "note", "warnings", "footer"})
 
 
 def _name_cap(width: int) -> int:
@@ -145,8 +167,17 @@ def build_report_segments(
     width: int = 80,
     glyphs: str = "blocks",
     surface: str = "report",
+    sections: tuple[str, ...] | None = None,
 ) -> list[list[Run]]:
     """One entry per output line; each line is a list[Run].
+
+    ``sections`` selects the named sections ("summary", "when", "projects"). The
+    TUI's section picker and the piped report run through THIS function, so the
+    two surfaces cannot drift on what a figure means; the piped report passes
+    nothing and gets the whole report in order. The header, the source-note, the
+    warnings and the footer belong to no section -- a report fragment still has
+    to say what window it covers and what went wrong.
+
 
     ``insights`` or ``active_time`` may be ``None`` (soft-failed fetch) — those
     sections render EM_DASH placeholders and a warning line, never an exception.
@@ -163,9 +194,16 @@ def build_report_segments(
     compute.py:989) and the non-mutation test locks that.
     """
     seg: list[list[Run]] = []
+    wanted = set(sections) if sections is not None else set(REPORT_SECTION_ORDER)
+    wanted |= _ALWAYS_SECTIONS
+    current = {"name": "summary"}
 
     def line(*runs: Run) -> None:
-        seg.append(list(runs))
+        if current["name"] in wanted:
+            seg.append(list(runs))
+
+    def section(name: str) -> None:
+        current["name"] = name
 
     def plain(text: Any) -> Run:
         return Run(str(text))
@@ -178,6 +216,7 @@ def build_report_segments(
     }
 
     # --- header ---------------------------------------------------------------
+    section("header")
     header = f"Tokdash report · {window.get('period') or EM_DASH} · {window_line(rng)}"
     timezone = window.get("timezone")
     if timezone:
@@ -185,6 +224,7 @@ def build_report_segments(
     line(Run(header, "header"))
 
     # --- hero (usage scan + active-time clock) --------------------------------
+    section("summary")
     comparison = usage.get("comparison") or {}
     at = active_time or {}
     at_cmp = at.get("comparison") or {}
@@ -233,6 +273,7 @@ def build_report_segments(
     line(Run("Daily  "), plain(spark), Run("  "), plain(dates))
 
     # --- when (hourly + weekday facets) ----------------------------------------
+    section("when")
     hourly = (insights or {}).get("hourly") or {}
     weekday = (insights or {}).get("weekday") or {}
     peak_hour = hourly.get("peak_hour")
@@ -279,7 +320,8 @@ def build_report_segments(
     # screen. An empty facet omits the section; insights=None never gets here.
     days = window.get("days")
     if insights is not None and daily and isinstance(days, int) and 0 < days <= 31:
-        seg.extend(_daily_section(daily, window, width=width, glyphs=glyphs))
+        if "when" in wanted:
+            seg.extend(_daily_section(daily, window, width=width, glyphs=glyphs))
 
     # --- joins onto the active-time by_tool table ------------------------------
     by_tool = at.get("by_tool") or {}
@@ -298,6 +340,10 @@ def build_report_segments(
     projects = (insights or {}).get("projects") or {}
 
     # --- podium -----------------------------------------------------------------
+    # The ranked podiums. The piped report keeps them (a standalone report is
+    # supposed to repeat its headline context); the interactive Overview already
+    # HAS a sortable models table, so its Report tab asks for "summary" only.
+    section("podium")
     if tools_ranked:
         top = tools_ranked[0]
         act = active_row(top.get("tool")) or {}
@@ -347,6 +393,7 @@ def build_report_segments(
         line(Run("       Top project  "), plain(EM_DASH))
 
     # --- agents table -------------------------------------------------------------
+    section("summary")
     # usageReportBuildModel rule (index.html:14659-14684): tools with tokens>0,
     # joined onto active time; when active time ANSWERED, rows with no session
     # count move aside rather than headlining a table of em dashes — when it
@@ -400,12 +447,44 @@ def build_report_segments(
     else:
         line(Run("       "), plain(EM_DASH))
 
+    # --- projects -----------------------------------------------------------------
+    # Attribution with its own denominator: the analytics scan's totals, which is
+    # the number the shares add up against. Attributed + unattributed can differ
+    # from that total, because attribution follows the transcript path recorded on
+    # each row and some sources record none, so the difference is printed as its
+    # own line rather than absorbed into a row or a rescaled share. There are no
+    # session counts here: the projects facet does not carry them.
+    section("projects")
+    if insights is not None:
+        from .views import report_projects
+
+        project_view = report_projects(insights, sort="tokens")
+        if project_view["reason"]:
+            line(Run("Projects unavailable: " + str(project_view["reason"]), "warn"))
+        elif project_view["rows"] or project_view["unattributed"]["tokens"] != EM_DASH:
+            line(Run(f"Projects  attributed share of {project_view['totals']} tokens (analytics scan)"))
+            for row in project_view["rows"][:10]:
+                line(
+                    Run("          "), plain(row["project"]), Run("  "),
+                    plain(row["tokens"]), Run("  "), plain(row["share"]),
+                    Run("  "), plain(row["cost"]),
+                )
+            un = project_view["unattributed"]
+            line(Run("          Unattributed"), Run("  "), plain(un["tokens"]),
+                 Run("  "), plain(un["share"]))
+            if project_view["coverage_note"]:
+                line(Run("          " + project_view["coverage_note"], "muted"))
+        else:
+            line(Run("Projects  no project attribution for this window", "muted"))
+
     # --- note (per-figure source labels, spec §5) ------------------------------
+    section("note")
     line(Run("Note   Headline totals are the usage scan; facet/agent figures are the analytics"))
     line(Run("       scan (tools scope only) and may differ."))
     line(_rule_line(width, glyphs))
 
     # --- warnings -----------------------------------------------------------------
+    section("warnings")
     warns = [str(w) for w in (window.get("warnings") or [])]
     # window["pending"] marks a TUI load still in flight: there a None source
     # means "still running", NOT "scan failed" — the spec reserves the failure
@@ -437,6 +516,7 @@ def build_report_segments(
         line(Run(f"[warn] {len(names)} source(s) failed this window: {', '.join(names)}", "warn"))
 
     # --- db footer ----------------------------------------------------------------
+    section("footer")
     # The footer is decoration; a store fault (or TOKDASH_USAGE_DB=0 surprises)
     # must not kill an otherwise good report body. The TUI passes its cached
     # line via window["db_line"] — the Report pane repaints up to ~4× per load

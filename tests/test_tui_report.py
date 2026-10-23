@@ -503,6 +503,15 @@ def test_tui_status_parses_and_is_ignored(monkeypatch, no_db):
     stub = types.ModuleType("tokdash.tui.app")
     stub.run_tui = lambda args: captured.update(vars(args)) or 0
     monkeypatch.setitem(sys.modules, "tokdash.tui.app", stub)
+    # `tokdash tui` also settles the colour ceiling before Textual is imported,
+    # and that decision is recorded process-wide for the brand row to read. A
+    # test that only means to check the parser must not leave the NEXT test
+    # module believing this terminal refused its palette. Imported here rather
+    # than named as a dotted path: the cli imports it inside the function, so a
+    # string target would be resolved before the module is in sys.modules.
+    import tokdash.tui.terminal as tui_terminal
+
+    monkeypatch.setattr(tui_terminal, "configure_color_system", lambda *a, **k: None)
     assert cli(["tui", "status"]) == 0
     assert captured["command"] == "tui"
     assert captured["db_action"] == "status"
@@ -582,8 +591,9 @@ def test_piped_bytes_are_deterministic(monkeypatch, no_db, piped, capsys):
     # dropped line in the shared seam is caught for both surfaces.
     # 1 header + 4 hero + streak + daily + peak + 3 hour bars + weekday
     # + Daily section (header + rule + 7 rows) + 3 podium + rule + table
-    # header + 2 agent rows (kimi filtered) + 2 note + rule + db.
-    assert len(first.rstrip("\n").split("\n")) == 32
+    # header + 2 agent rows (kimi filtered) + projects (header + 1 row +
+    # unattributed) + 2 note + rule + db.
+    assert len(first.rstrip("\n").split("\n")) == 35
 
 
 # ---------------------------------------------------------------------------

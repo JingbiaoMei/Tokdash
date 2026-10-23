@@ -519,7 +519,7 @@ def _quota_history():
 
 class TestQuotaTable:
     def render(self, state=None, history=None, labels=None):
-        banner, rows, note, credits = quota_table(
+        banner, rows, note, credits, _keys = quota_table(
             state or _quota_state(),
             history if history is not None else _quota_history(),
             now_ts=NOW,

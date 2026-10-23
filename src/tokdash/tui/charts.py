@@ -145,6 +145,199 @@ def day_bars(
 
 
 # ---------------------------------------------------------------------------
+# columns: the terminal-scale bar chart Overview's activity and Speed's series
+# ---------------------------------------------------------------------------
+#
+# The picture exists to answer one question a table answers badly: WHERE is the
+# series empty? A terminal has no pixels for that, so the geometry carries it,
+# and the two empty-looking states must never share a drawing:
+#
+#   * a MISSING value (the server timed nothing in that bucket) leaves the
+#     column BLANK for every level, including the baseline;
+#   * a MEASURED zero draws ONE stub cell on the baseline and nothing above it.
+#
+# Both states arrive as separate entries (None versus 0.0) from the caller,
+# which reads them off the payload. Nothing here invents a bucket, merges two,
+# or rescales a rate: the columns are the buckets the route returned.
+
+_BLOCK_FULL = "\u2588"
+_BLOCK_RAMP = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587"
+_ASCII_FULL = "#"
+_ASCII_RAMP = ".:-=+"
+# Wide enough to read as a shape, narrow enough that a month of daily buckets
+# still gets a column each at 80 columns. The air between columns is what makes
+# a blank one read as a gap rather than as a very short bar.
+_MAX_COLUMN = 9
+_GAP = 1
+
+
+def column_chart_needs(count: int) -> int:
+    """Cells a picture of ``count`` buckets asks for: one cell each, plus air.
+
+    The caller that has to choose between two arrangements (the Speed pane's
+    picture beside its table, or above it) asks this instead of guessing from
+    the bucket count, so the two cannot drift apart about what "fits" means.
+    """
+    return count if count < 2 else 2 * count - 1
+
+
+def column_chart(
+    entries: list[dict],
+    *,
+    width: int,
+    height: int = 6,
+    glyphs: str = "blocks",
+    style: str = "accent",
+    label: str = "",
+    unit: str = "",
+) -> dict:
+    """One column per bucket, drawn from the values the route returned.
+
+    ``entries`` is ``[{"label": str, "value": float|None, "text": str}]`` --
+    bucket keys and already-formatted figures. This renderer never recomputes a
+    rate, never merges a bucket and never fills a gap with a zero.
+
+    ``text`` rides above its column only when EVERY label fits the column it
+    belongs to: a truncated "12…" over a bar is a wrong number wearing the
+    bar's authority, and the table beside the chart always carries the exact
+    figure. The axis keeps the first and the last key whatever the squeeze, plus
+    as many in between as their own columns can hold.
+
+    Returns ``{"available", "lines", "columns", "column_width", "used_width",
+    "span", "peak", "peak_text", "measured", "gaps", "note"}``; the caller
+    escapes and paints the runs.
+    """
+    rows = [e for e in (entries or []) if isinstance(e, dict)]
+    width = max(8, int(width))
+    height = max(2, int(height))
+    if not rows:
+        return {"available": False, "lines": [], "columns": 0,
+                "note": "no buckets in this response"}
+
+    values = [float(e["value"]) if e.get("value") is not None else None for e in rows]
+    texts = [str(e.get("text") or "") for e in rows]
+    keys = [str(e.get("label") or "") for e in rows]
+    count = len(rows)
+    # The columns ARE the buckets the route returned: never merged, never
+    # dropped, never narrower than one cell. So when the box cannot hold both
+    # the column and the air beside it, the air is what gives way -- and when
+    # even one cell per bucket overflows the box there is no picture to draw
+    # there at all. Saying so is the honest answer: the caller hides the chart
+    # and the table it was squeezed against keeps every figure.
+    gap = _GAP if count > 1 and column_chart_needs(count) <= width else 0
+    col_w = max(1, min(_MAX_COLUMN, (width - gap * (count - 1)) // count))
+    used = count * col_w + gap * (count - 1)
+    if used > width:
+        return {"available": False, "lines": [], "columns": count,
+                "column_width": 0, "used_width": 0,
+                "note": f"{count} buckets need {count} cells, not {width}"}
+    full, ramp = ((_BLOCK_FULL, _BLOCK_RAMP) if glyphs != "ascii"
+                  else (_ASCII_FULL, _ASCII_RAMP))
+    peak = max((v for v in values if v is not None), default=0.0)
+    measured = sum(1 for v in values if v is not None)
+    gaps = count - measured
+    # A measured zero is a MEASUREMENT (the bucket answered, and answered none);
+    # a gap is the absence of one. The picture draws them differently, and the
+    # caption has to say the difference in words as well or a stub on the
+    # baseline reads as "no data" to the reader it means the opposite for.
+    zeros = sum(1 for v in values if v is not None and v <= 0)
+    lines: list[list[Run]] = []
+
+    # Labels first: a label that would be cut is a label that lies, so the whole
+    # row is dropped rather than thinned to the columns that happen to be short.
+    label_row = bool(texts) and all(len(t) <= col_w for t in texts if t) and any(texts)
+    if label_row:
+        line: list[Run] = []
+        for index, text in enumerate(texts):
+            if index:
+                line.append(Run(" " * gap))
+            left = (col_w - len(text)) // 2
+            line.append(Run(" " * left + text + " " * (col_w - left - len(text)), "muted"))
+        lines.append(line)
+
+    # Top level down to the baseline. A column is FULL for every level it clears,
+    # shows one ramp glyph for the level it only partly reaches, and shows
+    # nothing at all where nothing was measured.
+    for level in range(height, 0, -1):
+        line = []
+        for index, value in enumerate(values):
+            if index:
+                line.append(Run(" " * gap))
+            if value is None:
+                line.append(Run(" " * col_w))
+                continue
+            if value <= 0:
+                # Measured zero: one cell, and only on the baseline.
+                line.append(Run(ramp[0] * col_w if level == 1 else " " * col_w, "warn"))
+                continue
+            reach = (value / peak * height) if peak > 0 else 0.0
+            if reach >= level:
+                line.append(Run(full * col_w, style))
+            elif level - reach < 1:
+                step = int(round((reach - (level - 1)) * (len(ramp) - 1)))
+                line.append(Run(ramp[max(0, min(len(ramp) - 1, step))] * col_w, style))
+            else:
+                line.append(Run(" " * col_w))
+        lines.append(line)
+
+    # The axis: first and last whenever they FIT (a chart you cannot read the
+    # ends of is decoration), then every key once the columns are wide enough to
+    # hold one each -- a tick every third bar is a guess about which bar is
+    # which. A key that does not fit its own column is DROPPED, never cut: "10-"
+    # is not a shortened date, it is a wrong one with the chart's authority. The
+    # caption under the chart always spells the full span out.
+    marks = {0, count - 1}
+    if count <= max(2, width // 12):
+        marks.update(range(count))
+    axis: list[Run] = []
+    for index in range(count):
+        if index:
+            axis.append(Run(" " * gap))
+        key = keys[index] if index in marks else ""
+        keep = key if len(key) <= col_w else ""
+        left = (col_w - len(keep)) // 2
+        axis.append(Run(" " * left + keep + " " * (col_w - left - len(keep)), "muted"))
+    if not any(str(run.text).strip() for run in axis):
+        # Nothing fits a column (24 hours at eighty columns leaves two cells
+        # each). The ENDS still have the whole row to sit in, and a picture with
+        # no ends at all is a shape the reader cannot place in time.
+        first, last = str(keys[0] or ""), str(keys[-1] or "")
+        if count > 1 and first and last and len(first) + len(last) + 4 <= used:
+            axis = [Run(first, "muted"),
+                    Run(" " * (used - len(first) - len(last)), "muted"),
+                    Run(last, "muted")]
+        else:
+            axis = [Run("", "muted")]
+    lines.append(axis)
+
+    top = max(
+        ((i, v) for i, v in enumerate(values) if v is not None),
+        key=lambda pair: pair[1],
+        default=(0, 0.0),
+    )
+    peak_text = texts[top[0]] if texts and top[0] < len(texts) else ""
+    note = unit and (f"{measured} of {count} buckets measured \u00b7 peak {peak_text} {unit}") or (
+        f"{measured} of {count} buckets measured"
+    )
+    return {
+        "available": True,
+        "lines": lines,
+        "columns": count,
+        "column_width": col_w,
+        "used_width": used,
+        "span": (keys[0], keys[-1]) if count > 1 else (keys[0], keys[0]),
+        "peak": peak,
+        "peak_text": peak_text,
+        "peak_key": keys[top[0]] if count else "",
+        "measured": measured,
+        "gaps": gaps,
+        "zeros": zeros,
+        "label": label,
+        "note": note,
+    }
+
+
+# ---------------------------------------------------------------------------
 # month view: Monday-first calendar heat grid
 # ---------------------------------------------------------------------------
 
@@ -654,9 +847,16 @@ def quota_table(
     now_ts: float,
     glyphs: str = "blocks",
     labels: dict | None = None,
-) -> tuple[list[list[Run]], list[list[str]], str, list[list[Run]]]:
-    """(banner segments, DataTable string rows, note, credits section) for the
-    Quota tab.
+) -> tuple[list[list[Run]], list[list[str]], str, list[list[Run]], list[dict | None]]:
+    """(banner segments, DataTable string rows, note, credits, row identities).
+
+    ``keys[i]`` is what ``rows[i]`` IS: ``{"provider", "account", "bucket"}`` for
+    a usage window, ``{"provider", "status_only": True}`` for the dimmed
+    no-windows card, and None for the blank spacer between providers. The table
+    paints display text whose Provider cell is deliberately blank on
+    continuation rows, so the identity cannot be recovered from the cells a
+    reader sees -- Enter on a row needs this, or "open the account" has nothing
+    to open.
 
     Rows mirror the web companion card: Provider | Window (normalized
     "5-hour"/"Weekly") | remaining bar + "62.3% left" (the bar and the
@@ -706,6 +906,7 @@ def quota_table(
     ]]
 
     rows: list[list[str]] = []
+    keys: list[dict | None] = []
     # Credits are a property of the CARDS, not of a rendered window row —
     # collected whole (all providers) before the per-provider loop, so the
     # no-windows early-continue can't drop a card's grants. Round 4:
@@ -728,6 +929,7 @@ def quota_table(
     def _gap() -> None:
         if rows:  # never before the FIRST group — no leading blank row
             rows.append(["", "", "", "", "", ""])
+            keys.append(None)  # a spacer carries no account
 
     for provider in sorted(providers.keys()):
         card = providers[provider] or {}
@@ -737,6 +939,7 @@ def quota_table(
                 _gap()
                 rows.append([str(provider), EM_DASH, EM_DASH, EM_DASH, EM_DASH,
                              "unavailable"])
+                keys.append({"provider": str(provider), "status_only": True})
             # else: no windows but the card says something (e.g. "local_plan")
             # — nothing tabular to show; render no row.
             continue
@@ -800,6 +1003,8 @@ def quota_table(
                 trend,
                 str(card.get("status") or "unavailable"),
             ])
+            keys.append({"provider": str(provider), "account": acct,
+                         "bucket": str(bucket.get("bucket") or "")})
     notes: list[str] = []
     if not (state or {}).get("enabled"):
         notes.append("quota tracking is off — enable it with `tokdash quota consent --enabled on`")
@@ -807,4 +1012,165 @@ def quota_table(
         notes.append("network quota polling is not consented — grant it with `tokdash quota consent --<provider>-api on`")
     if not any_points:
         notes.append("no 24h quota history yet — press u to poll once")
-    return banner, rows, " · ".join(notes), credits_section
+    trouble = [
+        f"{provider} {account.get('account') or 'default'}"
+        for provider, card in sorted(providers.items())
+        for account in _accounts_of(card)
+        if str(account.get("status") or "ok") != "ok"
+    ]
+    if trouble:
+        # A narrow table drops the Status column before it cuts a word, and a
+        # stale credential under a healthy-looking percentage is exactly the
+        # thing that must not depend on a column being on screen.
+        notes.append(
+            f"{len(trouble)} account{'s' if len(trouble) != 1 else ''} reporting a "
+            f"problem ({', '.join(trouble[:3])}) — enter a row for its status"
+        )
+    return banner, rows, " · ".join(notes), credits_section, keys
+
+
+def quota_account_problem_lines(state: dict) -> list[list[Run]]:
+    """Accounts whose card says anything other than ok, as warning rows.
+
+    Kept separate from the table's Status column because that column is the
+    first thing a narrow terminal gives up; the account's freshness is not.
+    """
+    lines: list[list[Run]] = []
+    for provider, card in sorted(((state or {}).get("providers") or {}).items()):
+        for account in _accounts_of(card):
+            status = str(account.get("status") or "ok")
+            if status == "ok":
+                continue
+            detail = account.get("status_detail") or ""
+            lines.append([
+                Run(f"{provider} {account.get('account') or 'default'}: ", "bold"),
+                Run(status, "warn"),
+                Run(f" {detail}".rstrip(), "muted"),
+                Run(f" · {_fmt_epoch_full(account.get('status_at') or account.get('updated_at'))}",
+                    "muted"),
+            ])
+    return lines
+
+
+def _accounts_of(card: Any) -> list[dict]:
+    """GET /api/quota's ``accounts`` as a LIST of {account, status, ...} rows.
+
+    Not a mapping keyed by account id, and the window data does NOT live inside
+    it: windows are the card's top-level ``buckets``, each carrying its own
+    ``account``. Reading either as a dict silently finds nothing, which is how a
+    stale token disappears from the pane.
+    """
+    accounts = (card or {}).get("accounts") or []
+    if isinstance(accounts, dict):  # older shape: {account_id: {...}}
+        return [dict(value or {}, account=str(name))
+                for name, value in accounts.items() if isinstance(value, dict)]
+    return [entry for entry in accounts if isinstance(entry, dict)]
+
+
+def quota_detail_rows(
+    state: dict, identity: dict | None, *, now_ts: float, labels: dict | None = None
+) -> list[list[Run]]:
+    """Everything the reader should know about the row under the cursor.
+
+    A window's remaining percentage is the least interesting thing on the card:
+    what a reader needs underneath it is WHICH account that meter belongs to,
+    whether the answer came from the provider API or a local log that may lag,
+    when it was last observed, and whether that account is complaining. Consent
+    and the poll clock close it out, because "it says 0% left" and "the token
+    expired three hours ago" look identical without them.
+    """
+    # ``labels`` arrives as data, exactly as quota_table takes it: charts never
+    # reaches into the backend for a display name.
+    providers = (state or {}).get("providers") or {}
+    identity = identity or {}
+    provider = str(identity.get("provider") or "")
+    card = providers.get(provider)
+    if card is None:
+        for name, entry in providers.items():
+            if str(name).lower() == provider.lower():
+                provider, card = str(name), entry
+                break
+    if not isinstance(card, dict):
+        return [[Run(f"no quota card for {provider or 'this row'}", "warn")]]
+
+    if identity.get("status_only"):
+        return [[
+            Run(f"{tool_label(provider, labels)} · ", "bold"),
+            Run("no usable quota windows", "warn"),
+            Run(f" · card status {card.get('status') or 'unknown'}", "muted"),
+            Run(f" · detected {bool(card.get('detected'))}"
+                f" · network {'consented' if card.get('network_enabled') else 'not consented'}", "muted"),
+        ]]
+
+    bucket_key = str(identity.get("bucket") or "")
+    account_id = str(identity.get("account") or "default")
+    bucket = next(
+        (b for b in (card.get("buckets") or [])
+         if isinstance(b, dict) and str(b.get("bucket") or "") == bucket_key
+         and str(b.get("account") or "default") == account_id),
+        None,
+    )
+    # Resolved before the heading, because the heading needs it: the card's own
+    # ``plan`` names the DEFAULT install by producer contract (older readers keep
+    # reading it), while every install's own plan lives on its ``accounts`` row.
+    account = next((a for a in _accounts_of(card)
+                    if str(a.get("account") or "default") == account_id), None)
+    plan = (account or {}).get("plan") or (
+        card.get("plan") if account_id in ("", "default") else None
+    )
+    lines: list[list[Run]] = [[
+        Run(f"{tool_label(provider, labels)}", "bold"),
+        Run(f" · account {account_id}", "muted"),
+        Run(f" · plan {plan}" if plan else "", "muted"),
+        Run(f" · card status {card.get('status') or 'unknown'}", "muted"),
+        Run(" · network not consented"
+            if card.get("network_enabled") is False else "", "warn"),
+    ]]
+    if bucket is None:
+        lines.append([Run("that window is no longer in the snapshot — press r", "warn")])
+    else:
+        remaining = _remaining_pct(bucket)
+        window = _window_label(provider, bucket, now_ts)
+        raw_label = str(bucket.get("bucket_label") or bucket_key)
+        source = str(bucket.get("source") or "")
+        if bucket.get("unlimited") is True:
+            level = [Run("unlimited", "ok")]
+        elif remaining is None:
+            level = [Run("never measured", "warn")]
+        else:
+            level = [Run(f"{remaining:.1f}%", "bold"), Run(" left", "muted"),
+                     Run(f" (used {100.0 - remaining:.1f}%)", "muted")]
+        lines.append([Run("window ", "muted"), Run(window, "bold"),
+                      Run(f" ({raw_label})" if raw_label != window else "", "muted"),
+                      Run("  ·  ", "muted"), *level])
+        lines.append([
+            Run("resets ", "muted"), Run(_reset_cell(bucket, now_ts), "bold"),
+            Run("  · observed ", "muted"),
+            Run(_fmt_epoch_full(bucket.get("observed_at") or bucket.get("captured_at")), "bold"),
+            Run("  · source ", "muted"), Run(source or "unknown", "bold"),
+            Run("" if source.endswith("_api") else " (local logs can lag the provider)",
+                "" if source.endswith("_api") else "warn"),
+        ])
+    if account is not None:
+        status = str(account.get("status") or "ok")
+        lines.append([
+            Run("account status ", "muted"),
+            Run(status, "ok" if status == "ok" else "warn"),
+            Run(f" {account.get('status_detail')}" if account.get("status_detail") else "", "warn"),
+            Run("  · last seen ", "muted"),
+            Run(_fmt_epoch_full(account.get("status_at") or account.get("updated_at")), "muted"),
+        ])
+    elif account_id != "default":
+        lines.append([Run(f"account {account_id} is not on the card", "warn")])
+    if (card.get("status_account") or "") and str(card.get("status_account")) == account_id:
+        lines.append([Run("this account is the one that names the card's status", "muted")])
+    poll = (state or {}).get("poll") or {}
+    consent = (state or {}).get("consent") or {}
+    granted = ", ".join(str(k) for k, v in consent.items() if v) or "none"
+    lines.append([
+        Run("poll every ", "muted"), Run(f"{poll.get('interval_minutes', '?')} min", "muted"),
+        Run(" · last run ", "muted"), Run(_fmt_epoch_full(poll.get("last_run")), "muted"),
+        Run(" · network consent: ", "muted"), Run(granted, "muted"),
+        Run(" · u polls once", "muted"),
+    ])
+    return lines

@@ -84,7 +84,9 @@ caller's own token back — so a consumer that sent a typo receives a century of
 its own label.
 
 Every period-taking response therefore carries a `range` block describing the window that
-was actually queried:
+was actually queried. One route is the exception: `GET /api/sessions` answers with `tool`,
+`tool_label` and the echoed `period` and carries **no `range` block**, so a session list
+keeps the bounds the caller validated and sends them alongside the rows it displayed:
 
 ```json
 "range": {
@@ -508,9 +510,13 @@ changing the grouping resolution cannot flip an exact half-cent total.
   "tokens": 45990135,        // total tokens
   "tokens_in": 7786995,      // input tokens (non-cache)
   "tokens_out": 375005,      // output tokens
-  "tokens_cache": 37828135,  // cache read + write tokens
+  "tokens_cache": 37828135,  // cache READ tokens only
   "cost": 39.52,             // USD
   "messages": 566,
+  // cache WRITE tokens are billable input, so they are inside `tokens_in`
+  // above (compute.py: `tokens_in = input_raw + cacheWrite`,
+  // `tokens_cache = cacheRead`). `cache_hit_rate` divides `tokens_cache` by
+  // `tokens_in + tokens_cache` for that reason.
   "models": [
     {
       "name": "anthropic/claude-opus-4-7",
@@ -1111,7 +1117,7 @@ Yearly stats aggregation: a contribution grid plus headline totals.
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `year` | integer | no | Year to query. Defaults to current year if omitted. |
+| `year` | integer | no | Calendar year to query (`2026` is `2026-01-01` to `2026-12-31`). **Omitted, the window is the trailing 365 days** -- a rolling window ending today, not the current calendar year -- so a consumer that wants a calendar year must send `year` even on 1 January. |
 
 **`stats` fields**
 

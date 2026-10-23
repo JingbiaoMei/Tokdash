@@ -9,7 +9,12 @@ on:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    # The suite is 4,400 tests over four runners and takes 15-18 minutes on a
+    # busy host; the Windows legs are consistently the slowest and were killed
+    # mid-run at the old 20-minute cap, which reads as a cancelled PR rather
+    # than as information. The per-test cap (--timeout=180) is what catches a
+    # real hang; this one only has to outlast a healthy run.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:

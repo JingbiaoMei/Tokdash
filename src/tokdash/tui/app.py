@@ -900,6 +900,12 @@ class TokdashApp(App):
         # happened yet. See _fit_panes.
         self._strip_rows: int | None = None
         self._fit_rearms = 0  # bounded, so two sizes cannot chase each other
+        # Set when the last measurement of the frame CANNOT be trusted -- the page
+        # was covered by a chooser, or the chrome above the panes just changed
+        # height. A pass that measured a frame which has since moved looks exactly
+        # like a pass that has nothing to do, so this one makes the next pass a
+        # MEASUREMENT rather than a verdict. See _fit_panes.
+        self._fit_forced = False
         # Rows #sp-series was holding when the Speed picture was last drawn, and
         # the height of the picture that went in. The first paint of a pane runs
         # before Textual has any geometry, so the picture is sized from an
@@ -2473,9 +2479,14 @@ class TokdashApp(App):
             return  # nothing is laid out yet; a resize or the next paint retries
         # What the LAST fit saw, panes included: a height asked of a widget is
         # not the height it has until the next layout, and the rows that land
-        # then are the rows a body has to be re-fitted to.
+        # then are the rows a body has to be re-fitted to. Each pane's STARTING
+        # row rides along, not just its height -- the chrome above the panes (the
+        # range strip, the dates input it grows) changes height without any
+        # terminal resize, and a pane that slid down a row while keeping its
+        # height is a pane that quietly lost a row of figures.
         stamp = (self._pane_screen_width(), self._pane_screen_height(), limit,
-                 tuple(sorted(pane.region.height for pane in self.query(TabPane))))
+                 tuple(sorted((pane.region.y, pane.region.height)
+                              for pane in self.query(TabPane))))
         moved = stamp != self._fit_stamp
         self._fit_stamp = stamp
         changed = False
@@ -2491,6 +2502,13 @@ class TokdashApp(App):
             if pane.region.height != room:
                 pane.styles.height = f"{room}"
                 changed = True
+        if self._fit_forced:
+            # Whatever this pass found, it found it in a frame that had just moved
+            # under it. Take the rows it wrote as a guess and measure once more;
+            # the bound below is what stops a widget that resizes its neighbour
+            # from chasing it forever.
+            self._fit_forced = False
+            changed = True
         if not (changed or moved):
             self._fit_rearms = 0  # settled: a later disagreement starts fresh
         elif not self._fit_pending and self._fit_rearms < self._FIT_MAX_REARMS:
@@ -2642,6 +2660,9 @@ class TokdashApp(App):
         else:
             box.value = ""
             self._paint_rangebar()
+        # Revealed or put away, that input sits ABOVE the panes, so the page just
+        # gained or lost a row with no resize event to say so.
+        self._page_moved()
 
     def action_pick_more(self) -> None:
         """``p`` -- the row's own chooser: more ranges, or more years."""
@@ -3646,6 +3667,20 @@ class TokdashApp(App):
         self._update_status()  # re-wraps the strip, then re-fits the panes
         self._refit_body()
 
+    def _page_moved(self) -> None:
+        """Say that the frame the page was last measured against is not real.
+
+        Nothing here repaints a figure or starts a read: it re-arms the guarded
+        fit pass, which hands back the rows the frame was drawing over and then
+        re-fits the body against the rows it actually got. Used when a chooser
+        goes away and when the chrome above the panes changes height, both of
+        which move the page without any Resize event reaching the App.
+        """
+        self._fit_stamp = None
+        self._fit_rearms = 0
+        self._fit_forced = True
+        self.call_after_refresh(self._refit_after_layout)
+
     def _screen_changed(self, _screen) -> None:
         """Re-take the page's fit when a resized chooser is dismissed.
 
@@ -3667,9 +3702,7 @@ class TokdashApp(App):
             return  # a chooser going ON covers a page that has not moved
         # The chain may have settled against the chooser, so it is told to measure
         # the page again rather than trust a stamp taken while nothing was visible.
-        self._fit_stamp = None
-        self._fit_rearms = 0
-        self.call_after_refresh(self._refit_after_layout)
+        self._page_moved()
 
     def _refit_body(self) -> None:
         """Refit the page on screen, but only if its box is not the one it fitted.

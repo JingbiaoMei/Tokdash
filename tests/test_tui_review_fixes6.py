@@ -26,7 +26,7 @@ textual = pytest.importorskip("textual", reason="the TUI tests need textual")
 
 from rich.cells import cell_len  # noqa: E402
 
-from test_tui_review_fixes5 import figures  # noqa: E402
+from test_tui_review_fixes5 import figures, month_of_buckets  # noqa: E402
 from test_tui_revision5 import (  # noqa: E402
     api,
     press,
@@ -172,5 +172,83 @@ def test_a_chooser_that_was_not_resized_leaves_the_page_alone(api):
         assert len(app.screen_stack) == 1
         assert len(api.calls) == before, api.calls[before:]
         assert str(app.query_one("#ov-cards").content) == cards
+
+    run(api, body, size=WIDE)
+
+
+# --------------------------------------------------------------------- R6-F2 --
+# The rows the frame hands the page belong to the page. A modal that covers it,
+# or chrome above it that changes height, moves the page with no Resize event
+# for the App to answer, and a table that believes its viewport is shorter than
+# it is stops one row early for ever.
+# -------------------------------------------------------------------------- #
+
+
+PATHS = ("plain", "modal-escape", "modal-pick", "dates-editor", "dates-then-modal")
+LAST_BUCKET = "2026-10-15"  # the 45th daily bucket the fixture writes
+
+
+@pytest.mark.parametrize("how", PATHS)
+def test_the_page_keeps_every_row_the_frame_gives_it(api, how):
+    """After each of these, the last row of a long table has to reach the screen.
+
+    A pane that kept an old frame's height is invisible in the abstract -- the
+    clip is silent -- but it shows the moment a reader walks to the end of a
+    series: the cursor stops, and the row it stopped short of never arrives.
+    """
+
+    async def body(app, pilot):
+        month_of_buckets(api, 45)
+        app.action_show_pane("speed")
+        await settle(pilot, 3)
+        press(app, "sp-mode-trend")
+        await settle(pilot, 3)
+        if how.startswith("dates"):
+            await pilot.press("c")
+            await settle(pilot, 2)
+        if how.startswith("modal") or how == "dates-then-modal":
+            await pilot.press("p")
+            await settle(pilot, 2)
+        await pilot.resize_terminal(*WIDE)
+        await settle(pilot, 2)
+        if how == "modal-pick":
+            await pilot.press("enter")  # choose the highlighted preset
+        else:
+            await pilot.press("escape")
+        # TWO pauses, not eight: the page must take the rows the new frame gave
+        # it, not wait for the next unrelated repaint to hand them over.
+        await settle(pilot, 2)
+
+        box = app.query_one("#pane-speed")
+        strip = app.query_one("#status")
+        assert box.region.bottom == strip.region.y, (how, box.region, strip.region)
+        table = app.query_one("#sp-table")
+        table.focus()
+        await pilot.press("ctrl+end")
+        await settle(pilot, 2)
+        assert table.cursor_row == 44, (how, table.cursor_row)
+        assert LAST_BUCKET in visible(app, "#sp-table"), how
+        assert app._fit_rearms == 0, how  # the chain settled; it is not chasing
+
+    run(api, body, size=NARROW)
+
+
+@pytest.mark.parametrize("key", ["p", "c"])
+def test_a_close_that_changed_nothing_leaves_the_page_alone(api, key):
+    """Open and close with no resize: no re-read, no repaint, no spinning chain."""
+
+    async def body(app, pilot):
+        cards = str(app.query_one("#ov-cards").content)
+        before = len(api.calls)
+        await pilot.press(key)
+        await settle(pilot, 2)
+        await pilot.press("escape")
+        await settle(pilot, 4)
+        assert len(app.screen_stack) == 1
+        assert len(api.calls) == before, api.calls[before:]
+        assert str(app.query_one("#ov-cards").content) == cards
+        assert app._fit_rearms == 0
+        box = app.query_one("#pane-overview")
+        assert box.region.bottom == app.query_one("#status").region.y
 
     run(api, body, size=WIDE)

@@ -906,6 +906,12 @@ class TokdashApp(App):
         # like a pass that has nothing to do, so this one makes the next pass a
         # MEASUREMENT rather than a verdict. See _fit_panes.
         self._fit_forced = False
+        # Is something covering the page right now? The refit on the way back is
+        # owed only after a chooser that was ACTUALLY OPEN goes away: the app also
+        # publishes a screen change for its very first screen, and reading that as
+        # a dismissal re-fits a page that never moved -- which can move a pane's
+        # scroll position before the reader has touched anything.
+        self._chooser_was_up = False
         # Rows #sp-series was holding when the Speed picture was last drawn, and
         # the height of the picture that went in. The first paint of a pane runs
         # before Textual has any geometry, so the picture is sized from an
@@ -3047,7 +3053,9 @@ class TokdashApp(App):
             table = {"overview": "#ov-table", "sessions": "#sn-table",
                      "pricing": "#pr-table"}.get(pane)
             if table:
-                self.query_one(table, DataTable).focus()
+                # The list is where the reader already was; the hand-off may put
+                # the keys there, but it may not move the page to find them.
+                self.query_one(table, DataTable).focus(scroll_visible=False)
             return
         if pane == "overview":
             self._ov_selected = None
@@ -3057,8 +3065,10 @@ class TokdashApp(App):
             self._sn_detail = None
             self._paint_sessions()
             # The detail and its turn table just went away; focus has to land
-            # back on the list rather than on whatever the hidden table was.
-            self.query_one("#sn-table", DataTable).focus()
+            # back on the list rather than on whatever the hidden table was --
+            # and the list is already where the reader is looking, so the page
+            # must not be dragged to prove it.
+            self.query_one("#sn-table", DataTable).focus(scroll_visible=False)
         elif pane == "speed":
             self._sp_detail_kind = None
             self._sp_detail_key = None
@@ -3699,7 +3709,13 @@ class TokdashApp(App):
         the shared lifecycle instead of only the range picker's success callback.
         """
         if len(self.screen_stack) > 1:
-            return  # a chooser going ON covers a page that has not moved
+            # A chooser going ON covers a page that has not moved. Note the fact,
+            # because the refit is owed when -- and only when -- it goes away.
+            self._chooser_was_up = True
+            return
+        if not self._chooser_was_up:
+            return  # the app's first screen, or a mode change: nothing was covered
+        self._chooser_was_up = False
         # The chain may have settled against the chooser, so it is told to measure
         # the page again rather than trust a stamp taken while nothing was visible.
         self._page_moved()
@@ -3768,7 +3784,14 @@ class TokdashApp(App):
             if node is shown:  # way a widget can be off-screen: its pane can be
                 return        # hidden too
             node = node.parent
-        self.query_one(body).focus()
+        # scroll_visible=False: this is a hand-off of the KEYBOARD, not a trip to
+        # somewhere the reader asked to see, and focusing a widget scrolls it into
+        # view -- with an ANIMATED scroll, so the page is still moving afterwards
+        # for anything that measures it. On a short terminal that opened Overview
+        # with its card band scrolled off the top, eight rows down, before a key
+        # had been pressed. Where the table needs to be seen, the cursor movement
+        # that follows brings it on screen.
+        self.query_one(body).focus(scroll_visible=False)
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
         pane = event.tabbed_content.get_pane(event.tab)

@@ -35,6 +35,14 @@ from test_tui_revision5 import (  # noqa: E402
     visible,
 )
 
+async def _settled(app, pilot, pane: str) -> bool:
+    """Wait for one pane's first paint, the way the earlier suites do."""
+    for _ in range(40):
+        if app._state.get(pane) == "ok" and not app._open_loads.get(pane):
+            return True
+        await pilot.pause(0.1)
+    return app._state.get(pane) == "ok"
+
 WIDE = (120, 36)
 NARROW = (80, 24)
 
@@ -252,3 +260,72 @@ def test_a_close_that_changed_nothing_leaves_the_page_alone(api, key):
         assert box.region.bottom == app.query_one("#status").region.y
 
     run(api, body, size=WIDE)
+
+
+# --------------------------------------------------------------------- R6-F3 --
+# The refit a dismissed chooser owes must not become a refit that happens to
+# every page at start-up. The app publishes a screen change for its FIRST screen
+# too, and a forced pass there re-fits a page that never moved -- and a pane that
+# is re-fitted is a pane whose scroll position can move before a key is pressed.
+# -------------------------------------------------------------------------- #
+
+
+def test_the_page_opens_at_its_top_with_no_chooser_ever_opened(api):
+    """No chooser has been opened: nothing may re-fit the page out from under it."""
+
+    async def body(app, pilot):
+        assert await _settled(app, pilot, "overview")
+        assert app._chooser_was_up is False
+        assert app._fit_forced is False
+        pane = app.query_one("#pane-overview")
+        # Eight rows of terminal: the page overflows, so a scroll that was not
+        # asked for is a scroll that can be seen.
+        assert pane.scroll_y == 0, pane.scroll_y
+
+    run(api, body, size=(80, 14))
+
+
+def test_only_a_dismissed_chooser_owes_the_refit(api):
+    """The flag follows the chooser: up while it covers the page, down once it is gone."""
+
+    async def body(app, pilot):
+        assert await _settled(app, pilot, "overview")
+        await pilot.press("p")
+        await settle(pilot, 1)
+        assert app._chooser_was_up is True
+        await pilot.press("escape")
+        await settle(pilot, 2)
+        assert app._chooser_was_up is False
+        assert app._body_fitted.get("overview") == app._body_stamp("overview")
+
+    run(api, body, size=(80, 14))
+
+
+def test_handing_over_the_keys_does_not_move_the_page(api):
+    """Focus is a hand-off of the keyboard, not a trip somewhere else.
+
+    Eight rows of terminal: the Overview table starts below the fold, so a focus
+    that scrolls it into view puts the card band -- the reason the pane exists --
+    off the top of the screen. Textual animates that scroll too, so a reader (or
+    a test) that measures the page right afterwards catches it mid-flight.
+    """
+
+    async def body(app, pilot):
+        assert await _settled(app, pilot, "overview")
+        pane = app.query_one("#pane-overview")
+        assert pane.show_vertical_scrollbar, "eight rows must overflow the page"
+        assert pane.scroll_y == 0, pane.scroll_y
+        for pane_name in ("sessions", "speed", "overview"):
+            app.action_show_pane(pane_name)
+            await settle(pilot, 3)
+            box = app.query_one(f"#pane-{pane_name}")
+            assert box.scroll_y == 0, (pane_name, box.scroll_y)
+        # Closing a detail hands the keys back to its list. That is not a journey
+        # either: the list is already on screen.
+        app.action_show_pane("sessions")
+        await settle(pilot, 3)
+        app.action_close_detail()
+        await settle(pilot, 3)
+        assert app.query_one("#pane-sessions").scroll_y == 0
+
+    run(api, body, size=(80, 14))

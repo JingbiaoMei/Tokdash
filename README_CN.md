@@ -97,7 +97,7 @@ tokdash setup
 | 视图 | 它是什么 | 什么时候用它 |
 |---|---|---|
 | **[WebUI](#webui)** | 完整仪表盘：Overview、Sessions、Stats、Report、Quota、Servers | 你想要全局视图、图表与逐层下钻 |
-| **[TUI](#终端仪表盘tui)** | `tokdash tui` —— 在终端里查看 Overview、Report 与 Quota | 你常驻终端，不想为了看数字打开浏览器 |
+| **[TUI](#终端仪表盘tui)** | `tokdash tui` —— 终端里的七个面板：Overview、Sessions、Stats、Report、Speed、Quota、Pricing | 你常驻终端，不想为了看数字打开浏览器 |
 | **[Companion](#companion-状态栏应用)** | 原生菜单栏（macOS）/ 通知区域（Windows）应用 | 你想全天可见今日费用与额度，哪怕仪表盘没有打开 |
 | **[状态栏](#状态栏statusline)** | 你 Agent 状态栏里的实时 Token / 费用条目 | 你想在打字的正下方看到费用跳动 |
 
@@ -152,7 +152,7 @@ tokdash setup
 
 ### 终端仪表盘（TUI）
 
-更喜欢留在终端里？`tokdash tui` 无需浏览器即可打开 **Overview**、**Report** 和 **Quota** 标签页，读取同一个本地索引（当旁边运行着 `tokdash serve` 时，还会读取共享的磁盘数据库）。
+更喜欢留在终端里？`tokdash tui` 无需浏览器就能打开**七个面板** —— **Overview**、**Sessions**、**Stats**、**Report**、**Speed**、**Quota** 和 **Pricing**，读取同一个本地索引（当旁边运行着 `tokdash serve` 时，还会读取共享的磁盘数据库）。`F1`–`F7` 在它们之间跳转，`v` 列出全部面板。
 
 <table>
   <tr>
@@ -177,13 +177,24 @@ tokdash tui
 | 按键 | 操作 |
 |---|---|
 | `q` | 退出 |
-| `r` | 刷新当前标签页 |
-| `1` / `2` / `3` | 切换到 Overview / Report / Quota |
-| `t` `w` `m` `y` `a` | 直接跳转到对应周期（两个周期标签页通用；`t`/`a` 仅 Overview） |
-| `p` | 下一个时间窗口（仅向前循环） |
-| `[` / `]` | 按整个日历周期向后 / 向前切换 —— 绝不跳入未来 |
+| `r` | 重新加载当前面板 |
+| `F1`–`F7` | Overview / Sessions / Stats / Report / Speed / Quota / Pricing（`1` / `2` / `3` 仍然跳到 Overview / Report / Quota） |
+| `v` | 从列表里选一个面板 |
+| `t` `d` `w` `m` `y` `a` | 设置共用的时间区间：今天、昨天、本周、本月、今年、全部 |
+| `p` | 更多区间（区间栏里的 **More**）；在 Stats 里是更早的一年 |
+| `P` | Stats：更晚的一年，一路回到最近 365 天 |
+| `c` | 手工输入精确的自定义日期区间 |
+| `[` / `]` | 按整个周期向前 / 向后平移 —— 绝不跳入未来 |
 | `0` | 回到今天 |
-| `u` | 轮询额度（仅 Quota 标签页） |
+| `/` | 在当前表格里搜索 |
+| `s` | 切换当前表格的排序 |
+| `enter` / `esc` | 打开选中的行 / 关闭它 |
+| `h` | 选择数据来源（Sessions 与 Speed） |
+| `H` | 在 Speed 的来源之间逐个切换 |
+| `k` | 选择 Speed 的曲线 |
+| `x` | 切换计时窗口（Speed） |
+| `b` | 切换 Speed 的分桶粒度 |
+| `u` | 轮询额度（仅 Quota 面板） |
 | `?` | 显示所有按键的帮助面板 |
 
 </details>
@@ -402,7 +413,7 @@ tokdash serve
 - **贡献日历**：2D 热力图 + 3D 等距视图，支持 Tokens / Cost / Messages 指标
 - **Report 标签页**：本机 Agent 活动的周 / 月 / 年初至今报告，每个详细层级都配有可分享卡片；每次导出都会同时生成浅色与深色两张 PNG
 - **Quota 标签页**：九家服务商的订阅窗口进度条与重置倒计时。Codex 窗口读取本地日志即可开箱使用；多数其他来源需要选择启用[实时轮询](#额度跟踪可选)
-- **终端仪表盘** *[新]*：`tokdash tui` —— 在终端里查看 Overview、Report 与 Quota，无需浏览器
+- **终端仪表盘** *[新]*：`tokdash tui` —— 在终端里查看 Overview、Sessions、Stats、Report、Speed、Quota 和 Pricing，无需浏览器
 - **Companion 状态栏应用**：在 macOS 菜单栏或 Windows 通知区域查看费用与订阅额度 —— Windows 版已上架 [Microsoft Store](https://apps.microsoft.com/detail/9ppnmpdq8b52)
 - **状态栏集成**：在 Claude Code 的状态栏（或任何能访问本地 HTTP 端点的 Agent）中显示实时 Token 使用量
 - **多服务器视图**：在设置中添加 WSL、macOS 或其他 Tokdash 服务器；可合并任意选择的用量，并按机器分组显示额度。参见[远程访问](docs/guides/REMOTE_ACCESS.md)。

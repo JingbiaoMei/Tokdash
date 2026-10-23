@@ -100,7 +100,7 @@ tokdash setup
 | 뷰 | 무엇인가 | 이런 경우에 사용하세요 |
 |---|---|---|
 | **[WebUI](#webui)** | 전체 대시보드: Overview, Sessions, Stats, Report, Quota, Servers | 전체 조감, 차트, 드릴다운이 필요할 때 |
-| **[TUI](#터미널-대시보드-tui)** | `tokdash tui` — 터미널에서 Overview, Report, Quota | 터미널에 거주하며 브라우저 없이 수치가 필요할 때 |
+| **[TUI](#터미널-대시보드-tui)** | `tokdash tui` — 터미널에서 7개 패널: Overview, Sessions, Stats, Report, Speed, Quota, Pricing | 터미널에 거주하며 브라우저 없이 수치가 필요할 때 |
 | **[Companion](#companion-상태표-앱)** | 네이티브 메뉴 막대(macOS) / 알림 영역(Windows) 앱 | 대시보드를 닫아둔 채 하루 종일 오늘의 지출과 쿼터를 눈에 담고 싶을 때 |
 | **[상태줄](#상태줄)** | 에이전트 상태줄 안의 라이브 토큰/비용 항목 | 비용 티커를 정확히 타이핑하는 그 자리에 두고 싶을 때 |
 
@@ -158,9 +158,8 @@ tokdash setup
 
 ### 터미널 대시보드 (TUI)
 
-터미널에 그대로 남겠다면? `tokdash tui`는 브라우저 없이 **Overview**, **Report**,
-**Quota** 탭을 열며, 동일한 로컬 인덱스를 읽습니다(옆에서 `tokdash serve`가 실행
-중이면 디스크의 공유 데이터베이스도 함께 읽습니다).
+터미널에 그대로 남겠다면? `tokdash tui`는 브라우저 없이 **7개 패널** —— **Overview**, **Sessions**, **Stats**, **Report**, **Speed**, **Quota**, **Pricing** —— 을 열고, 동일한 로컬 인덱스를 읽습니다(옆에서 `tokdash serve`가 실행
+중이면 디스크의 공유 데이터베이스도 함께 읽습니다). `F1`–`F7`로 패널을 이동하고, `v`로 목록에서 고릅니다.
 
 <table>
   <tr>
@@ -185,13 +184,24 @@ tokdash tui
 | 키 | 동작 |
 |---|---|
 | `q` | 종료 |
-| `r` | 현재 탭 새로고침 |
-| `1` / `2` / `3` | Overview / Report / Quota으로 전환 |
-| `t` `w` `m` `y` `a` | 기간으로 바로 이동(두 기간 탭 공통; `t`/`a`는 Overview 전용) |
-| `p` | 다음 시간 윈도우(순환은 앞방향만) |
-| `[` / `]` | 캘린더 단위 전체 기간씩 뒤로 / 앞으로 이동 — 미래로는 이동하지 않음 |
+| `r` | 현재 패널 새로고침 |
+| `F1`–`F7` | Overview / Sessions / Stats / Report / Speed / Quota / Pricing(`1` / `2` / `3`은 기존대로 Overview / Report / Quota로 이동) |
+| `v` | 목록에서 패널 선택 |
+| `t` `d` `w` `m` `y` `a` | 공용 범위 지정: 오늘, 어제, 이번 주, 이번 달, 올해, 전체 |
+| `p` | 범위 추가(스트립의 **More**); Stats에서는 이전 연도 |
+| `P` | Stats: 이후 연도(마지막 365일까지 복귀) |
+| `c` | 정확한 사용자 지정 날짜 범위 입력 |
+| `[` / `]` | 범위 전체 기간 단위 앞 / 뒤로 이동 — 미래로는 이동하지 않음 |
 | `0` | 오늘로 복귀 |
-| `u` | 쿼터 폴링(Quota 탭 전용) |
+| `/` | 포커스된 표에서 검색 |
+| `s` | 포커스된 표의 정렬 순환 |
+| `enter` / `esc` | 선택한 행 열기 / 닫기 |
+| `h` | 소스 선택(Sessions 및 Speed) |
+| `H` | Speed의 소스를 하나씩 순환 |
+| `k` | Speed 계열 선택 |
+| `x` | 측정 윈도우 세트 전환(Speed) |
+| `b` | Speed 버킷 단위 전환 |
+| `u` | 쿼터 폴링(Quota 패널 전용) |
 | `?` | 모든 키를 표시하는 도움말 오버레이 |
 
 </details>
@@ -429,7 +439,7 @@ Tailscale Serve, SSH 포워딩, 명시적 네트워크 바인딩을 통한 원�
 - **기여 캘린더**: Tokens/Cost/Messages 지표가 있는 2D 히트맵 + 3D 등각 뷰
 - **Report 탭**: 본인 에이전트 활동을 주 / 월 / 연초 누적 기준으로 정리한 보고서. 상세 단계별로 공유 가능한 카드를 제공하며, 내보낼 때마다 밝은 색과 어두운 색 PNG 두 장을 함께 씁니다
 - **Quota 탭**: 아홉 제공자의 구독 윈도우 바와 리셋 카운트다운. Codex 윈도우는 로컬 로그로 바로 동작하며, 그 외 대다수 소스에는 옵트인 [라이브 폴링](#쿼터-추적-선택사항)이 필요합니다
-- **터미널 대시보드** *[신규]*: `tokdash tui` — 브라우저 없이 터미널에서 Overview, Report, Quota
+- **터미널 대시보드** *[신규]*: `tokdash tui` — 브라우저 없이 터미널에서 Overview, Sessions, Stats, Report, Speed, Quota, Pricing
 - **Companion 상태표 앱**: macOS 메뉴 막대나 Windows 알림 영역에서 지출과 구독 쿼터 확인 — Windows는 [Microsoft Store](https://apps.microsoft.com/detail/9ppnmpdq8b52) 제공
 - **상태줄 통합**: Claude Code의 상태줄(또는 로컬 HTTP 엔드포인트에 도달할 수 있는 어떤 에이전트든)에 실시간 토큰 사용량 표시기
 - **멀티 서버 뷰**: 설정에서 WSL, macOS, 기타 Tokdash 서버를 추가. 임의의 선택 사용량을 합치되 쿼터는 머신별로 그룹화. [원격 접근](docs/guides/REMOTE_ACCESS.md) 참조.

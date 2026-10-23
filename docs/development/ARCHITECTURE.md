@@ -36,7 +36,7 @@ flowchart LR
 
 **Aggregation.** `compute.py` coordinates parser synchronization, combines stored and source-native data where needed, and calculates date-range usage, costs, and summaries. Its results are the shared data layer used by the presentation surfaces.
 
-**Presentation.** `api.py` exposes usage and quota data through FastAPI routes and serves the WebUI. The Textual TUI first asks a running `tokdash serve` of the same version over HTTP, and only falls back to in-process functions when that fails (`tui/data.py`, `tui/remote.py`). Statusline integrations call `GET /api/usage` for compact usage data.
+**Presentation.** `api.py` exposes usage and quota data through FastAPI routes and serves the WebUI. The Textual TUI first asks a running `tokdash serve` of the same version over HTTP, and only falls back to in-process functions when that fails (`tui/data.py`, `tui/remote.py`). Inside the TUI, `tui/app.py` owns the seven panes (Overview, Sessions, Stats, Report, Speed, Quota, Pricing) and the single range that Overview, Sessions, Report and Speed share; `tui/views.py` builds the pane bodies, `tui/ranges.py` resolves the calendar windows, `tui/charts.py` draws the inline charts, and `tui/terminal.py` settles the colour system before Textual reads it, once, at import. `tui/report.py` and `tui/formatting.py` keep no Textual import so `tokdash report` stays headless. Statusline integrations call `GET /api/usage` for compact usage data.
 
 ## Output speed cache
 

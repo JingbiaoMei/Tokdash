@@ -102,7 +102,7 @@ sempre concordam entre si.
 | Visão | O que é | Quando recorrer a ela |
 |---|---|---|
 | **[WebUI](#webui)** | O painel completo: Overview, Sessions, Stats, Report, Quota, Servers | Você quer o panorama completo, gráficos e detalhamento por nível |
-| **[TUI](#painel-no-terminal-tui)** | `tokdash tui` — Overview, Report e Quota no terminal | Você vive no terminal e quer os números sem navegador |
+| **[TUI](#painel-no-terminal-tui)** | `tokdash tui` — sete painéis no terminal: Overview, Sessions, Stats, Report, Speed, Quota, Pricing | Você vive no terminal e quer os números sem navegador |
 | **[Companion](#app-de-barra-de-status-companion)** | App nativo de barra de menu (macOS) / área de notificação (Windows) | Você quer o gasto do dia e a cota visíveis o dia todo, com o painel fechado |
 | **[Statusline](#statusline)** | Um item de tokens/custo ao vivo dentro da statusline do seu agente | Você quer o contador de custo exatamente onde digita |
 
@@ -162,9 +162,11 @@ combina e compara várias máquinas. Clique em qualquer captura para abrir a
 
 ### Painel no terminal (TUI)
 
-Prefere ficar no terminal? `tokdash tui` abre as abas **Overview**, **Report**
-e **Quota** sem navegador, lendo o mesmo índice local (e o banco de dados
-compartilhado em disco quando um `tokdash serve` está rodando ao lado).
+Prefere ficar no terminal? `tokdash tui` abre **sete painéis** — **Overview**,
+**Sessions**, **Stats**, **Report**, **Speed**, **Quota** e **Pricing** — sem
+navegador, lendo o mesmo índice local (e o banco de dados compartilhado em disco
+quando um `tokdash serve` está rodando ao lado). `F1`–`F7` alternam entre eles;
+`v` lista todos.
 
 <table>
   <tr>
@@ -189,13 +191,24 @@ tokdash tui
 | Tecla | Ação |
 |---|---|
 | `q` | Sair |
-| `r` | Atualizar a aba atual |
-| `1` / `2` / `3` | Alternar para Overview / Report / Quota |
-| `t` `w` `m` `y` `a` | Pular direto para o período (ambas as abas de período; `t`/`a` só no Overview) |
-| `p` | Próxima janela de tempo (ciclo somente para frente) |
-| `[` / `]` | Recuar / avançar um período calendárico inteiro — nunca para o futuro |
+| `r` | Recarregar o painel atual |
+| `F1`–`F7` | Overview / Sessions / Stats / Report / Speed / Quota / Pricing (`1` / `2` / `3` continuam indo para Overview / Report / Quota) |
+| `v` | Escolher um painel na lista |
+| `t` `d` `w` `m` `y` `a` | Definir o intervalo compartilhado: hoje, ontem, esta semana, este mês, este ano, tudo |
+| `p` | Mais intervalos (o **More** da barra); no Stats, um ano anterior |
+| `P` | Stats: um ano posterior, de volta aos últimos 365 dias |
+| `c` | Digitar um intervalo de datas personalizado e exato |
+| `[` / `]` | Mover o intervalo um período inteiro para trás / para frente — nunca para o futuro |
 | `0` | Voltar para hoje |
-| `u` | Sondar a cota (somente aba Quota) |
+| `/` | Pesquisar na tabela em foco |
+| `s` | Alternar a ordenação da tabela em foco |
+| `enter` / `esc` | Abrir a linha selecionada / fechá-la |
+| `h` | Escolher fontes (Sessions e Speed) |
+| `H` | Percorrer as fontes do Speed uma a uma |
+| `k` | Escolher a série do Speed |
+| `x` | Alternar o conjunto de janelas de medição (Speed) |
+| `b` | Alternar a granularidade do bucket do Speed |
+| `u` | Sondar a cota (somente painel Quota) |
 | `?` | Painel de ajuda com todas as teclas |
 
 </details>
@@ -437,7 +450,7 @@ explícito, consulte **[`docs/guides/REMOTE_ACCESS.md`](docs/guides/REMOTE_ACCES
 - **Calendário de contribuições**: heatmap 2D + visão isométrica 3D com métricas de Tokens/Cost/Messages
 - **Aba Report**: relatório da sua própria atividade de agentes por semana, mês e ano corrente, com um cartão compartilhável para cada nível de detalhe. Cada exportação grava um PNG claro e um escuro
 - **Aba Quota**: barras de janela de assinatura com contagem regressiva de reset para nove provedores. As janelas do Codex funcionam direto dos logs locais; a maioria das outras origens exige [polling ao vivo](#acompanhamento-de-cota-opcional) opt-in
-- **Painel no terminal** *[novo]*: `tokdash tui` — Overview, Report e Quota no terminal, sem navegador
+- **Painel no terminal** *[novo]*: `tokdash tui` — Overview, Sessions, Stats, Report, Speed, Quota e Pricing no terminal, sem navegador
 - **App de barra de status Companion**: gasto e cota de assinatura na barra de menu do macOS ou na área de notificação do Windows — para Windows na [Microsoft Store](https://apps.microsoft.com/detail/9ppnmpdq8b52)
 - **Integração com statusline**: um indicador de uso de tokens ao vivo dentro da statusline do Claude Code (ou de qualquer agente que consiga acionar um endpoint HTTP local)
 - **Visões multi-servidor**: adicione servidores Tokdash de WSL, macOS e outros nas Configurações; combine o uso de qualquer seleção mantendo a cota agrupada por máquina. Veja [acesso remoto](docs/guides/REMOTE_ACCESS.md).

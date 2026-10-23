@@ -6,6 +6,17 @@ against `textual` 8.2.8 live on PyPI (installed and exercised in a scratch venv)
 Where this spec disagrees with intuition about an old Textual version, this spec is
 right about 8.2.8 — see §6 "verified Textual 8.x facts".
 
+> **Partly superseded as of v2.7.0.** This document stays as the record of why the TUI
+> is shaped the way it is. Revision 5 (released in v2.7.0) rebuilt the presentation
+> layer on top of it: the TUI now has seven panes — Overview, Sessions, Stats, Report,
+> Speed, Quota and Pricing — rather than the §0 "v1 scope" of Overview + Report;
+> Overview, Sessions, Report and Speed share one range strip that prints its exact
+> dates; surfaces are borderless navy separated by spacing rather than outlined boxes;
+> and the §1 module list gained `tui/views.py`, `tui/ranges.py` and `tui/terminal.py`.
+> What still binds is everything below the paint: in-process data access through
+> `tui/data.py` with route-identical cache keys, the missing-versus-zero rules, and the
+> import boundaries in §1 (`report.py` and `formatting.py` import no Textual).
+
 ## 0. Architecture in one paragraph
 
 Two new commands on the existing flat argparse parser: `tokdash tui` (Textual,

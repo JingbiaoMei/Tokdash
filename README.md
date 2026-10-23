@@ -100,7 +100,7 @@ terminal, the menu bar, and your agent's statusline always agree.
 | View | What it is | Reach for it when |
 |---|---|---|
 | **[WebUI](#webui)** | The full dashboard: Overview, Sessions, Stats, Report, Quota, Servers | You want the whole picture, charts, and drill-down |
-| **[TUI](#terminal-dashboard-tui)** | `tokdash tui` — Overview, Report and Quota in the terminal | You live in the terminal and want the numbers without a browser |
+| **[TUI](#terminal-dashboard-tui)** | `tokdash tui` — seven panes in the terminal: Overview, Sessions, Stats, Report, Speed, Quota, Pricing | You live in the terminal and want the numbers without a browser |
 | **[Companion](#companion-status-bar-app)** | Native menu-bar (macOS) / notification-area (Windows) app | You want today's spend and quota visible all day, dashboard closed |
 | **[Statusline](#statusline)** | A live token/cost item inside your agent's statusline | You want the cost ticker exactly where you type |
 
@@ -159,9 +159,11 @@ Click any screenshot to open the [live demo](https://tokdash.github.io/demo/).
 
 ### Terminal dashboard (TUI)
 
-Prefer to stay in the terminal? `tokdash tui` opens the **Overview**, **Report**,
-and **Quota** tabs without a browser, reading the same local index (and the
-shared on-disk database when a `tokdash serve` is running beside it).
+Prefer to stay in the terminal? `tokdash tui` opens **seven panes** —
+**Overview**, **Sessions**, **Stats**, **Report**, **Speed**, **Quota** and
+**Pricing** — without a browser, reading the same local index (and the shared
+on-disk database when a `tokdash serve` is running beside it). `F1`–`F7` jump
+between them, `v` lists them.
 
 <table>
   <tr>
@@ -186,13 +188,24 @@ tokdash tui
 | Key | Action |
 |---|---|
 | `q` | Quit |
-| `r` | Refresh the current tab |
-| `1` / `2` / `3` | Switch to Overview / Report / Quota |
-| `t` `w` `m` `y` `a` | Jump to a period directly (both period tabs; `t`/`a` are Overview-only) |
-| `p` | Next time window (forward-only cycle) |
-| `[` / `]` | Step one whole calendar period back / forward — never into the future |
+| `r` | Reload the current pane |
+| `F1`–`F7` | Overview / Sessions / Stats / Report / Speed / Quota / Pricing (`1` / `2` / `3` still jump to Overview / Report / Quota) |
+| `v` | Pick a view from the list |
+| `t` `d` `w` `m` `y` `a` | Set the shared range: today, yesterday, this week, this month, this year, all time |
+| `p` | More ranges (the strip's **More**); on Stats, an earlier year |
+| `P` | Stats: a later year, back up to the trailing 365 days |
+| `c` | Type an exact custom date range |
+| `[` / `]` | Step the range one whole period earlier / later — never into the future |
 | `0` | Back to today |
-| `u` | Poll quota (Quota tab only) |
+| `/` | Search the focused table |
+| `s` | Cycle the sort of the focused table |
+| `enter` / `esc` | Open the selected row / close it |
+| `h` | Choose sources (Sessions and Speed) |
+| `H` | Walk Speed's sources one at a time |
+| `k` | Pick the Speed series |
+| `x` | Toggle the timing set (Speed) |
+| `b` | Cycle the Speed bucket |
+| `u` | Poll quota (Quota pane only) |
 | `?` | Help overlay with all keys |
 
 </details>
@@ -424,7 +437,7 @@ Tailscale Serve, SSH forwarding, or an explicit network bind, see
 - **Contribution calendar**: 2D heatmap + 3D isometric view with Tokens/Cost/Messages metrics
 - **Report tab**: a week / month / year-to-date report of your own agent activity, with a shareable card for each tier of detail. Every export writes a light and a dark PNG
 - **Quota tab**: subscription window bars with reset countdowns for nine providers. Codex windows work out of the box from local logs; most other sources need opt-in [live polling](#quota-tracking-optional)
-- **Terminal dashboard** *[new]*: `tokdash tui` — Overview, Report and Quota in the terminal, no browser required
+- **Terminal dashboard** *[new]*: `tokdash tui` — Overview, Sessions, Stats, Report, Speed, Quota and Pricing in the terminal, no browser required
 - **Companion status bar app**: spend and subscription quota from the macOS menu bar or Windows notification area — on the [Microsoft Store](https://apps.microsoft.com/detail/9ppnmpdq8b52) for Windows
 - **Statusline integration**: a live token-usage indicator inside Claude Code's statusline (or any agent that can hit a local HTTP endpoint)
 - **Multi-server views**: add WSL, macOS, and other Tokdash servers in Settings; combine usage across any selection while keeping quota grouped by machine. See [remote access](docs/guides/REMOTE_ACCESS.md).

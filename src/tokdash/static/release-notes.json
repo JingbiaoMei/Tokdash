@@ -1,6 +1,36 @@
 {
-  "current": "2.6.20",
+  "current": "2.7.0",
   "releases": [
+    {
+      "version": "2.7.0",
+      "date": "2026-10-23",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "The terminal dashboard grew from three tabs to seven panes: Overview, Sessions, Stats, Report, Speed, Quota and Pricing. Press F1 to F7 to jump between them, or v to pick one from the list; 1, 2 and 3 still open Overview, Report and Quota. Sessions browses your tools' session history, Stats has its own yearly ladder, and Pricing is a read-only look at the price list the app ships with.",
+            "Speed in the terminal. Rates come from the server's own measurements rather than a client-side guess, so the terminal and the dashboard say the same thing about the same model, and you can pick the series, the timing set and the bucket size from the keyboard while the build reports its own progress.",
+            "A new TOKDASH_TUI_COLOR setting keeps colour on when NO_COLOR is set in your shell, and the top row now says which palette your terminal agreed to, so a greyed-out dashboard is never mistaken for an empty one.",
+            "Pricing DB 2.0.38 adds minimax-m3.1-flash at $0.15 input / $0.60 output per MTok, cache at $0.015 read / $0.15 write, and reprices nothing older."
+          ]
+        },
+        {
+          "type": "changed",
+          "items": [
+            "The terminal dashboard separates its surfaces with spacing and background tone instead of a box around everything, with lavender selected tabs and coloured figures. Rules are kept only where they mean something: table headers, input fields and the focused control.",
+            "Overview and Report share one date range, and the strip above them prints the exact dates it covers instead of a shorthand you had to remember. The activity chart draws only what the window really contains, and says so when a range is too long to chart."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "Numbers no longer turn up under the wrong dates. Changing the range could let an older answer arrive last and paint itself under the new dates; a result is now shown only when it answers for the range you are looking at, and a failed read is reported as failed instead of looking still in progress.",
+            "The layout follows your terminal when you resize it, including when a date or source picker was open at the time, and a long table no longer lets the arrow keys walk a row out of sight.",
+            "Work that a tab started no longer keeps running after you leave it, and two tools that happen to share a display name no longer share one colour badge."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.6.20",
       "date": "2026-10-22",

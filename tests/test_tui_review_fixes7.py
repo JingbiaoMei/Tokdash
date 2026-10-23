@@ -260,3 +260,55 @@ def test_a_repaint_leaves_the_poll_note_alone_until_a_read_answers_it(
         assert "polling" not in str(note.content), str(note.content)
 
     run(api, body, size=WIDE)
+
+
+# --------------------------------------------------------------------- R7-F5 --
+# The section at the foot of the page is sized against the rows its neighbours
+# leave it. It used to be given a FLOOR as well, and a floor is a promise the
+# rest of the page did not agree to: the shortest picture the band will draw is
+# eight rows, and a page holding five draws three rows of it through the status
+# strip. Windows CI met it at 120x36 (a two-row footer, airy table rows); the
+# same arithmetic is met here at 80x24, where it is not a race at all.
+# -------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("size", [(80, 24), (90, 26), (100, 30), (120, 32),
+                                  (120, 36), (140, 40)])
+def test_the_band_at_the_foot_of_the_page_stops_above_the_footer(api, size):
+    """Whatever a terminal is given, the page's last section stays inside it."""
+
+    async def body(app, pilot):
+        await _settled(app, pilot)
+        band = app.query_one("#ov-activity")
+        strip = app.query_one("#status")
+        await settle(pilot, 4)
+        assert band.region.bottom <= strip.region.y, (
+            f"{size}: the band is drawn past the row the footer owns: "
+            f"{band.region} vs strip {strip.region}")
+        # Refusing the PICTURE is allowed when the rows are not there. Losing what
+        # the band is for is not: the window's shape has to be said somewhere.
+        shown = visible(app, "#ov-activity")
+        assert "Token activity" in shown, shown
+
+    run(api, body, size=size)
+
+
+def test_a_page_squeezed_onto_short_rows_keeps_its_last_section_inside(api):
+    """The same promise after the frame shrinks, when the rows are taken back."""
+
+    async def body(app, pilot):
+        await _settled(app, pilot)
+        band = app.query_one("#ov-activity")
+        strip = app.query_one("#status")
+        await settle(pilot, 3)
+        await pilot.resize_terminal(*NARROW)
+        healed = False
+        for _ in range(20):
+            await pilot.pause(0.25)
+            if band.region.bottom <= strip.region.y:
+                healed = True
+                break
+        assert healed, f"{band.region} vs strip {strip.region}"
+        assert "Token activity" in visible(app, "#ov-activity")
+
+    run(api, body, size=WIDE)

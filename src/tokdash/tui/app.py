@@ -4617,7 +4617,14 @@ class TokdashApp(App):
             # reader cannot recover from the table. Hiding the panel instead
             # leaves a hole of navy where the window's shape used to be, and a
             # hole reads as a broken chart rather than a short terminal.
-            if room < 2:
+            #
+            # This branch sizes itself, so it is measured against the rows there
+            # really are and not against the floor: a sentence packed to eight
+            # rows in a page holding four is the same spill as a chart that
+            # needed them, and Windows CI caught it here -- the band nine rows
+            # tall, four of them underneath the status strip.
+            given = self._rows_above_strip(widget)
+            if given < 2:
                 widget.display = False
                 widget.update("")
                 return
@@ -4625,7 +4632,34 @@ class TokdashApp(App):
             widget.update(emit_markup(
                 [[Run(title, "bold")]]
                 + [[Run(part, "muted")] for part in _packed(
-                    spare_caption, room_width, limit=max(1, room - 1),
+                    spare_caption, room_width, limit=max(1, given - 1),
+                    notice=False)]
+            ))
+            self.call_after_refresh(self._refit_activity)
+            return
+        # And then it is measured AGAIN, against the rows there really are. The
+        # floor above buys a picture where a short neighbour has left five rows,
+        # which is the right trade -- but a picture that needs eight of them draws
+        # three of itself through the status strip and off the terminal, and an
+        # auto-height surface does not complain about being that tall. The rows the
+        # page leaves are the ceiling: the band may fill them, and may not pass
+        # them. Given fewer, it keeps its title and its sentence, which is what
+        # the no-picture branch below has always been for.
+        given = self._rows_above_strip(widget)
+        if len(lines) > given:
+            if given < 2:
+                # One row is not an assembly; it is a heading. Say which band this
+                # is and leave the geometry stable -- hiding it here would make the
+                # next measurement disagree, and the picture would flicker.
+                widget.styles.height = "1"
+                widget.update(emit_markup([[Run(title, "bold")]]))
+                self.call_after_refresh(self._refit_activity)
+                return
+            widget.styles.height = "auto"
+            widget.update(emit_markup(
+                [[Run(title, "bold")]]
+                + [[Run(part, "muted")] for part in _packed(
+                    spare_caption, room_width, limit=max(1, given - 1),
                     notice=False)]
             ))
             self.call_after_refresh(self._refit_activity)
@@ -4635,11 +4669,7 @@ class TokdashApp(App):
         # rows the picture happened to need. A surface that stops where its text
         # stops leaves a hole of page background under the chart, and the page
         # reads as a strip of content floating above an empty terminal.
-        spare_room = self._rows_above_strip(widget)
-        if spare_room > len(lines):
-            widget.styles.height = str(max(5, spare_room))
-        else:
-            widget.styles.height = "auto"
+        widget.styles.height = str(max(len(lines), given))
         # The rows this was sized against are the ones the PREVIOUS paint left
         # behind; once the frame settles, redraw for the rows there really are.
         self.call_after_refresh(self._refit_activity)

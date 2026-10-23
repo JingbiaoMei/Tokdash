@@ -71,6 +71,23 @@ def month_of_buckets(api, count=30):
 WIDE = (120, 36)
 
 
+
+async def _agrees(app, pilot, claim, tries: int = 20) -> bool:
+    """Wait for the page to agree with its frame, the way a reader would.
+
+    A page is fitted to the geometry its neighbours END UP taking, and on a loaded
+    runner the last of them lands a pass or two after the handler that started the
+    repaint. Polling the claim asks the question a person asks -- does this page fit
+    the terminal it is in -- instead of betting on how many refreshes a resize costs
+    on one particular machine. Bounded, so a page that never agrees still fails.
+    """
+    for _ in range(tries):
+        if claim():
+            return True
+        await pilot.pause(0.25)
+    return claim()
+
+
 def figures(table) -> list[tuple[str, str]]:
     """(bucket key, rate) for every row, however many columns are on show.
 
@@ -280,18 +297,31 @@ def test_a_widened_window_hands_back_the_rows_the_frame_was_owing(api):
 
         # 1. The strip re-chose its own form for the width it now has.
         assert "q quit" in str(strip.content), str(strip.content)
-        # 2. The pane was handed the rows the frame had been drawing over.
-        room = strip.region.y - pane.region.y
-        assert pane.region.height == room, (pane.region.height, room)
-        # 3. The band those rows buy is on the screen, not below the fold.
+        # 2. The pane was handed the rows the frame had been drawing over, and
+        # 3. the band those rows buy is on the screen rather than below the fold.
+        #    The two settle together: the band is sized against the rows the
+        #    sections above it END UP taking, and on a loaded host the last of them
+        #    lands after the resize handler has already run -- which is the state
+        #    Windows CI caught, the band drawn on past the footer's row.
         act = app.query_one("#ov-activity")
-        assert act.region.y + act.region.height <= strip.region.y, act.region
+        assert await _agrees(app, pilot, lambda: pane.region.height
+                             == strip.region.y - pane.region.y), (
+            pane.region, strip.region)
+        assert await _agrees(app, pilot,
+                             lambda: act.region.bottom <= strip.region.y), (
+            "the activity band is drawn past the row the footer owns: "
+            f"{act.region} vs strip {strip.region}")
         assert "Token activity" in visible(app, "#ov-activity"), visible(app, "#ov-activity")
         # 4. Squeezed back, it gives the rows up rather than spilling.
         await pilot.resize_terminal(80, 24)
         await settle(pilot, 5)
         assert "q quit" not in str(strip.content), str(strip.content)
-        assert pane.region.height == strip.region.y - pane.region.y
+        assert await _agrees(app, pilot, lambda: pane.region.height
+                             == strip.region.y - pane.region.y), (
+            pane.region, strip.region)
+        assert await _agrees(app, pilot,
+                             lambda: act.region.bottom <= strip.region.y), (
+            act.region, strip.region)
         lines = [line for line in str(strip.content).splitlines()]
         assert all(cell_len(line) <= 80 for line in lines), lines
 

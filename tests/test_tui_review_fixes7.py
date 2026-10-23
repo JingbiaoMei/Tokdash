@@ -38,6 +38,12 @@ WIDE = (120, 36)
 NARROW = (80, 24)
 
 
+async def press(app, pilot, key: str) -> None:
+    """A tab key, with the pause the pane needs to have started its read."""
+    await pilot.press(key)
+    await settle(pilot, 1)
+
+
 async def _settled(app, pilot, pane: str = "overview") -> None:
     for _ in range(40):
         if app._state.get(pane) == "ok" and not app._open_loads.get(pane):
@@ -205,3 +211,52 @@ def test_a_new_size_gets_its_own_settle_allowance(api):
                    for line in lines), lines
 
     run(api, body, size=NARROW)
+
+
+# --------------------------------------------------------------------- R7-F3 --
+# A repaint is not a read. It may redraw every figure the snapshot holds, and it
+# may not answer a question the snapshot was never asked -- which is what the
+# poll's line does: it says what the LAST POLLS did, from the reader's own
+# keystroke, and nothing in the accounts file knows about it.
+# -------------------------------------------------------------------------- #
+
+
+def test_a_repaint_leaves_the_poll_note_alone_until_a_read_answers_it(
+    api, monkeypatch
+):
+    """Polling, then a repaint: the reader still sees the poll's own sentence."""
+    import tokdash.cli as cli_mod
+
+    release = threading.Event()
+    calls = {"n": 0}
+
+    def held(**kwargs):
+        calls["n"] += 1
+        assert release.wait(10.0), "the poll was never released"
+        return {"snapshots": 1, "inserted": 1, "network_sources": []}
+
+    monkeypatch.setattr(cli_mod, "_quota_poll_once", held)
+
+    async def body(app, pilot):
+        await press(app, pilot, "3")
+        await _settled(app, pilot, "quota")
+        note = app.query_one("#quota-note")
+        await pilot.press("u")
+        await settle(pilot, 2)
+        assert "polling" in str(note.content), str(note.content)
+
+        # The two things a running app does to a pane that are not a read.
+        app._repaint_pane("quota")
+        await settle(pilot, 2)
+        assert "polling" in str(note.content), (
+            "a repaint replaced the poll's own line with a derived banner: "
+            f"{note.content}")
+
+        release.set()
+        await settle(pilot, 8)
+        await _settled(app, pilot, "quota")
+        assert calls["n"] == 1, calls
+        # A READ is what retires the sentence, and the reload's banner says so.
+        assert "polling" not in str(note.content), str(note.content)
+
+    run(api, body, size=WIDE)

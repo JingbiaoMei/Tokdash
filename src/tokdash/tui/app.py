@@ -938,6 +938,11 @@ class TokdashApp(App):
         # Same ledger for Overview's activity picture: the basis it was sized on.
         self._activity_painted = (-1,)
         self._polling = False
+        # The poll's own sentence, verbatim, for as long as it is the truth. A
+        # repaint of the Quota pane re-applies it instead of deriving the banner
+        # from a snapshot that cannot know about the poll; the next READ of the
+        # quota state clears it, because that read is what makes it stale.
+        self._quota_note_hold: str | None = None
         # Which row's detail #sp-detail is holding ("comparison" | "bucket" |
         # "hour", or None for the view's own caption). A pane repaints on a
         # snapshot update, a resize and the row-ledger refit; without this, every
@@ -2135,7 +2140,7 @@ class TokdashApp(App):
             except Exception as exc:  # noqa: BLE001 — a failed poll is a note
                 if gen == self._gen:
                     err = getattr(exc, "error", exc)
-                    self.query_one("#quota-note", Static).update(
+                    self._note_poll(
                         "[red]poll failed: " + str(err).replace("[", "\\[") + "[/]"
                     )
                 return
@@ -2143,11 +2148,11 @@ class TokdashApp(App):
                 return
             if isinstance(result, dict) and result.get("disabled"):
                 # Never a fake "ok": tracking off means say-so and stop.
-                self.query_one("#quota-note", Static).update(
+                self._note_poll(
                     emit_markup([[Run("quota tracking disabled — tokdash quota consent", "warn")]])
                 )
                 return
-            self.query_one("#quota-note", Static).update("poll ok")
+            self._note_poll("poll ok")
             self._load_quota(True)
         finally:
             self._polling = False
@@ -2259,6 +2264,9 @@ class TokdashApp(App):
             self._stats_payload = None
         elif pane == "quota":
             self._quota_history_val = None
+            # A read in flight outranks the last poll's sentence: whatever it held
+            # is about to be either confirmed or contradicted by newer snapshots.
+            self._quota_note_hold = None
             # The account detail is painted from the same snapshot as the table:
             # left standing, it would describe a poll that no longer answers.
             self._quota_detail = None
@@ -3515,8 +3523,13 @@ class TokdashApp(App):
         if self._active_pane() != "quota" or self._polling:
             return
         self._polling = True
-        self.query_one("#quota-note", Static).update("polling…")
+        self._note_poll("polling…")
         self._poll_quota()
+
+    def _note_poll(self, text: str) -> None:
+        """Say what the poll said, and go on saying it until a read contradicts it."""
+        self._quota_note_hold = text
+        self.query_one("#quota-note", Static).update(text)
 
     # ------------------------------------------------------------ widgets --
 
@@ -6251,10 +6264,28 @@ class TokdashApp(App):
             glyphs=_safe_glyphs(),
             labels=TOOL_LABELS,
         )
+        # While a poll is running the note belongs to the POLL. A repaint -- a
+        # resize, a re-fit landing after a load, a tab coming back -- used to write
+        # the state banner over "polling…" and over a poll's own result a moment
+        # after it landed, which on a slow runner meant the one piece of feedback
+        # a poll gives was gone before the reader looked. The table and the detail
+        # below are still repainted; only the sentence a repaint cannot know is
+        # left alone, and the reload a successful poll starts writes it back.
         segs = list(banner)
         if note:
             segs.append([Run(note, "muted")])
-        self.query_one("#quota-note", Static).update(emit_markup(segs))
+        # The note is the one line on this pane a repaint does not own. What the
+        # reader pressed "u" to learn is whether the POLLS worked -- "polling…",
+        # "poll ok", a failure, consent missing -- and none of it is derivable
+        # from the snapshot being painted. So a repaint re-applies the poll's own
+        # sentence for as long as it stands, and lets the derived banner back the
+        # moment a read lands that makes it stale. Before this, any repaint at all
+        # -- a resize, a re-fit landing after a load, the tab coming back -- could
+        # put the pre-poll banner over it, and on a slow runner the one piece of
+        # feedback a poll gives was gone before the reader looked.
+        note_w = self.query_one("#quota-note", Static)
+        note_w.update(emit_markup(segs) if self._quota_note_hold is None
+                      else self._quota_note_hold)
         table = self.query_one("#quota-table", DataTable)
         # Every quota row is a handful of words ("62.3% left", "in 1d 23h") that
         # cannot be abbreviated and should not be cropped: a cut "unlimi…" reads

@@ -21,20 +21,34 @@ PY="${PY:-python3}"
   tests/test_tui_ranges.py tests/test_tui_remote.py tests/test_tui_report.py \
   tests/test_tui_review_fixes.py tests/test_tui_review_fixes2.py \
   tests/test_tui_review_fixes3.py tests/test_tui_review_fixes4.py \
+  tests/test_tui_review_fixes5.py \
   tests/test_tui_layout_pass.py tests/test_tui_terminal_colour.py -q "$@"
 status=$?
 
-repo="$(git rev-parse --show-toplevel 2>/dev/null)"
-main_root="${repo}"
-while [ -n "$main_root" ] && [ ! -d "$main_root/output/tui-rev5-review" ]; do
-  main_root="$(dirname "$main_root")"
-done
-[ -n "$main_root" ] || main_root="/mnt/h/Developing/Agent/Tokdash_Project/tokdash"
+# The reviewers' regression files, run one pytest process each. They all share
+# the module basename, so they cannot share a run. They live under output/ of
+# the MAIN checkout -- this is a linked worktree -- until a cleanup sweep moves
+# them into docs/internal/output-archive/, so both roots are searched.
+# The MAIN checkout, not this linked worktree: its .git is the shared one, and
+# walking up from "." instead (an earlier version, without a bound at "/") spun
+# forever the day a review folder moved out from under it.
+main_root="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+main_root="${main_root%/.git}"
+[ -d "$main_root" ] || main_root="/mnt/h/Developing/Agent/Tokdash_Project/tokdash"
 
-for dir in tui-rev5-review tui-rev5-review2 tui-rev5-review3 tui-rev5-review4; do
-  file="$main_root/output/$dir/test_regressions.py"
-  [ -f "$file" ] || continue
-  echo "--- $dir ---"
-  "$PY" -m pytest "$file" -q --tb=line || status=1
+found=0
+for dir in tui-rev5-review tui-rev5-review2 tui-rev5-review3 tui-rev5-review4 \
+           tui-rev5-review5; do
+  for root in "$main_root/output" "$main_root/docs/internal/output-archive"; do
+    file="$root/$dir/test_regressions.py"
+    [ -f "$file" ] || continue
+    found=$((found + 1))
+    echo "--- $dir ---"
+    "$PY" -m pytest "$file" -q --tb=line || status=1
+  done
 done
+if [ "$found" = "0" ]; then
+  echo "no reviewer regression files found under $main_root -- gate ran without them" >&2
+  status=1
+fi
 exit $status

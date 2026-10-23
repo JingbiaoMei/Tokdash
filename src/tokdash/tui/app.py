@@ -45,6 +45,7 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.events import Key, Resize
 from textual.screen import ModalScreen
 from textual.worker import WorkerCancelled
@@ -98,7 +99,7 @@ from .formatting import (
     tool_label,
     tool_tint,
 )
-from .charts import column_chart, quota_detail_rows, quota_table
+from .charts import column_chart, column_chart_needs, quota_detail_rows, quota_table
 from .terminal import CEILING_MONO, palette as terminal_palette
 from .ranges import (
     ALL_PERIOD,
@@ -886,6 +887,19 @@ class TokdashApp(App):
         self._payload_scope: dict[str, tuple | None] = dict.fromkeys(PANI, None)
         self._db_line: str | None = None
         self._fit_pending = False  # a pane re-fit is already queued
+        # What the last pane fit was measured AGAINST: the screen, and the row
+        # the status strip owned when it ran. A resize hands the handler the new
+        # size BEFORE the layout has moved anything, so a fit can measure the frame
+        # being replaced and conclude, wrongly, that nothing needs doing. When this
+        # stamp moves the frame is still settling, so the fit runs once more.
+        self._fit_stamp: tuple | None = None
+        # Rows the status strip was WRITTEN with: one, or two when the keys
+        # and the data line would not share a row. The strip is the last thing
+        # on the screen, so this says which row it owns -- and therefore how
+        # tall a pane may be -- without waiting for a layout that has not
+        # happened yet. See _fit_panes.
+        self._strip_rows: int | None = None
+        self._fit_rearms = 0  # bounded, so two sizes cannot chase each other
         # Rows #sp-series was holding when the Speed picture was last drawn, and
         # the height of the picture that went in. The first paint of a pane runs
         # before Textual has any geometry, so the picture is sized from an
@@ -893,6 +907,12 @@ class TokdashApp(App):
         # repaints once when the estimate was wrong. See _speed_series_rows.
         self._sp_series_painted = (-1,)
         self._sp_chart_rows = 0
+        # How many buckets the series box is drawing, so the picture and the
+        # table beside it can be asked whether they BOTH fit (see
+        # _speed_chart_geometry), and the geometry each pane's body was last
+        # fitted to, so a resize can refit it once the layout settles.
+        self._sp_chart_buckets = 0
+        self._body_fitted: dict[str, tuple] = {}
         # Does the mode now on screen draw a picture beside/above its rows?
         self._sp_chart_wanted = False
         self._sp_chart_budget = 0
@@ -2282,7 +2302,12 @@ class TokdashApp(App):
         self._paint_loading(pane)
 
     def _repaint_pane(self, pane: str) -> None:
-        """Repaint one pane from the payloads already in hand (no new reads)."""
+        """Repaint one pane from the payloads already in hand (no new reads).
+
+        The geometry the body was fitted to is recorded on the way out, so the
+        pass that runs after the layout settles can tell a repaint that refitted
+        the page from a repaint that fitted it against the size being replaced.
+        """
         {"overview": self._paint_overview,
          "sessions": self._paint_sessions,
          "stats": self._paint_stats,
@@ -2290,6 +2315,15 @@ class TokdashApp(App):
          "speed": self._paint_speed,
          "quota": self._paint_quota,
          "pricing": self._paint_pricing}.get(pane, lambda: None)()
+        self._body_fitted[pane] = self._body_stamp(pane)
+
+    def _body_stamp(self, pane: str) -> tuple:
+        """The geometry a pane's BODY was laid out at: cells, rows, density."""
+        try:
+            box = self.query_one(f"#pane-{pane}")
+        except NoMatches:  # painted before compose (early failure paths)
+            return ()
+        return (box.content_region.width, box.content_region.height, self._compact)
 
     def _maybe_reread(self, pane: str, gen: int) -> None:
         if gen != self._gen:
@@ -2384,6 +2418,7 @@ class TokdashApp(App):
                         computing, cache, db) if part)
         status = self.query_one("#status", Static)
         if cell_len(line) <= room:
+            self._strip_rows = 1
             status.update(line)
         else:
             # Too wide for one row: the keys keep the first row whole and the
@@ -2397,6 +2432,7 @@ class TokdashApp(App):
                 second = "  ".join(escape(part) for part in parts if part)
                 if cell_len(second) <= room:
                     break
+            self._strip_rows = 2
             status.update(Text.from_markup(f"{escape(first)}\n{second}"))
         # The strip's height is now decided, and the panes are sized against the
         # space left below the frame -- so this is the moment to hand them back
@@ -2419,9 +2455,24 @@ class TokdashApp(App):
         panes that own their own window (Stats, Quota, Pricing), so the overlap
         belongs to the frame as it stands, not to the widget tree.
         """
-        limit = self.query_one("#status", Static).region.y
+        # The row the strip owns is WORKED OUT, not waited for. Measuring it asks
+        # the layout for the frame as it stands, and a resize arrives before that
+        # layout: the handler would measure the strip where it USED to sit, hand
+        # the panes the old frame's height, and conclude that nothing needed
+        # doing. The strip is the screen's last widget and it is written with a
+        # known number of rows, so the row is the screen's height minus those.
+        measured = self.query_one("#status", Static).region.y
+        rows = self._strip_rows
+        limit = (self._pane_screen_height() - rows) if rows else measured
         if limit <= 0:
             return  # nothing is laid out yet; a resize or the next paint retries
+        # What the LAST fit saw, panes included: a height asked of a widget is
+        # not the height it has until the next layout, and the rows that land
+        # then are the rows a body has to be re-fitted to.
+        stamp = (self._pane_screen_width(), self._pane_screen_height(), limit,
+                 tuple(sorted(pane.region.height for pane in self.query(TabPane))))
+        moved = stamp != self._fit_stamp
+        self._fit_stamp = stamp
         changed = False
         for pane in self.query(TabPane):
             if pane.region.height == 0:
@@ -2435,12 +2486,17 @@ class TokdashApp(App):
             if pane.region.height != room:
                 pane.styles.height = f"{room}"
                 changed = True
-        if changed and not self._fit_pending:
-            # The strip's own height is only known once the frame has been laid
-            # out with the text just written into it, so the first measurement
-            # can be one row out. One more pass after the refresh sees the
-            # settled frame; the second pass changes nothing, so it stops.
+        if not (changed or moved):
+            self._fit_rearms = 0  # settled: a later disagreement starts fresh
+        elif not self._fit_pending and self._fit_rearms < self._FIT_MAX_REARMS:
+            # Either a pane's height moved, or the frame this fit measured is not
+            # the frame that got laid out: the strip's row, and so every pane's
+            # height, is only known once the frame has been laid out with the text
+            # just written into it. Re-measure after the refresh -- a settled frame
+            # takes the branch above, so the chain stops. The bound is the brake on
+            # two widgets that each resize the other.
             self._fit_pending = True
+            self._fit_rearms += 1
             self.call_after_refresh(self._fit_after_refresh)
 
     def _speed_series_stale(self) -> bool:
@@ -2470,6 +2526,10 @@ class TokdashApp(App):
     def _fit_after_refresh(self) -> None:
         self._fit_pending = False
         self._fit_panes()
+        # Rows handed back to a pane are rows its body was never fitted to: the
+        # card grid, the table's rows and the band at the foot of the scroll were
+        # all sized for the shorter box.
+        self._refit_body()
 
     def _tick_status(self) -> None:
         if self._load_started:
@@ -3137,7 +3197,34 @@ class TokdashApp(App):
             # denominator, in the one view that may not have one.
             budget = min(len(packed), max(budget, ceiling - len(out)))
         out += [[Run(part, "muted")] for part in packed[:budget]]
-        return out[:ceiling]
+        return self._fit_detail_rows(out, ceiling)
+
+    @staticmethod
+    def _fit_detail_rows(rows: list[list[Run]], ceiling: int) -> list[list[Run]]:
+        """Cut the block to ``ceiling`` rows without ever cutting a warning.
+
+        A plain slice was the last thing to run, and it cut from the bottom -- which
+        is where the amber line sits. At the width that line matters most the
+        identity sentence above it wraps to two rows, the slice lands on the warning,
+        and what is left reads as a finished caption over rows that are NOT the
+        series the reader asked for: the misattribution the line exists to prevent.
+        So the block gives way from the bottom, a warn row is passed over, and only a
+        block made of nothing but warnings is allowed to stand past its ceiling.
+        """
+        if len(rows) <= ceiling:
+            return rows
+        kept = list(rows)
+        for index in range(len(kept) - 1, -1, -1):
+            if len(kept) <= ceiling:
+                break
+            if not any(run.style == "warn" for run in kept[index]):
+                del kept[index]
+        return kept[:ceiling]
+
+    #: Times a pane re-fit may re-measure before the frame is accepted as final.
+    #: Three is what a resize needs: the pass that measures the old frame, the
+    #: pass that hands the panes their rows, and the pass that agrees they settled.
+    _FIT_MAX_REARMS = 3
 
     #: Rows the opened-row explanation may spend. The painter and the sizing
     #: pass must agree on this number, or the table is measured against a
@@ -3511,23 +3598,66 @@ class TokdashApp(App):
         """
         self._repaint_chrome()
         self._fit_panes()  # the strip's share of the screen just changed shape
-        pane = self._active_pane()
-        if self._state[pane] == "ok":
-            self._repaint_pane(pane)
-        # And the chrome again once the layout has landed. The resize event
-        # arrives with the app's new size, but the labels it chooses are fitted
-        # against geometry the layout pass has not produced yet, so a window
-        # dragged WIDE keeps the labels it chose while it was narrow: "d Yest.",
-        # and a nav row with no keys on it, in a terminal with room for both.
-        # Measured on the live tmux session, where the letters only came back
-        # when something else happened to repaint them.
+        # Guarded, for the same reason the deferred pass below is: a pane with a
+        # load in flight is showing "computing…", and a repaint here would put
+        # the previous window's figures back over a table its reload had just
+        # cleared. A pane that IS painted re-fits to the new size -- which at
+        # this instant means NO re-fit, since nothing has moved yet; the honest
+        # re-fit is the one that runs once the layout lands.
+        self._refit_body()
+        # And the same again once the layout has landed. The resize event
+        # arrives with the app's new size, but every measurement below it -- the
+        # tab row's key chips, the strip's window names, the card band's row
+        # count, a table's column set -- is taken from widgets that still have
+        # the geometry being replaced. Measured on the live tmux session: the
+        # nav row's letters only came back when something else happened to
+        # repaint them, and a 120x36 Overview squeezed to 80 columns kept 112
+        # cells of card inside a 78-cell widget, so "450.0K" arrived as "450".
         #
-        # Chrome only. A pane's own repaint stays on the synchronous path above
-        # and happens ONCE: a second one, late, is a repaint that a pending
-        # Speed read has to survive, and the panes that name the series a reader
-        # picked (rather than the one a snapshot lists first) cannot tell a
-        # re-fit from a relabel. tests/test_tui_review_fixes4.py pins both halves.
-        self.call_after_refresh(self._repaint_chrome)
+        # What follows is GUARDED at every step, never an unconditional second
+        # pass: a pane painted at the size it was actually given is left alone.
+        # An unconditional repaint would repaint the Speed pane for every resize
+        # -- a repaint the panes that name the series a reader picked (rather
+        # than the one a snapshot lists first) cannot tell from the relabel they
+        # refuse. tests/test_tui_review_fixes4.py pins that.
+        self.call_after_refresh(self._refit_after_layout)
+
+    def _refit_after_layout(self) -> None:
+        """Re-take the three things that are fitted to a SIZE, not to content.
+
+        Runs after the refresh, because the settled measurements are the only
+        honest ones: the labels (a tab row that chose its key chips while the
+        window was narrow), the status strip (whose key tail is dropped at eighty
+        columns, and whose second row then costs every pane a row it did not
+        lose), and the body, whose card grid and column set were chosen at
+        whatever width the widgets had the last time they were painted.
+
+        The strip is the fiddly one: rewriting it moves the row that every pane
+        height is measured against, and that lands on the NEXT layout pass. The
+        chain is therefore carried by _fit_panes, which re-measures until the
+        frame stops moving and hands the settled rows straight back here.
+        """
+        self._repaint_chrome()
+        self._update_status()  # re-wraps the strip, then re-fits the panes
+        self._refit_body()
+
+    def _refit_body(self) -> None:
+        """Refit the page on screen, but only if its box is not the one it fitted.
+
+        Two things stop it. A pane that never painted has no stamp to compare;
+        and a pane with a LOAD IN FLIGHT is showing "computing…", not a payload --
+        its state still says "ok" (that is how the loading copy knows it is a
+        re-load rather than a first run), so the state is not the question. The
+        load is. Repainting across it would pour the retained payload back over a
+        table the reload had just cleared, which is the one thing a reader can
+        see: figures under a "computing" line, for a window that has not answered.
+        """
+        pane = self._active_pane()
+        if self._state[pane] != "ok" or self._open_loads.get(pane):
+            return
+        if self._body_fitted.get(pane) == self._body_stamp(pane):
+            return
+        self._repaint_pane(pane)
 
     def _repaint_chrome(self) -> None:
         """Re-choose the labels whose shape depends on the screen's size.
@@ -5144,6 +5274,7 @@ class TokdashApp(App):
             return
         self._paint_speed_chart_hidden()
         self._sp_chart_wanted = False
+        self._sp_chart_buckets = 0
         table = self.query_one("#sp-table", DataTable)
         result = views.speed_rows(payload, lens=self._sp_lens, labels=TOOL_LABELS)
         width = self._pane_width("speed")
@@ -5206,7 +5337,12 @@ class TokdashApp(App):
         for row in result["rows"]:
             self._add_row(table, [
                 ("model", escape(row["model"])),
-                ("harness", _source_cell(row.get("harness"), row.get("harness"))),
+                # ID for the colour, LABEL for the word. Handing the palette the
+                # display name made "Codex" hash to another tool's hue, so the
+                # same harness wore mint in Overview and amber here -- and the
+                # colour is the one thing that lets the eye follow a source from
+                # one pane to the next.
+                ("harness", _source_cell(row.get("source_id"), row.get("harness"))),
                 ("sources", _source_cell(
                     str(row.get("sources") or "").split(",")[0] or None,
                     row.get("sources"),
@@ -5413,16 +5549,33 @@ class TokdashApp(App):
         """(side_by_side, cells the chart may draw into).
 
         Beside the table when the table still has room to name its own columns
-        after the chart takes its share; above it otherwise. The estimate is made
-        here rather than asked of the layout because the paint runs BEFORE the
-        layout pass that would answer: asking now returns the width of the
-        arrangement being replaced.
+        after the chart takes its share AND the picture can stand its buckets in
+        that share; above it otherwise. The estimate is made here rather than
+        asked of the layout because the paint runs BEFORE the layout pass that
+        would answer: asking now returns the width of the arrangement being
+        replaced.
+
+        The bucket count is the second half of the question, and a month of daily
+        buckets is what asks it: thirty of them want fifty-nine cells (one per
+        bucket plus the air between them), and a pane 120 wide has room for the
+        rows and about fifty for the picture. Drawing them anyway is not a
+        picture that fits -- it either pushes the numeric table sideways, where
+        the responses behind a rate fall off the screen, or it merges, drops or
+        re-buckets buckets, and the gaps between measurements (the one thing only
+        the picture says well) go with them. Above the rows the same thirty
+        columns have the whole pane to stand in, so that is where they go.
         """
         pane = self._pane_width("speed")
         # What the rows need to name a bucket, its rate, the responses behind it
         # and the coverage under the rate; anything less and the picture would be
         # bought with a table that cannot identify its own rows.
         split = pane >= (_SPEED_TABLE_CELLS + 44)
+        if split and self._sp_chart_buckets:
+            # The same estimate the renderer will be handed: the box loses three
+            # cells of its own padding to its text (see _paint_speed_chart).
+            beside = max(16, max(24, pane - _SPEED_TABLE_CELLS) - 3)
+            if column_chart_needs(self._sp_chart_buckets) > beside:
+                split = False
         return split, max(24, pane - (_SPEED_TABLE_CELLS if split else 4))
 
     def _speed_table_budget(self, *, reserve: int = 0) -> int:
@@ -5692,8 +5845,13 @@ class TokdashApp(App):
 
         # Shorten the PICTURE before shortening anything that says a number:
         # the bars show where the series is empty, and both the note strip and
-        # the table already carry the figures a caption would repeat. The loop
-        # ends at the first height whose whole assembly fits the box.
+        # the table already carry the figures a caption would repeat. So the
+        # loop walks the picture DOWN and takes the first height that leaves a
+        # row for the caption -- a column of bars with no line under it is a
+        # shape that never had to say whether its blanks were gaps. A picture
+        # with no room to say anything at all is held back as the last answer,
+        # used only when no shorter one can pay for its own explanation.
+        tall: list[list[Run]] | None = None
         for height in range(
             min(4 if self._compact else 12, max(2, budget - 2)), 1, -1
         ):
@@ -5723,13 +5881,20 @@ class TokdashApp(App):
                 lines += [[Run(part, "muted")]
                           for part in _packed(caption_of(drawn), width,
                                               limit=spare, notice=False)]
-            if len(lines) <= budget:
-                break
+            if len(lines) > budget:
+                continue
+            if spare <= 0:
+                if tall is None:
+                    tall = lines
+                continue
+            break
         else:
-            self._sp_chart_rows = 0
-            chart.display = False
-            chart.update("")
-            return
+            if tall is None:
+                self._sp_chart_rows = 0
+                chart.display = False
+                chart.update("")
+                return
+            lines = tall
         self._sp_chart_rows = len(lines)
         chart.display = True
         chart.update(emit_markup(lines))
@@ -5779,10 +5944,14 @@ class TokdashApp(App):
         series, _label = self._speed_trend_selection()
         trend = views.speed_trend_rows(self._sp_trend or {}, key=series, lens=self._sp_lens)
         stream = self._sp_lens == "stream"
+        # Told to the arrangement before the columns are fitted: the buckets the
+        # route returned decide whether the picture can stand BESIDE these rows
+        # at all, and the fit has to be asked at the width that answer implies.
+        self._sp_chart_buckets = len(trend["rows"])
         # The column budget depends on whether the picture stands BESIDE these
         # rows or above them, and the paint runs before the layout that would
-        # answer, so the same estimate the box will use is taken here.
-        split_now = self._speed_chart_geometry()[0]
+        # answer -- so it is asked through _speed_table_budget, which is where
+        # the fit below actually gets its cells.
         held = self._held_key(table)
         # BESIDE the picture the table has roughly half the pane, and what it
         # must never lose is the bucket, the rate the bars are drawn from and the
@@ -5854,6 +6023,7 @@ class TokdashApp(App):
         table = self.query_one("#sp-table", DataTable)
         hours = views.speed_hour_rows(self._sp_hours or {}, lens=self._sp_lens)
         combined = self._sp_lens == "combined"
+        self._sp_chart_buckets = len(hours["rows"])
         held = self._held_key(table)
         spec = [
             # The hour axis IS the identity column, so it never goes; the second

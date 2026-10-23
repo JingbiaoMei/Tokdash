@@ -171,6 +171,16 @@ _MAX_COLUMN = 9
 _GAP = 1
 
 
+def column_chart_needs(count: int) -> int:
+    """Cells a picture of ``count`` buckets asks for: one cell each, plus air.
+
+    The caller that has to choose between two arrangements (the Speed pane's
+    picture beside its table, or above it) asks this instead of guessing from
+    the bucket count, so the two cannot drift apart about what "fits" means.
+    """
+    return count if count < 2 else 2 * count - 1
+
+
 def column_chart(
     entries: list[dict],
     *,
@@ -208,9 +218,19 @@ def column_chart(
     texts = [str(e.get("text") or "") for e in rows]
     keys = [str(e.get("label") or "") for e in rows]
     count = len(rows)
-    gap = _GAP if count > 1 else 0
+    # The columns ARE the buckets the route returned: never merged, never
+    # dropped, never narrower than one cell. So when the box cannot hold both
+    # the column and the air beside it, the air is what gives way -- and when
+    # even one cell per bucket overflows the box there is no picture to draw
+    # there at all. Saying so is the honest answer: the caller hides the chart
+    # and the table it was squeezed against keeps every figure.
+    gap = _GAP if count > 1 and column_chart_needs(count) <= width else 0
     col_w = max(1, min(_MAX_COLUMN, (width - gap * (count - 1)) // count))
     used = count * col_w + gap * (count - 1)
+    if used > width:
+        return {"available": False, "lines": [], "columns": count,
+                "column_width": 0, "used_width": 0,
+                "note": f"{count} buckets need {count} cells, not {width}"}
     full, ramp = ((_BLOCK_FULL, _BLOCK_RAMP) if glyphs != "ascii"
                   else (_ASCII_FULL, _ASCII_RAMP))
     peak = max((v for v in values if v is not None), default=0.0)

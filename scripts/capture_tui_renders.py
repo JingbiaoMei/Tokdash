@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import datetime as dt
 import os
 import sys
 from pathlib import Path
@@ -76,8 +77,14 @@ def screen_lines(app) -> list[str]:
 
 
 def capture(name: str, size: tuple[int, int], body, *, initial: str = "today",
-            mono: bool = False) -> None:
-    """One pilot run, one frame, two files."""
+            mono: bool = False, resize_to: tuple[int, int] | None = None) -> None:
+    """One pilot run, one frame, two files.
+
+    ``resize_to`` drags the window AFTER the pane has painted at ``size`` and the
+    frame is taken at the NEW size: the pair of captures is the resize itself,
+    which is the only honest way to show that a squeezed page re-fitted rather
+    than kept the column set and the card grid it chose for another window.
+    """
     if mono:  # a real terminal asks for this with NO_COLOR=1
         os.environ["NO_COLOR"] = "1"
     else:
@@ -91,6 +98,9 @@ def capture(name: str, size: tuple[int, int], body, *, initial: str = "today",
             if body is not None:
                 await body(app, pilot)
                 await fx.settle(pilot, 2)
+            if resize_to is not None:
+                await pilot.resize_terminal(*resize_to)
+                await fx.settle(pilot, 5)
             if mono:
                 app.no_color = True  # drives the {nocolor} CSS variable as well
                 app._repaint_pane(app._active_pane())
@@ -100,7 +110,8 @@ def capture(name: str, size: tuple[int, int], body, *, initial: str = "today",
                 "\n".join(row.rstrip() for row in rows) + "\n", encoding="utf-8"
             )
             (OUT / f"{name}.svg").write_text(app.export_screenshot(), encoding="utf-8")
-            print(f"{name:38} {size[0]:3}x{size[1]:<3} {len(rows)} rows", flush=True)
+            drawn = resize_to or size
+            print(f"{name:38} {drawn[0]:3}x{drawn[1]:<3} {len(rows)} rows", flush=True)
 
     # Not asyncio.run(): its Runner.close() waits for the default thread
     # executor, and the app's off-loop reads (a cold usage scan on a fresh data
@@ -761,6 +772,55 @@ def rich_speed_hour() -> dict:
     }
 
 
+def rich_speed_trend_month() -> dict:
+    """A MONTH of daily buckets: the series no side-by-side picture can hold.
+
+    Thirty of them want fifty-nine cells -- one column each plus the air between
+    them -- and Speed 120 columns wide has room for the rows and about fifty for
+    the picture. The rates walk, one day answers nothing at all (a gap) and one
+    answers a measured zero, so the frame also shows whether the arrangement
+    that gives up its columns kept the two states distinguishable.
+    """
+    # The window the capture selects: Last Month, with today fixed at 2026-10-18.
+    days = [(dt.date(2026, 9, 1) + dt.timedelta(days=i)).isoformat() for i in range(30)]
+    stream, combined, calls, par = [], [], [], []
+    for index, day in enumerate(days):
+        weekend = dt.date.fromisoformat(day).weekday() >= 5
+        if index == 11:                      # nothing timed in that bucket
+            stream.append(None)
+            combined.append(None)
+            calls.append(0)
+            par.append(None)
+            continue
+        base = 190.0 + 26.0 * (index / 29.0) - (48.0 if weekend else 0.0)
+        if index == 24:                      # a bucket that measured a zero
+            stream.append(0.0)
+            combined.append(0.0)
+            calls.append(4)
+            par.append(1.0)
+            continue
+        stream.append(round(base, 1))
+        combined.append(round(base * 1.24, 1))
+        calls.append(96 - (58 if weekend else 0) + index)
+        par.append(1.5 if not weekend else 1.05)
+    arrays = {"per_stream": stream, "combined": combined, "calls": calls,
+              "parallelism": par, "spread": {}}
+    return {
+        "granularity": "day", "requested_bucket": "auto", "auto_bucket": "day",
+        "offered_buckets": [{"bucket": "day", "count": 30},
+                            {"bucket": "week", "count": 5}],
+        "buckets": [{"key": day, "from": day, "to": day} for day in days],
+        "spread": {"quantiles": [10, 50, 90], "min_responses": 30, "weight": "duration"},
+        "series": [dict({"source": "codex", "model": "gpt-5.1-codex",
+                         "measurement_kind": "response_window",
+                         "token_basis": "output_including_reasoning"}, **arrays)],
+        "model_series": [dict({"model": "gpt-5.1-codex", "sources": ["claude", "codex"],
+                               "measurement_kinds": ["post_first_token",
+                                                     "response_window"]},
+                              **arrays)],
+    }
+
+
 def use_rich_payloads() -> None:
     """Point the fake at the populated week. Must run before the pane loads."""
     assert FAKE is not None, "install_fakes() first"
@@ -877,6 +937,23 @@ async def rich_view_trend(app, pilot):
     await fx.settle(pilot, 6)
 
 
+async def rich_view_trend_month(app, pilot):
+    """A month of DAILY buckets in Trend: the picture above its rows, not over them.
+
+    The window is chosen with the control a reader uses, so the dates on the
+    strip are the dates the buckets cover -- a capture that showed thirty days
+    under a "today" label would prove nothing about the thing it is here to show.
+    """
+    use_rich_payloads()
+    FAKE.speed_trend = rich_speed_trend_month()
+    app.action_set_range("lastmonth")
+    await fx.settle(pilot, 4)
+    app.action_show_pane("speed")
+    await fx.settle(pilot, 6)
+    app.query_one("#sp-mode-trend").press()
+    await fx.settle(pilot, 6)
+
+
 async def rich_view_hour(app, pilot):
     await rich_speed(app, pilot)
     app.query_one("#sp-mode-hour").press()
@@ -982,6 +1059,18 @@ CASES = [
     ("80-speed-hour-combined-populated-100x30", (100, 30), rich_speed_hour_combined, "today", False),
     ("81-speed-detail-populated-100x30", (100, 30), rich_speed_detail, "today", False),
     ("82-speed-trend-detail-populated-100x30", (100, 30), rich_speed_trend_detail, "today", False),
+    ("83-speed-trend-month-populated-120x36", (120, 36), rich_view_trend_month,
+     "today", False),
+    ("84-speed-trend-month-populated-100x30", (100, 30), rich_view_trend_month,
+     "today", False),
+    ("85-speed-trend-month-populated-80x24", (80, 24), rich_view_trend_month,
+     "today", False),
+    # The resize, as two frames: a page painted for one window and then handed
+    # another. The card band and the table's column set are what used to stay
+    # behind, and a number the widget clips is a number the user never sees.
+    ("86-overview-resized-120-to-80", (120, 36), None, "7d", False, (80, 24)),
+    ("87-overview-resized-80-to-120", (80, 24), None, "7d", False, (120, 36)),
+    ("88-speed-across-resized-120-to-80", (120, 36), rich_speed, "7d", False, (80, 24)),
     ("90-sessions-populated-120x36", (120, 36), rich_sessions_pane, "7d", False),
     ("91-sessions-populated-100x30", (100, 30), rich_sessions_pane, "7d", False),
     ("92-sessions-populated-80x24", (80, 24), rich_sessions_pane, "7d", False),
@@ -993,11 +1082,13 @@ CASES = [
 def main() -> int:
     wanted = set(sys.argv[1:])
     OUT.mkdir(parents=True, exist_ok=True)
-    for name, size, body, initial, mono in CASES:
+    for case in CASES:
+        name, size, body, initial, mono = case[:5]
+        resize_to = case[5] if len(case) > 5 else None
         if wanted and name not in wanted:
             continue
         install_fakes()  # a fresh fake per frame: no state bleeds between captures
-        capture(name, size, body, initial=initial, mono=mono)
+        capture(name, size, body, initial=initial, mono=mono, resize_to=resize_to)
     print(f"\ncaptures in {OUT}", flush=True)
     # Every file is closed and flushed by now. The exit is explicit because the
     # app's worker threads are not: a plain return would sit in

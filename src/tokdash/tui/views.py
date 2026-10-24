@@ -171,6 +171,180 @@ def harness_models(usage: dict, tool: str, *, labels: dict | None = None) -> lis
 
 
 # ---------------------------------------------------------------------------
+# Overview: Tools & Models (one section per tool, that tool's own models)
+# ---------------------------------------------------------------------------
+
+
+def _has_token_usage(row: dict) -> bool:
+    """Did this model record a token ANYWHERE? (web ``hasModelTokenUsage``)
+
+    A model row with nothing in any of its four token fields says nothing, and
+    the dashboard leaves it out of the per-tool tables rather than painting a
+    line of zeros. It is a presence test, so an absent figure reads as no
+    usage exactly as it does web-side; the missing-versus-zero law still
+    applies to the cells that DO print.
+    """
+    for field in ("tokens_in", "tokens_out", "tokens_cache", "tokens"):
+        if _num(row.get(field)) > 0:
+            return True
+    return False
+
+
+def _sorted_models(rows: list[dict], sort: str) -> list[dict]:
+    """Model rows in the order the pane's ``s`` sort asks for.
+
+    The same primary/secondary pairing ``model_rows`` uses, so "sorted by cost"
+    means one thing wherever the reader meets it on the Overview.
+    """
+    if sort == "name":
+        return sorted(
+            rows,
+            key=lambda r: (str(r.get("name") or "").lower(), -_num(r.get("tokens"))),
+        )
+    primary = {"tokens": "tokens", "cost": "cost", "messages": "messages"}[sort]
+    secondary = {"tokens": "cost", "cost": "tokens", "messages": "tokens"}[sort]
+    return sorted(
+        rows,
+        key=lambda r: (
+            -_num(r.get(primary)),
+            -_num(r.get(secondary)),
+            str(r.get("name") or "").lower(),
+        ),
+    )
+
+
+def tool_model_sections(
+    usage: dict,
+    *,
+    sort: str = "tokens",
+    search: str = "",
+    labels: dict | None = None,
+) -> dict:
+    """Every tool's OWN models, in one section per tool.
+
+    The terminal's reading of the dashboard's "Apps & Models Breakdown"
+    (index.html ``updateAppsBreakdown``): a heading per tool carrying that
+    tool's totals, and under it the models THAT tool recorded. This is not
+    the Models table with a column bolted on -- ``combined_models`` merges a
+    name across every tool, and here the same model used by two tools is two
+    rows, because the question this table answers is what one tool spent.
+
+    Three payload rules carry over from the web section:
+
+    * A tool whose model list holds nothing with a token in it gets NO section,
+      so an empty list never paints a heading (``hasModelTokenUsage``).
+    * OpenClaw has no ``apps`` entry; its models ride in ``openclaw_models``,
+      and that list is what stands for the tool here.
+    * Section figures read the fields the Tools table reads (``by_tool`` for
+      tokens, cost and hit; ``apps[tool]`` for messages), so a section header
+      and its Tools row cannot disagree. Model rows print only what their own
+      row carries: ``tokens_in``/``tokens_out``/``tokens_cache`` are absent on
+      some payloads, and those cells stay a dash rather than becoming a zero.
+
+    A model's share divides by its TOOL's reported tokens -- the only
+    denominator a per-tool table owns -- including while a search filters the
+    rows, which is ``model_rows``' rule applied one level down.
+    """
+    if sort not in {key for key, _ in MODEL_SORTS}:
+        sort = "tokens"
+    apps = usage.get("apps") or {}
+    by_tool = usage.get("by_tool") or {}
+    openclaw_models = [
+        r for r in (usage.get("openclaw_models") or []) if isinstance(r, dict)
+    ]
+    needle = str(search or "").strip().lower()
+
+    # Tool order = the Tools view's order: tokens descending, cost then name to
+    # break a tie, so the two tables that list the same tools agree about what
+    # to read first. A tool with an apps entry but no by_tool row is still
+    # listed, at the bottom of whatever its own tokens buy it.
+    def _agg(tool: object) -> dict:
+        return by_tool.get(tool) or apps.get(tool) or {}
+
+    order = sorted(
+        {str(tool) for tool in by_tool} | {str(t) for t in apps},
+        key=lambda tool: (
+            -_num(_agg(tool).get("tokens")),
+            -_num(_agg(tool).get("cost")),
+            str(tool).lower(),
+        ),
+    )
+
+    sections: list[dict] = []
+    models_listed = 0
+    for tool in order:
+        app = apps.get(tool) or {}
+        agg = by_tool.get(tool) or {}
+        listed = [r for r in (app.get("models") or []) if isinstance(r, dict)]
+        if not listed and tool == "openclaw":
+            listed = openclaw_models
+        label = tool_label(tool, labels)
+        listed = [r for r in listed if _has_token_usage(r)]
+        if needle:
+            # A tool whose NAME matches keeps its whole list: someone typing
+            # "claude" is asking about the tool, not for a name-substring
+            # coincidence inside it.
+            tool_match = needle in tool.lower() or needle in str(label).lower()
+            listed = [
+                r for r in listed
+                if tool_match or needle in str(r.get("name") or "").lower()
+            ]
+        if not listed:
+            continue
+
+        tool_tokens = _num(agg.get("tokens", app.get("tokens")))
+        messages = app.get("messages")
+        if messages is None and tool == "openclaw" and openclaw_models:
+            counted = [
+                m.get("messages") for m in openclaw_models
+                if m.get("messages") is not None
+            ]
+            messages = sum(counted) if counted else None
+        hit = agg.get("cache_hit_rate")
+        if hit is None:
+            hit = app.get("cache_hit_rate")
+
+        models = [
+            {
+                "name": str(row.get("name") or MISSING),
+                "tokens": fmt_tokens(row.get("tokens")),
+                "share": _share(_num(row.get("tokens")), tool_tokens),
+                "cost": fmt_cost_row(row.get("cost")),
+                "input": fmt_tokens(row.get("tokens_in")),
+                "output": fmt_tokens(row.get("tokens_out")),
+                "cache": fmt_tokens(row.get("tokens_cache")),
+                "hit": fmt_hit(row.get("cache_hit_rate")),
+                "messages": fmt_int(row.get("messages")),
+            }
+            for row in _sorted_models(listed, sort)
+        ]
+        models_listed += len(models)
+        sections.append(
+            {
+                "tool": tool,
+                "harness": label,
+                "tokens": fmt_tokens(agg.get("tokens", app.get("tokens"))),
+                "tokens_sort": tool_tokens,
+                "cost": fmt_cost_row(agg.get("cost", app.get("cost"))),
+                "input": fmt_tokens(app.get("tokens_in", agg.get("tokens_in"))),
+                "output": fmt_tokens(app.get("tokens_out", agg.get("tokens_out"))),
+                "cache": fmt_tokens(app.get("tokens_cache", agg.get("tokens_cache"))),
+                "hit": fmt_hit(hit),
+                "messages": fmt_int(messages),
+                "models": models,
+            }
+        )
+
+    return {
+        "sections": sections,
+        "sections_listed": len(sections),
+        "sections_total": len(order),
+        "models_listed": models_listed,
+        "searched": bool(needle),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Overview: Models (aggregate across EVERY harness)
 # ---------------------------------------------------------------------------
 
@@ -203,18 +377,7 @@ def model_rows(
     needle = str(search or "").strip()
     visible = [r for r in rows_in if _matched(r, needle, ("name",))]
 
-    if sort == "name":
-        visible.sort(key=lambda r: (str(r.get("name") or "").lower(), -_num(r.get("tokens"))))
-    else:
-        primary = {"tokens": "tokens", "cost": "cost", "messages": "messages"}[sort]
-        secondary = {"tokens": "cost", "cost": "tokens", "messages": "tokens"}[sort]
-        visible.sort(
-            key=lambda r: (
-                -_num(r.get(primary)),
-                -_num(r.get(secondary)),
-                str(r.get("name") or "").lower(),
-            )
-        )
+    visible = _sorted_models(visible, sort)
 
     rows = []
     for row in visible:

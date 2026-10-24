@@ -71,4 +71,5 @@ tokdash = ["static/vendor/fonts/*", "static/vendor/fonts/**/*"]
 tmp_path_retention_policy = "failed"
 markers = [
     "opens_browser: test legitimately exercises a browser-open sink; the no_browser_open backstop is suspended for it",
+    "xdist_group(name): run every test of the group on one pytest-xdist worker (CI uses --dist loadgroup)",
 ]

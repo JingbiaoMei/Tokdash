@@ -26,7 +26,8 @@ pip install -r requirements-dev.txt
 ```
 
 `requirements-dev.txt` adds what the tests need beyond the runtime: `pytest`, `httpx` for
-FastAPI's test client and `build` for the packaging tests. Some frontend tests also run
+FastAPI's test client, `build` for the packaging tests, and `pytest-timeout` and
+`pytest-xdist` for the per-test cap and the parallel run. Some frontend tests also run
 `node` and are skipped when it is not installed.
 
 Run from source with its own data directory. A source checkout can be ahead of the Tokdash
@@ -59,9 +60,18 @@ without ever reading your history.
 
 Run tests:
 ```bash
-pytest -q
+pytest -q -n auto --dist loadgroup                     # every core, as CI runs it
 pytest tests/test_pricing_normalization.py -k lookup   # one file, filtered by test name
 ```
+
+`-n` comes from `pytest-xdist`. `--dist loadgroup` keeps the tests that share a resource on
+one worker; mark a new test that builds from the repo root or holds a fixed port with the same
+`xdist_group` as its peers, or two workers will collide on it.
+
+The TUI tests drive the real app through Textual's pilot. Wait on a condition, never on a fixed
+sleep: `settle()` in `tests/test_tui_revision5.py` returns as soon as the app is idle, and
+`wait_for()` in `tests/test_tui_app.py` polls a predicate. A fixed `pilot.pause(0.25)` costs
+every leg of CI that long on every call, and is still too short on a slow Windows runner.
 
 The suite points `TOKDASH_DATA_DIR` at a temporary directory itself, so it never touches
 your real data.

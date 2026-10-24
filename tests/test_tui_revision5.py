@@ -18,12 +18,14 @@ from __future__ import annotations
 import asyncio
 import copy
 import datetime
+import time
 
 import pytest
 
 textual = pytest.importorskip("textual", reason="the TUI tests need textual")
 
 from textual.widgets import Button, DataTable, Input, Static  # noqa: E402
+from textual.worker import WorkerState  # noqa: E402
 
 import tokdash.tui.app as app_mod  # noqa: E402
 from tokdash.sessions import SESSION_TOOLS  # noqa: E402
@@ -582,7 +584,7 @@ def run(api, body, size=(120, 36)):
 
     async def _main():
         async with app.run_test(size=size) as pilot:
-            await pilot.pause(0.6)
+            await quiesce(pilot, 0.6)
             await body(app, pilot)
         return app
 
@@ -590,9 +592,68 @@ def run(api, body, size=(120, 36)):
     return app
 
 
+_LIVE_WORKER = (WorkerState.PENDING, WorkerState.RUNNING)
+_PENDING_FLAGS = ("_layout_required", "_scroll_required", "_repaint_required",
+                  "_recompose_required", "_refresh_styles_required")
+
+
+def _busy(app, horizon: float) -> bool:
+    """Whether the app still holds work a step could be waiting on.
+
+    That is an unfinished worker, an animation, a queued message, a layout or
+    repaint not yet done, a ``call_after_refresh`` not yet run, or a one-shot
+    timer no longer than ``horizon``. Interval timers (the 1 s status tick)
+    never finish, and a longer one-shot (the 12 s stale re-read) would not have
+    fired inside the fixed sleep this replaces either, so neither counts.
+    These are Textual 8 internals; pyproject pins textual below 9.
+    """
+    if any(worker.state in _LIVE_WORKER for worker in app.workers):
+        return True
+    if app.animator._animations or app.animator._scheduled:
+        return True
+    nodes = [app]
+    for screen in app.screen_stack:
+        if screen._dirty_widgets or screen._callbacks:
+            return True
+        nodes.extend(screen.walk_children(with_self=True))
+    for node in nodes:
+        if not node._message_queue.empty():
+            return True
+        if any(getattr(node, flag, False) for flag in _PENDING_FLAGS):
+            return True
+        for timer in list(node._timers):
+            task = timer._task
+            if timer._repeat == 0 and task is not None and not task.done() \
+                    and timer._interval <= horizon:
+                return True
+    return False
+
+
+async def quiesce(pilot, budget: float):
+    """Return once the app is idle, or after ``budget`` seconds at the most.
+
+    Idle means three polls running with nothing in ``_busy`` and every message
+    the screen was sent handled; the repeat catches a ``call_after_refresh``
+    that a finished worker leaves behind. The budget is the fixed sleep this
+    used to be, so a step that parks a worker on purpose (a gated fetch) still
+    waits exactly that long -- and every other step stops paying for it.
+
+    Only a busy poll sleeps, to hand the worker threads the GIL; an idle one
+    just drains the screen. A fixed sleep per poll would cost each step three
+    timer ticks, which on Windows are ~15 ms however short the request.
+    """
+    deadline = time.monotonic() + budget
+    quiet = 0
+    busy = True
+    while quiet < 3 and time.monotonic() < deadline:
+        await pilot.pause(0.002 if busy else 0)
+        busy = _busy(pilot.app, budget)
+        quiet = 0 if busy else quiet + 1
+
+
 async def settle(pilot, times=3):
-    for _ in range(times):
-        await pilot.pause(0.25)
+    """Let the step settle: ``times`` quarter-seconds is the cap, not the cost."""
+    await quiesce(pilot, 0.25 * times)
 
 
 def screen_lines(app):
@@ -1738,7 +1799,7 @@ def _open(api, initial_period, body, size=(120, 36)):
 
     async def _main():
         async with app.run_test(size=size) as pilot:
-            await pilot.pause(0.6)
+            await quiesce(pilot, 0.6)
             await settle(pilot, 3)
             await body(app, pilot)
 

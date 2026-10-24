@@ -15,6 +15,10 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+# Every build here stages inside the checkout (build/ and the sdist tree), so two
+# at once collide.
+pytestmark = pytest.mark.xdist_group("repo-build")
+
 
 def _build_dists(tmp_path: Path, root: Path = REPO_ROOT) -> tuple[Path, Path]:
     """Build wheel + sdist into tmp_path; return (wheel, sdist) paths."""

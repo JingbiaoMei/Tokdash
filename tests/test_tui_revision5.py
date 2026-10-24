@@ -596,53 +596,66 @@ _LIVE_WORKER = (WorkerState.PENDING, WorkerState.RUNNING)
 _PENDING_FLAGS = ("_layout_required", "_scroll_required", "_repaint_required",
                   "_recompose_required", "_refresh_styles_required")
 
+#: The most a step may take before the test looks anyway. A loaded CI runner
+#: (four workers on four cores) has run a step at several times the fixed sleep
+#: this replaces, so the sleep is no ceiling. Only a step that parks a worker on
+#: purpose -- a gated fetch, a held build stream -- ever waits this out.
+PATIENCE = 3.0
+
 
 def _busy(app, horizon: float) -> bool:
     """Whether the app still holds work a step could be waiting on.
 
-    That is an unfinished worker, an animation, a queued message, a layout or
-    repaint not yet done, a ``call_after_refresh`` not yet run, or a one-shot
-    timer no longer than ``horizon``. Interval timers (the 1 s status tick)
-    never finish, and a longer one-shot (the 12 s stale re-read) would not have
-    fired inside the fixed sleep this replaces either, so neither counts.
+    That is an unfinished worker, an animation, a queued message, a one-shot
+    timer no longer than ``horizon``, or -- on the screen being shown -- a layout
+    or repaint not yet done or a ``call_after_refresh`` not yet run. A screen
+    under a chooser does not repaint until it is uncovered, so its pending
+    repaint is not work in hand. Interval timers (the 1 s status tick) never
+    finish, and a longer one-shot (the 12 s stale re-read) would not have fired
+    inside the fixed sleep this replaces either, so neither counts.
     These are Textual 8 internals; pyproject pins textual below 9.
     """
     if any(worker.state in _LIVE_WORKER for worker in app.workers):
         return True
     if app.animator._animations or app.animator._scheduled:
         return True
-    nodes = [app]
+    shown = app.screen
+    if shown._dirty_widgets or shown._callbacks:
+        return True
     for screen in app.screen_stack:
-        if screen._dirty_widgets or screen._callbacks:
-            return True
-        nodes.extend(screen.walk_children(with_self=True))
-    for node in nodes:
-        if not node._message_queue.empty():
-            return True
-        if any(getattr(node, flag, False) for flag in _PENDING_FLAGS):
-            return True
-        for timer in list(node._timers):
-            task = timer._task
-            if timer._repeat == 0 and task is not None and not task.done() \
-                    and timer._interval <= horizon:
+        for node in screen.walk_children(with_self=True):
+            if not node._message_queue.empty():
                 return True
+            if screen is shown and any(getattr(node, flag, False) for flag in _PENDING_FLAGS):
+                return True
+            if _short_timer(node, horizon):
+                return True
+    return not app._message_queue.empty() or _short_timer(app, horizon)
+
+
+def _short_timer(node, horizon: float) -> bool:
+    for timer in list(node._timers):
+        task = timer._task
+        if timer._repeat == 0 and task is not None and not task.done() \
+                and timer._interval <= horizon:
+            return True
     return False
 
 
 async def quiesce(pilot, budget: float):
-    """Return once the app is idle, or after ``budget`` seconds at the most.
+    """Return once the app is idle, or after ``PATIENCE`` seconds at the most.
 
     Idle means three polls running with nothing in ``_busy`` and every message
     the screen was sent handled; the repeat catches a ``call_after_refresh``
-    that a finished worker leaves behind. The budget is the fixed sleep this
-    used to be, so a step that parks a worker on purpose (a gated fetch) still
-    waits exactly that long -- and every other step stops paying for it.
+    that a finished worker leaves behind. ``budget`` is the fixed sleep this
+    used to be. It decides which one-shot timers the step may be waiting on;
+    the wait itself runs to ``PATIENCE``, or to ``budget`` if that is longer.
 
     Only a busy poll sleeps, to hand the worker threads the GIL; an idle one
     just drains the screen. A fixed sleep per poll would cost each step three
     timer ticks, which on Windows are ~15 ms however short the request.
     """
-    deadline = time.monotonic() + budget
+    deadline = time.monotonic() + max(budget, PATIENCE)
     quiet = 0
     busy = True
     while quiet < 3 and time.monotonic() < deadline:
@@ -652,7 +665,7 @@ async def quiesce(pilot, budget: float):
 
 
 async def settle(pilot, times=3):
-    """Let the step settle: ``times`` quarter-seconds is the cap, not the cost."""
+    """Let the step settle: ``times`` quarter-seconds was the old fixed sleep."""
     await quiesce(pilot, 0.25 * times)
 
 

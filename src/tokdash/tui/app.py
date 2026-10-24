@@ -2544,7 +2544,14 @@ class TokdashApp(App):
             # A set height is honoured to the row, which makes the second call
             # compute exactly what the first one set.
             room = max(1, limit - pane.region.y)
-            if pane.region.height != room:
+            # The height ASKED counts as well as the one laid out. A strip that
+            # wraps to two rows and back before the next layout leaves a request
+            # for the shorter pane behind it; measured by the laid-out height
+            # alone, the second pass reads "already right" and lets that request
+            # land. With the re-measures spent, nothing takes the row back.
+            asked = pane.styles.height
+            if (pane.region.height != room or asked is None or not asked.is_cells
+                    or int(asked.value) != room):
                 pane.styles.height = f"{room}"
                 changed = True
         if self._fit_forced:
@@ -2600,7 +2607,10 @@ class TokdashApp(App):
         self._refit_body()
 
     def _tick_status(self) -> None:
-        if self._load_started:
+        # The interval outlives the page on the way out: Textual tears the
+        # screens down before it stops the app's timers, and a tick in between
+        # would ask for a status strip that is already gone.
+        if self._load_started and self.is_running:
             self._update_status()
 
     # ------------------------------------------------------------ actions --

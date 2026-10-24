@@ -304,9 +304,15 @@ def drive(app, steps, size=(80, 24)):
     asyncio.run(main())
 
 
-async def wait_for(app, pilot, predicate, tries=100):
-    """Thread jobs + chained awaits need more than one pause to settle."""
-    for _ in range(tries):
+async def wait_for(app, pilot, predicate, timeout=10.0):
+    """Thread jobs + chained awaits need more than one pause to settle.
+
+    The timeout is patience, not a cost: a predicate that holds returns at once,
+    and a CI runner shared by four workers has taken more than the two seconds
+    this used to allow to run one thread job.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         if predicate():
             return True
         await pilot.pause(0.02)

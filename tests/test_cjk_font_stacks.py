@@ -10,12 +10,13 @@ the page. These tests keep:
 - a CJK family in the tail of both, covering each supported platform's own face;
 - the 3D view's labels, which name the current stylesheet stack;
 - the locale rules that take translated labels off the mono stack and off tracking;
-- the optional vendored face: its placeholder, its discovery rule, and the fetch
-  script's licence handling.
+- the optional vendored face: its discovery rule, the link the served page's head
+  script writes for it (run under node), and the fetch script's licence handling.
 """
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -25,6 +26,8 @@ from fastapi.testclient import TestClient
 import tokdash  # type: ignore[import-untyped]
 import tokdash.api as api
 from tokdash import assets
+
+from support.frontend import needs_node, run_node
 
 STATIC = Path(tokdash.__file__).parent / "static"
 INDEX_HTML = STATIC / "index.html"
@@ -294,15 +297,64 @@ def test_vendored_face_is_discovered_by_upstream_version(tmp_path, monkeypatch):
     assert assets.local_cjk_font_css() == "/static/vendor/fonts/noto-sans-sc-v41/noto-sans-sc.css"
 
 
-def test_the_page_links_a_vendored_face_only_when_the_server_offers_one():
+def _font_head_script(page: str) -> str:
+    """The head script that decides whether to link the vendored face."""
+    start = page.rindex("<script>", 0, page.index("const cjkFontCss")) + len("<script>")
+    return page[start : page.index("</script>", start)]
+
+
+def _served_page(static_dir: Path, monkeypatch) -> str:
+    _clear_font_cache()
+    monkeypatch.setattr(assets, "STATIC_DIR", static_dir)
+    monkeypatch.delenv("TOKDASH_PUBLIC_BASE_PATH", raising=False)
+    page = TestClient(api.app).get("/").text
+    assert assets.CJK_FONT_CSS_PLACEHOLDER not in page
+    return page
+
+
+# Runs each head script with a window at the given path and reports the
+# stylesheet links it writes.
+HEAD_LINKS_JS = """
+const cases = %s;
+const out = {};
+for (const [name, { script, pathname }] of Object.entries(cases)) {
+  const written = [];
+  const window = { location: { pathname } };
+  const document = { write: (html) => { written.push(html); } };
+  new Function('window', 'document', script)(window, document);
+  out[name] = written.filter((html) => html.includes('rel="stylesheet"'));
+}
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@needs_node
+def test_the_page_links_a_vendored_face_only_when_the_server_offers_one(tmp_path, monkeypatch):
     """The client cannot know the file exists, so the server says so through the
-    placeholder; an unsubstituted placeholder must never reach the browser."""
-    source = _source()
-    assert f'const cjkFontCss = "{assets.CJK_FONT_CSS_PLACEHOLDER}";' in source
-    guard = source.split("const cjkFontCss", 1)[1]
-    assert 'cjkFontCss.startsWith("/")' in guard, "an unsubstituted placeholder would load as a path"
-    rendered = api._render_dashboard_html("").split("const cjkFontCss", 1)[1]
-    assert assets.CJK_FONT_CSS_PLACEHOLDER not in rendered.splitlines()[0]
+    placeholder: the page links the face it names, under the public prefix too,
+    and links nothing when it names none. A placeholder the server never
+    substituted must not load as a relative path either."""
+    face = "vendor/fonts/noto-sans-sc-v41/noto-sans-sc.css"
+    (tmp_path / "with" / face).parent.mkdir(parents=True)
+    (tmp_path / "with" / face).write_text("/* stub */", encoding="utf-8")
+    (tmp_path / "without").mkdir()
+    vendored = _font_head_script(_served_page(tmp_path / "with", monkeypatch))
+    bare = _font_head_script(_served_page(tmp_path / "without", monkeypatch))
+    cases = {
+        "vendored": {"script": vendored, "pathname": "/"},
+        "vendoredUnderPrefix": {"script": vendored, "pathname": "/tokdash/"},
+        "noFace": {"script": bare, "pathname": "/"},
+        "unsubstituted": {"script": _font_head_script(_source()), "pathname": "/"},
+    }
+    harness = tmp_path / "head-links.js"
+    harness.write_text(HEAD_LINKS_JS % json.dumps(cases), encoding="utf-8")
+    links = json.loads(run_node(harness))
+    assert links == {
+        "vendored": ['<link rel="stylesheet" href="/static/' + face + '" />'],
+        "vendoredUnderPrefix": ['<link rel="stylesheet" href="/tokdash/static/' + face + '" />'],
+        "noFace": [],
+        "unsubstituted": [],
+    }
 
 
 @pytest.mark.skipif(not VENDOR_SCRIPT.is_file(), reason="scripts/ is not installed")

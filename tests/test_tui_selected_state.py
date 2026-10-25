@@ -14,9 +14,9 @@ import pytest
 
 textual = pytest.importorskip("textual", reason="the TUI tests need textual")
 
+from textual.color import Color  # noqa: E402
 from textual.widgets import Button  # noqa: E402
 
-from tokdash.tui.app import TokdashApp  # noqa: E402
 from tokdash.tui.ranges import STRIP_PRESETS  # noqa: E402
 from tokdash.tui.ranges import PRESETS as _ALL_PRESETS  # noqa: E402
 import support.tui as fx  # noqa: E402  (the layout-law tests call it fx)
@@ -29,8 +29,9 @@ from support.tui import (  # noqa: E402
 )
 
 
-SELECTED_FILL = "#b9a7ff"  # the lavender fill of the approved design
-
+# The lavender fill of the approved design. The stylesheet writes it as a
+# literal in each -selected rule, so there is no constant to import.
+SELECTED_FILL = "#b9a7ff"
 
 RANGE_IDS = [f"range-{preset.key}" for preset in _ALL_PRESETS]
 
@@ -99,12 +100,30 @@ def test_every_button_group_marks_the_choice_it_is_showing(api):
 
 
 def test_the_selected_class_is_painted_not_just_set(api):
-    """A class nobody styles is an invisible feature; the fill is the feature."""
-    css = TokdashApp.CSS
-    for selector in ("#rangebar Button.-selected", ".toggle Button.-selected"):
-        assert selector in css, selector
-    selected = css[css.index(".toggle Button.-selected"):]
-    assert SELECTED_FILL in selected[:240], selected[:240]
+    """A class nobody styles is an invisible feature; the fill is the feature.
+
+    The fill is read off the widgets as the stylesheet resolved it, not out of
+    the CSS text: a rule whose selector stops matching -- a renamed container, a
+    later rule that wins -- leaves the class set and the button looking like
+    its neighbours, and only the resolved style shows that.
+    """
+    fill = Color.parse(SELECTED_FILL)
+
+    async def body(app, pilot):
+        # A focused toolbar button wears the focus ground instead of the fill.
+        # Take the keyboard off every button, so the class is the only thing
+        # left that can paint one.
+        app.set_focus(None)
+        await settle(pilot, 1)
+        for chosen, other in (("range-today", "range-yesterday"),
+                              ("ov-tab-harnesses", "ov-tab-models")):
+            assert lit(app, [chosen, other]) == [chosen], (chosen, other)
+            selected = app.query_one(f"#{chosen}", Button).styles.background
+            plain = app.query_one(f"#{other}", Button).styles.background
+            assert selected == fill, (chosen, selected)
+            assert plain != fill, (other, plain)
+
+    run(api, body)
 
 
 def test_the_live_window_is_the_one_thing_the_strip_paints_lavender(api):
@@ -116,18 +135,25 @@ def test_the_live_window_is_the_one_thing_the_strip_paints_lavender(api):
     """
 
     async def body(app, pilot):
+        fill = Color.parse(SELECTED_FILL)
         chosen = [b for b in app.query("#rangebar Button") if "-selected" in b.classes]
         assert [b.id for b in chosen] == ["range-today"], [b.id for b in chosen]
-        assert chosen[0].styles.background is not None
+        assert chosen[0].styles.background == fill, chosen[0].styles.background
         for preset in STRIP_PRESETS:
             button = app.query_one(f"#range-{preset.key}", Button)
             if button.id == "range-today":
                 continue
             assert "-selected" not in button.classes, button.id
+            assert button.styles.background != fill, (button.id, button.styles.background)
 
         await pilot.press("m")
         await settle(pilot, 2)
-        assert "-selected" in app.query_one("#range-month", Button).classes
-        assert "-selected" not in app.query_one("#range-today", Button).classes
+        month = app.query_one("#range-month", Button)
+        today = app.query_one("#range-today", Button)
+        assert "-selected" in month.classes
+        assert "-selected" not in today.classes
+        # The plate moves with the window: the old one gives it up.
+        assert month.styles.background == fill, month.styles.background
+        assert today.styles.background != fill, today.styles.background
 
     fx.run(api, body, size=(120, 36))

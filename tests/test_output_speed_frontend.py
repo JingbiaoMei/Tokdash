@@ -470,18 +470,6 @@ def test_a_page_left_during_the_backoff_is_not_charged_for_another_request(tmp_p
     assert out["neverHidden"] == 5, out
 
 
-def test_range_changes_invalidate_speed_without_charging_the_report():
-    invalidate = _extract("function usageReportSpeedInvalidate(")
-    for field in ("loadedKey", "trendKey", "rows", "payload"):
-        assert field in invalidate
-    loader = _extract("async function usageReportLoadSpeed(")
-    assert "usageReportSpeedInvalidate();" in loader
-    assert "usageReportSpeedInvalidate" not in _extract("async function loadUsageReport(options = {})")
-    route = _extract("function updateDashboardByDateRange(")
-    assert "usageReportSpeedState.active" in route
-    assert route.index("usageReportLoadSpeed(") < route.index("updateDashboard(null")
-
-
 def _standalone_loader_js():
     return '\n'.join([
         STUBS,
@@ -512,6 +500,59 @@ def _standalone_loader_js():
         _extract('function updateDashboardByDateRange('),
         'usageReportSpeedState.active = true; usageReportSpeedState.tool = "kimi";',
     ])
+
+
+def test_range_changes_invalidate_speed_without_charging_the_report(tmp_path):
+    """A new window clears the old one's rows, payload and trend before it asks.
+
+    On the speed page the shared range router loads speed and never the Overview;
+    off it, the range goes to the Overview loader and speed is not asked. A kept
+    view (the window already loaded) is left alone. That the report's own load
+    never invalidates speed is run in tests/test_usage_report_frontend.py.
+    """
+    out = _run_node(tmp_path, 'standalone_invalidate', _standalone_loader_js() + '''
+const fields = () => {
+  const s = usageReportSpeedState;
+  return {loadedKey: s.loadedKey, trendKey: s.trendKey, trend: s.trend, rows: s.rows.length, payload: s.payload};
+};
+(async () => {
+  const out = {};
+  updateDashboardByDateRange(currentStartDate, currentEndDate);
+  asks[0].resolve({rows: [{source: 'kimi', model: 'm', speed_calls: 1}]});
+  await flush();
+  out.loaded = !!usageReportSpeedState.loadedKey && usageReportSpeedState.rows.length;
+  updateDashboardByDateRange(currentStartDate, currentEndDate);
+  out.sameWindowAsks = asks.length;
+  usageReportSpeedState.trend = {buckets: []};
+  usageReportSpeedState.trendKey = usageReportSpeedState.loadedKey;
+  currentStartDate = new Date(2026, 7, 1);
+  updateDashboardByDateRange(currentStartDate, currentEndDate);
+  out.whileAsking = {...fields(), asks: asks.length};
+  asks[1].resolve({rows: [{source: 'kimi', model: 'm', speed_calls: 2}]});
+  await flush();
+  usageReportSpeedInvalidate({keepUnchanged: true});
+  out.kept = usageReportSpeedState.rows.length;
+  usageReportSpeedInvalidate();
+  out.cleared = fields();
+  usageReportSpeedState.active = false;
+  try {
+    updateDashboardByDateRange(currentStartDate, currentEndDate);
+    out.offPage = 'no loader';
+  } catch (error) {
+    out.offPage = error.message;
+  }
+  out.offPageAsks = asks.length;
+  console.log(JSON.stringify(out));
+})();
+''')
+    cleared = {"loadedKey": "", "trendKey": "", "trend": None, "rows": 0, "payload": None}
+    assert out["loaded"] == 1
+    assert out["sameWindowAsks"] == 1, "the window on screen was asked for again"
+    assert out["whileAsking"] == {**cleared, "asks": 2}, "the old window's data outlived the range change"
+    assert out["kept"] == 1, "keepUnchanged threw away the window it was asked to keep"
+    assert out["cleared"] == cleared
+    assert out["offPage"] == "Range switch used Overview loader"
+    assert out["offPageAsks"] == 2, "the speed page asked for a range while it was not open"
 
 
 def test_top_range_starts_a_new_load_before_the_old_one_finishes(tmp_path):
@@ -950,17 +991,26 @@ console.log(JSON.stringify(out));
     assert "resumeSpeed:active=true" in out["speedAgain"]["log"], "a return did not resume the page"
 
 
-def test_the_table_and_its_spanned_rows_agree_on_the_column_count():
+def test_the_table_and_its_spanned_rows_agree_on_the_column_count(tmp_path):
+    """A message row spans the header, and a built row has a cell per column."""
     headers = re.findall(r'data-speed-sort="([a-z_]+)"', SRC)
     assert headers == ["model", "rate", "speed_calls", "coverage"]
     table = SRC[SRC.index('id="usageReportSpeedTable"'):SRC.index('</thead>', SRC.index('id="usageReportSpeedTable"'))]
     columns = table.count('<th scope="col"')
     assert columns == 5, "a tick column, then the four sortable ones"
-    spans = set(re.findall(r"colSpan = (\d+)", _extract("function usageReportSpeedMessageRow(message)")))
-    assert spans == {str(columns)}, f"spanned rows must match the {columns} columns"
-    # A built row has a cell per column, too.
-    row = _extract("function usageReportSpeedTableRow(")
-    assert row.count("tr.appendChild(") == columns
+    out = _run_node(tmp_path, "table_columns", _table_row_js() + chr(10).join([
+        _extract("function usageReportSpeedMessageRow(message)"),
+        """
+const message = usageReportSpeedMessageRow('nothing measured');
+usageReportSpeedState.payload = {models: []};
+const row = usageReportSpeedTableRow({source: 'codex', model: 'm', measurement_kind: 'response_window',
+  token_basis: 'b', speed_calls: 4, coverage: 1, combined_tok_per_s: 30, output_tok_per_s: 20,
+  peak_in_flight: 3, parallelism: 1.16}, 100);
+console.log(JSON.stringify({messageCells: message.parts.length, span: message.parts[0].colSpan,
+  text: message.textContent, rowCells: row.parts.length}));
+""",
+    ]))
+    assert out == {"messageCells": 1, "span": columns, "text": "nothing measured", "rowCells": columns}
 
 
 # --------------------------------------------------------------------------
@@ -986,12 +1036,30 @@ console.log(JSON.stringify(cases.map((v) => usageReportSpeedRateValue(v))));
     assert out[6:] == [None, None, None], "non-finite and unparseable rates are absence"
 
 
-def test_the_chart_uses_that_guard():
-    body = _extract("function usageReportSpeedChartModel()")
-    assert "usageReportSpeedRateValue(at(raw, index))" in body
-    assert "Number(at(raw" not in body
-    draw = _extract("function usageReportDrawSpeedChart()")
-    assert "if (value === null) { pen = false; return; }" in draw, "a gap lifts the pen"
+def test_the_line_lifts_its_pen_over_an_unmeasured_bucket(tmp_path):
+    """A gap in the data is a gap in the line, not a slope through zero.
+
+    The chart model keeps an unmeasured bucket as null (run in
+    test_the_chart_reads_the_lens_view_and_merged_series_and_keeps_gaps); the
+    drawing then starts a new segment after it and puts no point on it.
+    """
+    out = _run_node(tmp_path, "speed_line_gap", _draw_js() + """
+state.lens = 'combined';
+state.chart = usageReportSpeedChartModel();
+usageReportDrawSpeedChart();
+const svg = nodes.usageReportSpeedChart.children[0];
+const line = svg.children.filter((n) => n.attrs.class === 'speed-line');
+const points = svg.children.filter((n) => n.attrs.class === 'speed-point').map((n) => Number(n.attrs.cx));
+console.log(JSON.stringify({values: state.chart.series[0].values, lines: line.length, d: line[0].attrs.d, points}));
+""")
+    assert out["values"] == [20, 22, None, 21, 23]
+    assert out["lines"] == 1
+    moves = re.findall(r"([ML])([\d.]+),", out["d"])
+    assert [command for command, _ in moves] == ["M", "L", "M", "L"], out["d"]
+    xs = [float(x) for _, x in moves]
+    assert xs == out["points"], "a point was drawn where nothing was measured"
+    step = xs[1] - xs[0]
+    assert xs[2] - xs[1] == pytest.approx(2 * step), "the line bridged the missing bucket"
 
 
 def _table_row_js() -> str:
@@ -1062,23 +1130,28 @@ console.log(JSON.stringify(out));
     assert out["merged"]["meta"].startswith("omp + opencode · ")
     assert "usageReportSpeedMethods" in out["merged"]["meta"], "two methods are named as two"
     assert "usageReportSpeedRateTitleMerged" in out["merged"]["title"]
+    # The tooltip gives both rates, whichever the lens prints.
+    assert '"stream":"20.0"' in out["at"]["title"] and '"combined":"30.0"' in out["at"]["title"], out["at"]["title"]
     assert out["stream"]["rate"] == "20.0" and out["stream"]["par"] is None, "Per stream has no ×N"
     assert out["full"]["disabled"] == "true", "a seventh row cannot be ticked"
 
 
-def test_method_explanations_are_collapsed_and_rows_carry_both_rates():
+def test_method_explanations_are_collapsed():
+    """The method note starts closed; that each row's tooltip carries both rates
+    is read off a built row in the row test above."""
     note = SRC[SRC.index('<details class="speed-method-note"'):SRC.index('</details>', SRC.index('<details class="speed-method-note"'))]
     assert ' open' not in note
     assert 'usageReportSpeedCompleteness' in note
     assert 'usageReportSpeedMethodSummary' in note
-    title = _extract('function usageReportSpeedRateTitle(row)')
-    assert 'row.output_tok_per_s' in title and 'row.combined_tok_per_s' in title
 
 
-def test_combined_is_the_default_lens():
-    state = _extract("const usageReportSpeedState = {")
-    assert "lens: 'combined'," in state
-    assert 'data-speed-lens="combined" aria-pressed="true"' in SRC
+def test_combined_is_the_default_lens(tmp_path):
+    out = _run_node(tmp_path, "default_lens", _rows_js() + """
+usageReportSpeedState.payload = {rows: [], models: []};
+console.log(JSON.stringify({lens: usageReportSpeedLens(), merging: usageReportSpeedMerging()}));
+""")
+    assert out["lens"] == "combined", "a fresh page must open on Combined"
+    assert 'data-speed-lens="combined" aria-pressed="true"' in SRC, "the pressed pill must match the default"
 
 
 def test_an_older_server_without_combined_reads_per_stream(tmp_path):
@@ -1390,10 +1463,36 @@ console.log(JSON.stringify(out));
     assert out["legacy"] == 1, "an older payload degrades to the number it can support"
 
 
-def test_the_note_under_the_table_reads_that_union():
-    body = _extract("function usageReportSpeedPartialLine()")
-    assert "usageReportSpeedMeasuredDays(rows)" in body
-    assert "Math.max(...rows.map((row) => Number(row.days_with_measurements" not in body
+def test_the_note_under_the_table_reads_that_union(tmp_path):
+    """The note prints the union: two models on two different days is 2/N, where
+    the old maximum printed 1/N. Rows with no measured call do not count."""
+    out = _run_node(tmp_path, "speed_partial_line", _table_row_js() + chr(10).join([
+        _extract("function usageReportSpeedPartialLine()"),
+        """
+const host = el('p');
+document.getElementById = (id) => (id === 'usageReportSpeedPartial' ? host : null);
+const day = (d) => Date.UTC(2026, 8, d, 12);
+usageReportSpeedState.tool = 'kimi';
+usageReportSpeedState.payload = {days_with_measurements: 4, selected_days: 28,
+  selected_range: {from: '2026-09-01', to: '2026-09-28'}};
+usageReportSpeedState.rows = [
+  {model: 'a', source: 'kimi', speed_calls: 3, days_with_measurements: 1, source_days_with_measurements: 2,
+   first_measured_at: day(3), last_measured_at: day(3)},
+  {model: 'b', source: 'kimi', speed_calls: 5, days_with_measurements: 1, source_days_with_measurements: 2,
+   first_measured_at: day(9), last_measured_at: day(9)},
+  {model: 'idle', source: 'kimi', speed_calls: 0, days_with_measurements: 0, source_days_with_measurements: 2},
+];
+usageReportSpeedPartialLine();
+const out = {line: host.textContent, title: host.title};
+usageReportSpeedState.rows = usageReportSpeedState.rows.slice(2);
+usageReportSpeedPartialLine();
+out.nothingMeasured = host.textContent;
+console.log(JSON.stringify(out));
+""",
+    ]))
+    assert out["line"] == "usageReportSpeedDaysWith 2/28", "the note printed the maximum, not the union"
+    assert out["title"].startswith("usageReportSpeedSelectedRange 2026-09-01 → 2026-09-28"), out["title"]
+    assert out["nothingMeasured"] == ""
 
 
 def test_absence_sorts_last_in_both_directions(tmp_path):
@@ -1681,12 +1780,17 @@ def test_reloading_with_a_tool_chosen_keeps_the_other_tools(tmp_path):
     assert out["sorted"] == ["kimi"]
     assert out["tools"] == ["kimi", "omp"], "omp survives the reload"
 
-    loader = _extract("async function usageReportLoadSpeed(")
-    queries = re.findall(r"usageReportSpeedQuery\([^)]*\)", loader)
-    assert queries, "the loader builds its own query"
-    for query in queries:
-        assert "source" not in query, (
-            f"{query} asks the server for one tool, which is what empties the picker"
+    # The loader, with kimi saved as the tool, still asks for every tool.
+    urls = _run_node(tmp_path, "speed_tool_reload_query", _standalone_loader_js() + """
+usageReportLoadSpeed();
+usageReportLoadSpeed({refresh: true});
+console.log(JSON.stringify(asks.map((ask) => ask.url)));
+""")
+    assert len(urls) == 2, urls
+    for url in urls:
+        assert url.startswith("/api/output-speed?"), url
+        assert not re.search(r"[?&](source|tool)=", url), (
+            f"{url} asks the server for one tool, which is what empties the picker"
         )
 
 

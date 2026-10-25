@@ -2,8 +2,9 @@
 
 `applyI18n` translates four kinds of markup: text nodes (`data-i18n`) and
 three attribute forms (`data-i18n-placeholder`, `data-i18n-title`,
-`data-i18n-aria`). These tests pin the properties that are easy to break
-silently, because none of them raise at runtime:
+`data-i18n-aria`); one test runs it under node in every language. The rest pin
+the properties that are easy to break silently, because none of them raise at
+runtime:
 
 * every attribute selector in the page stylesheet is a single valid
   selector -- two attribute conditions in one ``[...]`` bracket make the
@@ -23,7 +24,6 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 import shutil
 from html.parser import HTMLParser
 from pathlib import Path
@@ -32,7 +32,13 @@ import pytest
 
 import tokdash  # type: ignore[import-untyped]
 
-from support.frontend import extract_i18n_literal
+from support.frontend import extract_i18n_literal, needs_node, run_node
+from support.i18n_profile import (
+    APPLY_I18N_FUNCTIONS,
+    APPLY_I18N_STATE,
+    page_script,
+    run_page,
+)
 
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
@@ -111,8 +117,7 @@ def static_html(source: str) -> str:
 @pytest.fixture(scope="module")
 def english_dictionary(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
     """The ``en`` block of the I18N literal, evaluated by node."""
-    node = shutil.which("node")
-    if node is None:  # pragma: no cover - node ships with the dev extra
+    if shutil.which("node") is None:  # pragma: no cover - node ships with the dev extra
         pytest.skip("node not available")
     source = INDEX_HTML.read_text(encoding="utf-8")
     literal = extract_i18n_literal(source)
@@ -121,10 +126,7 @@ def english_dictionary(tmp_path_factory: pytest.TempPathFactory) -> dict[str, st
         literal + "\nprocess.stdout.write(JSON.stringify(I18N.en));",
         encoding="utf-8",
     )
-    output = subprocess.run(
-        [node, str(harness)], capture_output=True, check=True, encoding="utf-8"
-    ).stdout
-    return json.loads(output)
+    return json.loads(run_node(harness))
 
 
 def _style_blocks(source: str) -> list[str]:
@@ -557,6 +559,58 @@ def test_applyi18n_translates_every_attribute_form_through_one_table(
         )
 
 
+# What applyI18n sets <html lang> to for each dictionary.
+HTML_LANG = {"en": "en", "zh": "zh-CN", "ja": "ja", "ko": "ko", "es": "es", "pt": "pt-BR"}
+
+
+@needs_node
+def test_a_language_switch_rewrites_every_marker_form(tmp_path: Path) -> None:
+    """applyI18n, run in every language, writes each marker to its attribute.
+
+    Text through data-i18n, then placeholder, title and aria-label through the
+    table; an icon-only button with only attribute hooks keeps its glyph.
+    """
+    script = page_script(
+        APPLY_I18N_FUNCTIONS,
+        prelude=APPLY_I18N_STATE
+        + """
+document.body.append(
+  el('span', { id: 'text', 'data-i18n': 'whatsNew' }, "What's new"),
+  el('input', { id: 'field', 'data-i18n-placeholder': 'searchSessions', placeholder: 'Search sessions/projects...' }),
+  el('button', { id: 'icon', 'data-i18n-title': 'closeDialog', 'data-i18n-aria': 'closeDialog',
+    title: 'Close dialog', 'aria-label': 'Close dialog' }, el('svg', { class: 'glyph' })),
+);
+""",
+        i18n=True,
+        body="""
+const out = {};
+for (const lang of Object.keys(I18N)) {
+  currentLang = lang;
+  applyI18n();
+  const icon = document.getElementById('icon');
+  out[lang] = {
+    html: document.documentElement.lang,
+    got: [
+      document.getElementById('text').textContent,
+      document.getElementById('field').getAttribute('placeholder'),
+      icon.getAttribute('title'),
+      icon.getAttribute('aria-label'),
+    ],
+    want: [I18N[lang].whatsNew, I18N[lang].searchSessions, I18N[lang].closeDialog, I18N[lang].closeDialog],
+    glyph: icon.children.map((child) => child.getAttribute('class')),
+  };
+}
+print(out);
+""",
+    )
+    report = run_page(tmp_path, "apply-i18n-markers", script)
+    assert {lang: row["html"] for lang, row in report.items()} == HTML_LANG
+    for lang, row in report.items():
+        assert row["got"] == row["want"], lang
+        assert row["glyph"] == ["glyph"], f"{lang}: the icon button lost its glyph"
+    assert report["zh"]["got"] != report["en"]["got"]
+
+
 def test_static_markup_stays_well_formed(static_html: str) -> None:
     """The translated markup is still well-formed HTML.
 
@@ -651,7 +705,8 @@ CHART_TOOLTIPS = {
 }
 
 
-def test_chart_tooltips_reuse_their_heading_terminology() -> None:
+@needs_node
+def test_chart_tooltips_reuse_their_heading_terminology(tmp_path: Path) -> None:
     """Every locale's tooltip opens with its own heading's wording.
 
     The three session-chart tooltips sit directly under headings. The ja
@@ -661,13 +716,8 @@ def test_chart_tooltips_reuse_their_heading_terminology() -> None:
     from the heading above it is a mismatch the reader has to resolve
     themselves, so each one must start with the heading's own term.
     """
-    node = shutil.which("node")
-    if node is None:  # pragma: no cover - node ships with the dev extra
-        pytest.skip("node not available")
     source = INDEX_HTML.read_text(encoding="utf-8")
-    harness = (
-        REPO_ROOT / "_i18n_tooltip_probe.js"
-    )
+    harness = tmp_path / "i18n_tooltip_probe.js"
     harness.write_text(
         extract_i18n_literal(source)
         + "\nconst pairs = "
@@ -682,14 +732,7 @@ def test_chart_tooltips_reuse_their_heading_terminology() -> None:
         "process.stdout.write(JSON.stringify(out));",
         encoding="utf-8",
     )
-    try:
-        rows = json.loads(
-            subprocess.run(
-                [node, str(harness)], capture_output=True, check=True, encoding="utf-8"
-            ).stdout
-        )
-    finally:
-        harness.unlink(missing_ok=True)
+    rows = json.loads(run_node(harness))
     mismatches = [
         f"{lang} {tip}: {tip!r} starts {tooltip!r} instead of the heading "
         f"{heading!r}"

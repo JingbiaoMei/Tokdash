@@ -3,14 +3,15 @@
 The app ships six UI languages (en, zh, ja, ko, es, pt) in a single
 `const I18N = {...}` literal in static/index.html. These tests keep the
 dictionaries honest: same key set in every language, no dropped or invented
-placeholders, and a language picker that offers every supported language.
+placeholders, and a language picker that offers every supported language. The
+mechanism runs under node: the browser locale and the stored choice pick the
+language, and applyI18n relabels what data-i18n cannot express.
 """
 
 from __future__ import annotations
 
 import json
 import re
-import subprocess
 import unicodedata
 from pathlib import Path
 
@@ -18,7 +19,14 @@ import pytest
 
 import tokdash  # type: ignore[import-untyped]
 
-from support.frontend import extract_i18n_literal, needs_node
+from support.frontend import extract_i18n_literal, needs_node, run_node
+from support.i18n_profile import (
+    APPLY_I18N_FUNCTIONS,
+    APPLY_I18N_STATE,
+    page_script,
+    run_page,
+    slice_statement,
+)
 
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
@@ -85,10 +93,7 @@ def test_i18n_language_parity(tmp_path: Path) -> None:
         prelude + literal + "\nprocess.stdout.write(JSON.stringify(reportI18n(I18N)));\n",
         encoding="utf-8",
     )
-    output = subprocess.run(
-        ["node", str(harness)], capture_output=True, text=True, check=True
-    ).stdout
-    report = json.loads(output)
+    report = json.loads(run_node(harness))
 
     assert report["languages"] == list(EXPECTED_LANGUAGES)
 
@@ -132,17 +137,78 @@ def test_language_select_offers_every_language() -> None:
     assert options == ["system", *EXPECTED_LANGUAGES]
 
 
-def test_language_mechanism_supports_all_languages() -> None:
+@needs_node
+def test_the_browser_language_picks_its_dictionary(tmp_path: Path) -> None:
+    """A browser locale opens the dashboard in its own language, an unsupported
+    one in English, and choosing "system" in the picker follows the browser
+    again rather than storing the word "system" as a language."""
     source = INDEX_HTML.read_text(encoding="utf-8")
-    locales = re.search(r"const LANG_LOCALES = \{([^}]*)\};", source)
-    assert locales, "LANG_LOCALES map not found"
-    for lang in EXPECTED_LANGUAGES:
-        assert f"{lang}: '" in locales.group(1), f"LANG_LOCALES missing {lang}"
+    languages = source[
+        source.index("const LANG_LOCALES = {") : source.index("let currentLang = (function() {")
+    ]
+    boot = (
+        "function initialLanguage() {\n"
+        + slice_statement(source, "let currentLang = (function() {", "})();")
+        + "\n"
+        + slice_statement(source, "let selectedLang = (function() {", "})();")
+        + "\nreturn { currentLang, selectedLang };\n}\n"
+    )
+    picker = slice_statement(
+        source, "const langSelectEl = document.getElementById('langToggle');", "\n    });"
+    )
+    script = page_script(
+        snippets=[extract_i18n_literal(source) + ";", languages, boot, picker],
+        prelude=(
+            "document.body.append(el('select', { id: 'langToggle' }));\n"
+            "let currentLang = 'en';\n"
+            "let selectedLang = 'system';\n"
+        ),
+        body="""
+const detected = {};
+for (const browser of ['ja-JP', 'pt-BR', 'fr-FR', 'zh-TW', 'ko-KR', 'es-419', 'en-GB']) {
+  navigator.language = browser;
+  detected[browser] = detectBrowserLang();
+}
+navigator.language = 'ko-KR';
+const booted = {};
+for (const stored of [null, 'system', 'ja', 'xx']) {
+  if (stored === null) localStorage.removeItem('tokdash-lang');
+  else localStorage.setItem('tokdash-lang', stored);
+  booted[String(stored)] = initialLanguage();
+}
+const picker = document.getElementById('langToggle');
+const picked = {};
+for (const choice of ['system', 'pt']) {
+  picker.value = choice;
+  fire(picker, 'change');
+  picked[choice] = { currentLang, selectedLang, stored: localStorage.getItem('tokdash-lang') };
+}
+print({ detected, booted, picked, repainted: calls('applyI18n').length, rerendered: calls('rerenderPresentation').length });
+""",
+    )
+    report = run_page(tmp_path, "browser-language", script)
 
-    assert "function detectBrowserLang()" in source
-    # Storing 'system' resolves to the detected browser language.
-    assert "stored === 'system'" in source
-    assert "selectedLang === 'system' ? detectBrowserLang()" in source
+    assert report["detected"] == {
+        "ja-JP": "ja",
+        "pt-BR": "pt",
+        "fr-FR": "en",
+        "zh-TW": "zh",
+        "ko-KR": "ko",
+        "es-419": "es",
+        "en-GB": "en",
+    }
+    assert report["booted"] == {
+        "null": {"currentLang": "ko", "selectedLang": "system"},
+        "system": {"currentLang": "ko", "selectedLang": "system"},
+        "ja": {"currentLang": "ja", "selectedLang": "ja"},
+        "xx": {"currentLang": "ko", "selectedLang": "system"},
+    }
+    assert report["picked"] == {
+        "system": {"currentLang": "ko", "selectedLang": "system", "stored": "system"},
+        "pt": {"currentLang": "pt", "selectedLang": "pt", "stored": "pt"},
+    }
+    assert report["repainted"] == 2
+    assert report["rerendered"] == 2
 
 
 def test_hit_rate_headers_carry_translated_hint() -> None:
@@ -157,15 +223,47 @@ def test_hit_rate_headers_carry_translated_hint() -> None:
     assert 'title="Cache hit rate' not in source
 
 
-def test_quota_poll_options_use_translated_minute_unit() -> None:
+def test_quota_poll_options_are_the_four_intervals() -> None:
     source = INDEX_HTML.read_text(encoding="utf-8")
     select_start = source.index('<select id="quotaIntervalSelect"')
     select = source[select_start : source.index("</select>", select_start)]
     assert re.findall(r'<option value="(\d+)"', select) == ["15", "30", "60", "120"]
-    apply_start = source.index("function applyI18n()")
-    apply_body = source[apply_start : source.index("\n    }\n", apply_start)]
-    assert "#quotaIntervalSelect option" in apply_body
-    assert "${option.value} ${t('minuteShort')}" in apply_body
+
+
+@needs_node
+def test_a_language_switch_relabels_the_poll_interval_options(tmp_path: Path) -> None:
+    """The options pair a number with the minute unit, which data-i18n cannot
+    express, so applyI18n writes them itself in the current language."""
+    script = page_script(
+        APPLY_I18N_FUNCTIONS,
+        prelude=APPLY_I18N_STATE
+        + """
+document.body.append(el('select', { id: 'quotaIntervalSelect' },
+  ...['15', '30', '60', '120'].map((value) => {
+    const option = el('option', {}, `${value} min`);
+    option.value = value;
+    return option;
+  })));
+""",
+        i18n=True,
+        body="""
+const out = {};
+for (const lang of Object.keys(I18N)) {
+  currentLang = lang;
+  applyI18n();
+  out[lang] = {
+    labels: document.querySelectorAll('#quotaIntervalSelect option').map((option) => option.textContent),
+    unit: I18N[lang].minuteShort,
+  };
+}
+print(out);
+""",
+    )
+    report = run_page(tmp_path, "poll-interval-options", script)
+    assert tuple(report) == EXPECTED_LANGUAGES
+    for lang, row in report.items():
+        assert row["labels"] == [f"{value} {row['unit']}" for value in ("15", "30", "60", "120")], lang
+    assert report["zh"]["labels"][0] == "15 分钟"
 
 
 @pytest.mark.parametrize("readme", TRANSLATED_READMES)

@@ -7,9 +7,10 @@ queue must not outlive the selection that filled it. String assertions cannot se
 any of that, so these run the extracted function against controllable promises.
 
 The same queue carries the Overview's agent-time card, whose own request waits
-behind /api/usage. Some scenarios swap the real card loader and the Codex review
-toggle in for their stubs, so the order in which the card clears, refetches and
-repaints comes from the shipped code too.
+behind /api/usage, and the Refresh button's label. Some scenarios swap the real
+card loader, the Codex review toggle, or the real button in for their stubs, so
+the order in which the card clears, refetches and repaints, and the label the
+button is left wearing, come from the shipped code too.
 """
 from __future__ import annotations
 
@@ -333,7 +334,7 @@ async function main() {
     out.updateInFlight = updateInFlight;
   }
 
-  // --- with the real agent-time loader (REAL_ACTIVE_TIME_CARD) ---------------
+  // --- with the real agent-time loader (_real_active_time_card) ---------------
 
   if (scenario === 'the-review-toggle-refetches-the-card') {
     currentStartDate = new Date(2026, 0, 5);
@@ -438,6 +439,30 @@ async function main() {
     out.zRequest = activeTimeFetches().at(-1).url;
   }
 
+  // --- with the real Refresh button (_real_refresh_button) ---------------------
+
+  if (scenario === 'a-quiet-success-clears-a-failed-refresh') {
+    // The Refresh button's own load fails: every selected server is down.
+    pick('X', { forceRefresh: true });
+    await settle();
+    rejectRange('X', 'offline');
+    await settle(); await settle();
+    const button = () => ({
+      state: refreshUiState,
+      label: refreshBtn.attrs['aria-label'] ?? null,
+      disabled: refreshBtn.disabled,
+    });
+    out.afterFailure = button();
+    // The next ordinary load (the five-minute timer, a range change) succeeds
+    // well inside the 2.6 s the failed label would otherwise hold on its own.
+    pick('X');
+    await settle();
+    out.whileLoading = button();
+    resolveRange('X', { total_tokens: 100, total_cost: 1, total_messages: 2 });
+    await settle(); await settle();
+    out.afterSuccess = { ...button(), resetTimerPending: refreshUiResetTimer !== null };
+  }
+
   process.stdout.write(JSON.stringify(out));
 }
 
@@ -493,6 +518,23 @@ def _real_active_time_card() -> str:
         # The listener is an anonymous arrow inside addEventListener(...), so it is
         # sliced from its own parameter list and given a name to call it by.
         "const onCodexReviewToggle = " + extract_js_function(source[listener:], "(event) => {") + ";",
+    ])
+
+
+def _real_refresh_button() -> str:
+    """The real setRefreshUiState and renderRefreshButton, over a stub button."""
+    source = index_source()
+    return "\n".join([
+        "let refreshUiResetTimer = null;",
+        "let refreshCooldownTimer = null;",
+        "let refreshCooldownRemaining = 0;",
+        "const refreshBtn = {",
+        "  innerHTML: '', disabled: false, attrs: {},",
+        "  setAttribute(name, value) { this.attrs[name] = String(value); },",
+        "};",
+        "const document = { getElementById: (id) => (id === 'refreshBtn' ? refreshBtn : null) };",
+        extract_js_function(source, "function setRefreshUiState(state, { resetAfterMs = 0 } = {}) {"),
+        extract_js_function(source, "function renderRefreshButton() {"),
     ])
 
 
@@ -767,3 +809,23 @@ def test_a_range_change_clears_the_card_before_its_usage_lands(tmp_path):
     }
     assert out["zRequest"] == "/api/active-time?date_from=Z&date_to=Z&refresh=1"
 
+
+# --- the Refresh button ---------------------------------------------------------
+
+
+def test_a_quiet_success_clears_a_failed_refresh(tmp_path):
+    """The failed label belongs to the load that failed, not to the one after it.
+
+    A forced refresh that fails wears the failed label for 2.6 s. An ordinary
+    load that succeeds inside that window puts the button straight back to
+    idle, rather than leaving "failed" over figures that just arrived.
+    """
+    out = _run(tmp_path, "a-quiet-success-clears-a-failed-refresh", _real_refresh_button())
+
+    # t() returns its key in this harness, so the label is the key it reads.
+    assert out["afterFailure"] == {"state": "failed", "label": "refreshFailed", "disabled": False}
+    assert out["whileLoading"]["label"] == "loading"
+    assert out["whileLoading"]["disabled"] is True
+    assert out["afterSuccess"] == {
+        "state": "idle", "label": "refresh", "disabled": False, "resetTimerPending": False,
+    }

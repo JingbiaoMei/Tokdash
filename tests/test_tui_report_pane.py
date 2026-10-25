@@ -78,7 +78,7 @@ def test_report_keeps_the_two_scans_denominators_apart(api):
 
 
 def test_report_when_uses_the_full_hour_grid_and_the_named_weekday(api):
-    """The WHOLE facet: 24 hours, 7 named weekdays, and the share denominator.
+    """The WHOLE facet: 24 hours, 7 named weekdays, the share denominator, the clock.
 
     The piped report prints the three busiest hours and one weekday because a
     report is a summary. A PANE is where the rest of the facet lives, so the
@@ -106,6 +106,12 @@ def test_report_when_uses_the_full_hour_grid_and_the_named_weekday(api):
             assert day in text, (day, text)
         # Shares divide the analytics scan total, named above the rows.
         assert "analytics scan total" in text, text
+        # The clock is named, not implied: the facet's own timezone.
+        rendered = str(app.query_one("#rp-body").render())
+        assert "BST" in rendered, rendered
+        # The grid is taller than the pane and the pane scrolls, so "reachable"
+        # means paged to, not clipped away.
+        assert app.query_one("#rp-body").region.height >= 24
 
     run(api, body)
 
@@ -143,29 +149,9 @@ def test_report_names_a_soft_failure_rather_than_dashing_it_out(api):
 
 # -------------------------------------------------------------------- F10 --
 # Report -> When routed to the summary renderer: three hours, one weekday, and
-# the rest of the facet unreachable.
-
-
-def test_when_pane_reaches_the_quiet_hours_and_the_whole_week(api):
-    async def body(app, pilot):
-        app.action_show_pane("report")
-        await settle(pilot, 2)
-        press(app, "rp-tab-when")
-        await settle(pilot, 2)
-        rendered = str(app.query_one("#rp-body").render())
-        for hour in range(24):
-            assert f"{hour:02d}:00" in rendered, hour
-        for day in ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
-                    "Saturday", "Sunday"):
-            assert day in rendered, day
-        # The denominator and the clock are named, not implied.
-        assert "analytics scan total" in rendered
-        assert "BST" in rendered
-        # The grid is taller than the pane and the pane scrolls, so "reachable"
-        # means paged to, not clipped away.
-        assert app.query_one("#rp-body").region.height >= 24
-
-    run(api, body)
+# the rest of the facet unreachable. The whole grid is pinned above, by
+# test_report_when_uses_the_full_hour_grid_and_the_named_weekday; a facet that
+# never answered says so instead of drawing an empty grid.
 
 
 def test_when_pane_says_so_when_a_facet_never_answered(api):

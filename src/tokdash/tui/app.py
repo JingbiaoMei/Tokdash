@@ -198,6 +198,15 @@ def _num_cell(value: str) -> Text:
     return Text(value, justify="right")
 
 
+def _head_cell(value: str) -> Text:
+    """A section header's figure: right-aligned AND bold.
+
+    The Tools&Models table puts a tool's own totals on the row that names it,
+    and those figures have to read as the heading of the model rows under them
+    rather than as one more model in the list."""
+    return Text(value, justify="right", style="bold")
+
+
 #: The badge's edge: a half block in the source's own colour, set on the chip.
 _BADGE_EDGE = "▌"
 
@@ -756,6 +765,13 @@ class TokdashApp(App):
        already swallowed, and an invisible cursor does not search, sort or read. */
     #pr-table { max-height: 75%; }
     #quota-table { max-height: 55%; }
+    /* Tools&Models is the ONE Overview shape with more rows than a screen: a
+       header per tool plus every model that tool recorded. Left unbounded it
+       walks the page off the terminal and the caption under it -- the line that
+       says WHICH TOOL a figure belongs to, which is the whole point of the view
+       -- lands below the clip. Bounded, the table scrolls itself and the cursor
+       drags the view, which is what #sn-table and #pr-table already do. */
+    #pane-overview.-sectioned #ov-table { max-height: 55%; }
 
     /* Textual's Horizontal defaults to height: 1fr, which turns a one-line
        toolbar into a spring: the subview row swallows the pane and shoves the
@@ -959,6 +975,10 @@ class TokdashApp(App):
         self._ov_subview = "harnesses"
         self._ov_sort = "tokens"
         self._ov_search = ""
+        # Whether the sectioned view has already panned the page to its open
+        # caption. A repaint (resize, refit, a sort change) must not yank the
+        # page down again; only a fresh Enter may.
+        self._detail_panned = False
         self._ov_selected: object | None = None
         self._custom_mode = False
         # The label form the range buttons are wearing: (key hint, roomy name).
@@ -1143,6 +1163,7 @@ class TokdashApp(App):
                 with Horizontal(id="ov-subview", classes="toggle"):
                     yield Button("Tools", id="ov-tab-harnesses")
                     yield Button("Models", id="ov-tab-models")
+                    yield Button("Tools&Models", id="ov-tab-breakdown")
                     yield Static("", id="ov-sort", classes="head-scope")
                 yield Input(placeholder="filter names", id="ov-search")
                 yield Static("", id="ov-cards")
@@ -3140,7 +3161,20 @@ class TokdashApp(App):
         if key is None:
             return
         if pane == "overview":
-            self._ov_selected = key
+            if (self._ov_subview == "breakdown" and isinstance(key, tuple)
+                    and key[0] == "tool"):
+                # Enter on a section header opens the tool in the Tools view,
+                # where its models already get a table and a window of their
+                # own; the section's own rows stay where they are.
+                self._ov_subview = "harnesses"
+                self._ov_selected = key[1]
+                self._sync_toggle_states()
+            else:
+                self._ov_selected = key
+                if self._ov_subview == "breakdown":
+                    # Only an Enter pans the page -- a repaint of a caption that
+                    # was already open must leave the scroll where it was.
+                    self._detail_panned = False
             self._paint_overview()
         elif pane == "sessions":
             self._sn_selected_key = tuple(key)
@@ -3565,8 +3599,12 @@ class TokdashApp(App):
         if button_id.startswith("sn-tool-"):
             self._on_sources(button_id[len("sn-tool-"):])
             return
-        if button_id in ("ov-tab-harnesses", "ov-tab-models"):
-            self._ov_subview = "harnesses" if button_id.endswith("harnesses") else "models"
+        if button_id in ("ov-tab-harnesses", "ov-tab-models", "ov-tab-breakdown"):
+            self._ov_subview = {
+                "ov-tab-harnesses": "harnesses",
+                "ov-tab-models": "models",
+                "ov-tab-breakdown": "breakdown",
+            }[button_id]
             self._ov_selected = None
             self._sync_toggle_states()
             self._paint_overview()
@@ -3605,6 +3643,7 @@ class TokdashApp(App):
         for key, active in (
             ("ov-tab-harnesses", self._ov_subview == "harnesses"),
             ("ov-tab-models", self._ov_subview == "models"),
+            ("ov-tab-breakdown", self._ov_subview == "breakdown"),
             ("rp-tab-summary", self._rp_section == "summary"),
             ("rp-tab-when", self._rp_section == "when"),
             ("rp-tab-projects", self._rp_section == "projects"),
@@ -4168,6 +4207,15 @@ class TokdashApp(App):
 
     def _paint_overview(self) -> None:
         self._sync_toggle_states()
+        # The sectioned view bounds its own table (see CSS), so the pane says
+        # which shape it is showing rather than the table guessing from its row
+        # count -- a Tools list of the same length must keep its unbounded grid.
+        try:
+            self.query_one("#pane-overview").set_class(
+                self._ov_subview == "breakdown", "-sectioned"
+            )
+        except Exception:  # noqa: BLE001 -- before compose, nothing to class
+            pass
         if not self._scope_ok("overview"):
             self._paint_pending("overview")
             return
@@ -4197,7 +4245,7 @@ class TokdashApp(App):
         # The sort lives here, next to the table it reorders, rather than in a
         # paragraph under it: "s" is invisible until the reader knows what it does.
         sort_note = self.query_one("#ov-sort", Static)
-        if self._ov_subview == "models":
+        if self._ov_subview in ("models", "breakdown"):
             sort_note.display = True
             label = dict(views.MODEL_SORTS).get(self._ov_sort, self._ov_sort)
             sort_note.update(escape(f"sorted by {label} · s changes it"))
@@ -4206,6 +4254,8 @@ class TokdashApp(App):
             sort_note.update("")
         if self._ov_subview == "models":
             self._paint_models(usage, width)
+        elif self._ov_subview == "breakdown":
+            self._paint_breakdown(usage, width)
         elif self._ov_selected is not None:
             self._paint_harness_detail(usage)
         else:
@@ -4262,6 +4312,8 @@ class TokdashApp(App):
         if pane == "overview":
             if self._ov_subview == "models":
                 text = "Normalized models · every tool"
+            elif self._ov_subview == "breakdown":
+                text = "Each tool's own models · not merged"
             elif self._ov_selected:
                 label = TOOL_LABELS.get(self._ov_selected, self._ov_selected)
                 text = f"{label} · this tool's models only"
@@ -4473,6 +4525,137 @@ class TokdashApp(App):
         ]
         detail.display = True
         detail.update(emit_markup([[Run(line, "header" if i == 0 else None)] for i, line in enumerate(lines)]))
+
+    def _paint_breakdown(self, usage: dict, width: int) -> None:
+        """Every tool's OWN models, one section per tool (Tools&Models).
+
+        The dashboard's "Apps & Models Breakdown", drawn in a widget that has no
+        group heading: the row that NAMES a tool carries that tool's own totals
+        in the same columns as the models under it, so a section reads top-down
+        and a header stays comparable with the same tool's row in the Tools
+        view. Nothing here is merged -- a model two tools used is two rows,
+        because the question this table answers is what ONE tool spent. That is
+        also why it carries no Share-of-everything column: the denominator a
+        model row owns is its own tool.
+
+        A tool with no model list of its own gets no section, exactly as the
+        web leaves it out, and a dash in an Input/Output/Cache cell means that
+        source does not report the figure, not that it recorded a zero.
+        """
+        table = self.query_one("#ov-table", DataTable)
+        wide = width >= 104
+        result = views.tool_model_sections(
+            usage, sort=self._ov_sort, search=self._ov_search, labels=TOOL_LABELS
+        )
+        label = "Tool · model"
+        if result["searched"]:
+            tools = f"{result['sections_listed']} of {result['sections_total']} tools"
+            models = f"{result['models_listed']} model"
+            if result["models_listed"] != 1:
+                models += "s"
+            label = f"Tool · model · {tools} · {models}"
+        spec = [("model", label, 30 if wide else 40, False),
+                ("tokens", "Tokens", 8, False), ("cost", "Cost", 10, False)]
+        if wide:
+            spec += [("input", "Input", 8, True), ("output", "Output", 8, True),
+                     ("cache", "Cache", 8, True), ("hit", "Hit", 7, True),
+                     ("msgs", "Msgs", 8, True)]
+        self._shape(table, tuple(spec), reserve=2)
+        for section in result["sections"]:
+            # The header row is keyed by the TOOL, so Enter can open it; the
+            # model rows are keyed by (tool, name) because the same name rides
+            # under two tools here and a key has to name one row.
+            self._add_row(table, [
+                ("model", _source_cell(section["tool"], section["harness"])),
+                ("tokens", _head_cell(section["tokens"])),
+                ("cost", _head_cell(section["cost"])),
+                ("input", _head_cell(section["input"])),
+                ("output", _head_cell(section["output"])),
+                ("cache", _head_cell(section["cache"])),
+                ("hit", _head_cell(section["hit"])),
+                ("msgs", _head_cell(section["messages"])),
+            ], key=("tool", section["tool"]), height=self._row_air)
+            for row in section["models"]:
+                self._add_row(table, [
+                    ("model", escape(f"  {row['name']}")),
+                    ("tokens", _num_cell(row["tokens"])),
+                    ("cost", _num_cell(row["cost"])),
+                    ("input", _num_cell(row["input"])),
+                    ("output", _num_cell(row["output"])),
+                    ("cache", _num_cell(row["cache"])),
+                    ("hit", _num_cell(row["hit"])),
+                    ("msgs", _num_cell(row["messages"])),
+                ], key=("model", section["tool"], row["name"]),
+                    height=self._row_air)
+        self._restore_cursor(table, self._ov_selected)
+        self._paint_breakdown_detail(result)
+
+    def _paint_breakdown_detail(self, result: dict) -> None:
+        """The opened row of the sectioned view, in the view's own terms.
+
+        A model row is one tool's figure for that model and says so: the merged
+        figure a reader may be looking for lives in the Models view, and the
+        two numbers are allowed to differ because they answer different
+        questions.
+        """
+        detail = self.query_one("#ov-detail", Static)
+        key = self._ov_selected
+        section = None
+        if isinstance(key, tuple) and key[0] in ("model", "tool"):
+            section = next(
+                (s for s in result["sections"] if s["tool"] == key[1]), None
+            )
+        if section is None:
+            self._detail_panned = False
+            if not result["sections"]:
+                detail.display = True
+                detail.update(emit_markup([[
+                    Run("this window's sources recorded no per-tool model lists",
+                        "muted")]]))
+                return
+            detail.display = False
+            detail.update("")
+            return
+        if key[0] == "tool":
+            lines = [
+                section["harness"],
+                f"tokens {section['tokens']} · cost {section['cost']} · "
+                f"messages {section['messages']} · hit {section['hit']}",
+                "enter a model below for its figures · enter this row to open "
+                "the tool in the Tools view",
+            ]
+        else:
+            model = next(
+                (m for m in section["models"] if m["name"] == key[2]), None
+            )
+            if model is None:
+                detail.display = False
+                detail.update("")
+                return
+            lines = [
+                f"{model['name']} · {section['harness']}",
+                f"tokens {model['tokens']} · share of this tool {model['share']} · "
+                f"cost {model['cost']} · messages {model['messages']}",
+                f"input {model['input']} · output {model['output']} · "
+                f"cache read {model['cache']} · hit {model['hit']}",
+                "this tool's own figure · the Models view merges this model "
+                "across every tool",
+            ]
+        detail.display = True
+        detail.update(emit_markup([
+            [Run(line, "header" if i == 0 else None)]
+            for i, line in enumerate(lines)
+        ]))
+        if not self._detail_panned:
+            # The reader pressed Enter to see THIS row, so the page goes to it:
+            # the sectioned table is taller than most terminals, and a caption
+            # that opened below the fold is a caption that never opened. Same
+            # two hops Sessions uses for its turn table -- the first refresh
+            # measures the pane as it was before the caption re-wrapped.
+            self._detail_panned = True
+            self.call_after_refresh(
+                lambda: self.call_after_refresh(detail.scroll_visible)
+            )
 
     def _paint_harness_detail(self, usage: dict) -> None:
         """One source's own models, labelled with the source and the window."""

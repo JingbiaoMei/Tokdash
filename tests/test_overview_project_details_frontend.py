@@ -13,23 +13,18 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 from pathlib import Path
 
 import pytest
 
-import tokdash
+from support.frontend import extract_js_function, index_source, needs_node, run_node
 
-from support.frontend import extract_js_function, needs_node
-
-
-INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 
 pytestmark = needs_node
 
 
 def _source() -> str:
-    return INDEX_HTML.read_text(encoding="utf-8")
+    return index_source()
 
 
 def _declaration(source: str, prefix: str) -> str:
@@ -40,9 +35,7 @@ def _declaration(source: str, prefix: str) -> str:
 def _run_node(tmp_path: Path, name: str, body: str) -> dict:
     harness = tmp_path / name
     harness.write_text(body, encoding="utf-8")
-    return json.loads(
-        subprocess.run(["node", str(harness)], capture_output=True, check=True, encoding="utf-8").stdout
-    )
+    return json.loads(run_node(harness))
 
 
 # --- markup -----------------------------------------------------------------
@@ -71,42 +64,6 @@ def test_the_section_sits_under_combined_models_and_sorts_every_column() -> None
     shipped = source[source.index('id="projectDetailsTable"') : source.index("</tbody>", source.index("id=\"projectDetailsTable\""))]
     assert 'colspan="5"' in shipped, "the loading row does not span the table"
     assert 'data-i18n="loading"' in shipped, "the placeholder is not translatable"
-
-
-def test_the_share_column_sorts_numerically_and_remembered_its_arrows() -> None:
-    """Share is a fraction, so a string comparison would rank 9% above 40%."""
-    source = _source()
-    state = extract_js_function(source, "const breakdownSortState = {")
-    assert "projects: { field: 'tokens', direction: 'desc' }" in state
-    numeric = _declaration(source, "const BREAKDOWN_NUMERIC_FIELDS")
-    assert "'share'" in numeric, "the share column would sort as text"
-    # Re-translating a header rewrites its textContent and takes the arrow with
-    # it, so every table with data-i18n headers is restored by name after the pass.
-    assert "['projectDetailsTable', 'projects']" in source
-
-
-def test_a_range_change_clears_it_and_a_failure_says_so() -> None:
-    """Two ways the table can lie: yesterday's rows, and a silent failed read."""
-    source = _source()
-    cleared = extract_js_function(source, "function clearOverviewBreakdowns() {")
-    assert "clearOverviewFacets();" in cleared, "the new breakdown is not cleared with the others"
-
-    loader = extract_js_function(source, "async function loadOverviewFacets(customDays, dateFrom, dateTo, options = {}) {")
-    assert "overviewFacetsState.status = 'error'" in loader
-    assert loader.index("catch (error)") < loader.rindex("updateProjectDetailsTable()"), (
-        "a failed read must repaint the error row rather than leave the spinner up"
-    )
-    # One request answers for both facet tables, and the tools facet is what the
-    # tools breakdown borrows its message column from.
-    assert "facets=tools,projects" in loader
-
-    # It runs in the same deferred tail as the active-time card, so a range the
-    # user has already left behind does not open a fifth request.
-    update = extract_js_function(
-        source, "async function updateDashboard(customDays = null, dateFrom = null, dateTo = null, options = {}) {"
-    )
-    assert "loadOverviewFacets(customDays, dateFrom, dateTo, { force: forceRefresh })" in update
-    assert update.index("loadOverviewActiveTime(") < update.index("loadOverviewFacets(")
 
 
 # --- merging, executed for real under node ----------------------------------
@@ -192,7 +149,7 @@ def test_the_facet_is_merged_across_servers_rather_than_replaced_by_one(tmp_path
 
 # --- the table itself, executed for real under node -------------------------
 
-TABLE_FIXTURE = """
+TABLE_DOM = """
 function makeNode(tag) {
   const node = {
     tag, children: [], className: '', textContent: '', title: '', colSpan: null,
@@ -245,7 +202,9 @@ const read = () => ({
   toggleLabel: ids.projectDetailsToggle.textContent,
   sortSetups,
 });
+"""
 
+TABLE_FIXTURE = TABLE_DOM + """
 const ROWS = [
   { project: 'alpha', tokens: 400, messages: 40, cost: 4, share: 0.4 },
   { project: 'beta', tokens: 500, messages: 5, cost: 30, share: 0.5 },
@@ -269,6 +228,14 @@ out.byCost = read().printed.map((cells) => cells[0]);
 breakdownSortState.projects = { field: 'share', direction: 'asc' };
 updateProjectDetailsTable();
 out.byShare = read().printed.map((cells) => cells[0]);
+
+// Share is a number, and must rank as one. Fractions written out in decimals sort
+// the same either way, but a project small enough prints its share as "1e-7",
+// which a text sort ranks above every other share.
+overviewFacetsState.rows = ROWS.concat([{ project: 'delta', tokens: 1, messages: 1, cost: 0, share: 1e-7 }]);
+updateProjectDetailsTable();
+out.byShareWithATinyProject = read().printed.map((cells) => cells[0]);
+overviewFacetsState.rows = ROWS;
 
 // A long tail is capped, said so, and the toggle is the way past the cap.
 breakdownSortState.projects = { field: 'tokens', direction: 'desc' };
@@ -347,6 +314,9 @@ def test_the_table_prints_the_rank_the_header_promises(tmp_path: Path) -> None:
     assert out["byTokens"]["printed"][2] == ["gamma", "t100", "10.0%", "$0", "n90"]
     assert out["byCost"] == ["beta", "alpha", "gamma"]
     assert out["byShare"] == ["gamma", "alpha", "beta"], "the share column ranks by the share it shows"
+    assert out["byShareWithATinyProject"] == ["delta", "gamma", "alpha", "beta"], (
+        "the share column sorted as text"
+    )
     # The number goes through the same thousands formatter the table's rows use.
     assert out["byTokens"]["info"] == "n3 projects"
     assert out["byTokens"]["note"] == "12.0% of tokens carry no project"
@@ -371,3 +341,133 @@ def test_the_table_prints_the_rank_the_header_promises(tmp_path: Path) -> None:
     assert out["cleared"]["printed"] == [["Loading"]]
     assert out["cleared"]["info"] == "" and out["cleared"]["note"] == ""
     assert out["cleared"]["toggle"] == "none"
+
+
+# --- the loader, executed for real under node --------------------------------
+
+LOADER_CASES = """
+const requests = [];
+function selectedServers() { return [{ id: 'local' }]; }
+function fetchSelectedServers(url) {
+  return new Promise((resolve, reject) => requests.push({ url, resolve, reject }));
+}
+function paintToolsTableIfLoaded() {}
+
+(async () => {
+  const out = {};
+  const failing = loadOverviewFacets(null, '2026-01-05', '2026-01-05');
+  out.whileLoading = read().printed;
+  requests[0].reject(new Error('offline'));
+  await failing;
+  out.failed = { status: overviewFacetsState.status, printed: read().printed };
+
+  const landing = loadOverviewFacets(null, '2026-01-06', '2026-01-06');
+  requests[1].resolve([{ server: { id: 'local' }, payload: {
+    totals: { tokens: 1000 },
+    projects: { projects: [{ project: 'alpha', tokens: 1000, messages: 3, cost: 1 }] },
+  } }]);
+  await landing;
+  out.landed = { status: overviewFacetsState.status, names: read().printed.map((cells) => cells[0]) };
+  out.urls = requests.map((request) => request.url);
+  process.stdout.write(JSON.stringify(out));
+})();
+"""
+
+
+def test_a_failed_read_says_so_instead_of_leaving_the_spinner_up(tmp_path: Path) -> None:
+    """A range whose facet read fails must not sit under a loading row forever.
+
+    One request answers for both facet tables: the tools facet is where the tools
+    breakdown borrows its message column from, so the request asks for both.
+    """
+    source = _source()
+    loader = "\n".join(
+        extract_js_function(source, signature)
+        for signature in (
+            "function windowKeyFor(customDays, dateFrom, dateTo) {",
+            "function usageServerKeyFor(servers = selectedServers()) {",
+            "function combineOverviewFacets(payloads) {",
+            "async function loadOverviewFacets(customDays, dateFrom, dateTo, options = {}) {",
+        )
+    )
+    out = _run_node(tmp_path, "project-details-loader.js", _table_body() + "\n" + loader + TABLE_DOM + LOADER_CASES)
+
+    assert out["whileLoading"] == [["Loading"]]
+    assert out["failed"]["status"] == "error"
+    assert out["failed"]["printed"] == [["Failed to load"]], "the failed read left the spinner up"
+    assert out["landed"] == {"status": "ready", "names": ["alpha"]}
+    assert out["urls"][0] == "/api/insights?facets=tools,projects&date_from=2026-01-05&date_to=2026-01-05"
+
+
+# --- a language switch, executed for real under node -------------------------
+
+ARROWS_HARNESS = """
+function makeArrow() {
+  const arrow = { className: '', textContent: '', classes: new Set() };
+  arrow.classList = { add: (name) => arrow.classes.add(name), remove: (name) => arrow.classes.delete(name) };
+  return arrow;
+}
+// A header row as applyI18n leaves it: retranslating a header rewrites its text,
+// which takes the sort arrow span with it.
+function makeTable(fields) {
+  const headers = fields.map((field) => ({
+    field, children: [],
+    getAttribute: (name) => (name === 'data-sortable' ? field : null),
+    querySelector(selector) {
+      return selector === '.sort-arrow' ? this.children.find((kid) => kid.className === 'sort-arrow') || null : null;
+    },
+    appendChild(kid) { this.children.push(kid); return kid; },
+  }));
+  return { headers, querySelectorAll: () => headers };
+}
+const tables = {
+  toolsTable: makeTable(['tool', 'tokens', 'cost']),
+  allModelsTable: makeTable(['model', 'tokens', 'cost']),
+  projectDetailsTable: makeTable(['project', 'tokens', 'share']),
+};
+const document = {
+  getElementById: (id) => (tables[id] ? { closest: () => tables[id] } : null),
+  createElement: makeArrow,
+};
+
+__FUNCTIONS__
+
+// The reader had ranked Project Details by share, low to high.
+breakdownSortState.projects = { field: 'share', direction: 'asc' };
+__RESTORE__
+
+const arrows = (id) => Object.fromEntries(tables[id].headers.map((th) => {
+  const arrow = th.children.find((kid) => kid.className === 'sort-arrow');
+  return [th.field, arrow ? arrow.textContent : null];
+}));
+process.stdout.write(JSON.stringify({
+  tools: arrows('toolsTable'),
+  combined: arrows('allModelsTable'),
+  projects: arrows('projectDetailsTable'),
+}));
+"""
+
+
+def test_a_language_switch_puts_every_sort_arrow_back(tmp_path: Path) -> None:
+    """applyI18n rewrites the header text, so it has to restore each table's arrow.
+
+    Only that step of applyI18n runs here, sliced out of the function: the rest of
+    it repaints half the page and has no harness yet. A table missing from its
+    list keeps arrowless headers until the next click on one.
+    """
+    source = _source()
+    i18n = extract_js_function(source, "function applyI18n() {")
+    restore = extract_js_function(i18n, "if (typeof breakdownSortState !== 'undefined') {")
+    functions = "\n".join([
+        extract_js_function(source, "const breakdownSortState = {"),
+        extract_js_function(source, "function renderBreakdownSortArrows(table, state) {"),
+    ])
+    out = _run_node(
+        tmp_path,
+        "sort-arrows.js",
+        ARROWS_HARNESS.replace("__FUNCTIONS__", functions).replace("__RESTORE__", restore),
+    )
+
+    assert out["tools"] == {"tool": "", "tokens": " ▼", "cost": ""}
+    assert out["combined"] == {"model": "", "tokens": "", "cost": " ▼"}
+    assert out["projects"] == {"project": "", "tokens": "", "share": " ▲"}

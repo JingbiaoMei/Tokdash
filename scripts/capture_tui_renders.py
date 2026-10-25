@@ -4,7 +4,7 @@
     TOKDASH_TUI_NO_REMOTE=1 PYTHONPATH=src python3 scripts/capture_tui_renders.py
 
 Every pane is driven by a real Textual pilot over the contract-shaped payloads
-the revision-5 suite already pins (tests/test_tui_revision5.py), with the fetch
+the TUI tests already pin (tests/support/tui.py), with the fetch
 seams patched -- so a capture is what the widgets actually draw, clipping and
 all, not a styled mockup. The fixture data is SYNTHETIC; the prices are made up.
 
@@ -36,8 +36,9 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tests"))
 OUT = ROOT / "output" / "tui-rev5-captures"
 
-import test_tui_revision5 as fx  # noqa: E402  (contract-shaped fixtures)
+import support.tui as fx  # noqa: E402  (contract-shaped fixtures)
 import tokdash.tui.app as app_mod  # noqa: E402
+from tokdash.sessions import SESSION_TOOLS  # noqa: E402
 from tokdash.tui.app import TokdashApp  # noqa: E402
 
 
@@ -877,7 +878,7 @@ def rich_sessions() -> dict:
     """One /api/sessions body per supported tool, in the shape the route sends."""
     out: dict[str, dict] = {}
     load = _RICH_TOOL_LOAD
-    for tool in fx.SESSION_TOOLS:
+    for tool in SESSION_TOOLS:
         rows = []
         for n in range(load.get(tool, 0)):
             project, name = _RICH_PROJECTS[n % len(_RICH_PROJECTS)]

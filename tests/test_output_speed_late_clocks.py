@@ -1,4 +1,9 @@
-"""Contradictory late clocks must reject timing without moving response ownership."""
+"""Output clocks that arrive late in a Codex or DSH stream.
+
+A contradictory late clock rejects the timing without moving response
+ownership; an identical one changes nothing; and the DSH usage boundary
+follows every output clock seen, not only the last.
+"""
 import pytest
 from tokdash.output_speed_readers import CodexResponseAssociation, dsh_stream_timing
 

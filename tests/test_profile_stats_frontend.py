@@ -79,13 +79,7 @@ def _run_profile_js(tmp_path: Path, expression: str, payload: dict) -> object:
         + "process.stdout.write(JSON.stringify(result));\n",
         encoding="utf-8",
     )
-    result = subprocess.run(
-        ["node", str(harness), json.dumps(payload)],
-        check=True,
-        capture_output=True,
-        encoding="utf-8",
-    )
-    return json.loads(result.stdout)
+    return json.loads(run_node(harness, json.dumps(payload)))
 
 
 TOOLTIP_JS_SETUP = """
@@ -134,13 +128,7 @@ def _run_profile_tooltip_js(tmp_path: Path, expression: str, payload: dict) -> o
         + "process.stdout.write(JSON.stringify(result));\n",
         encoding="utf-8",
     )
-    result = subprocess.run(
-        ["node", str(harness), json.dumps(payload)],
-        check=True,
-        capture_output=True,
-        encoding="utf-8",
-    )
-    return json.loads(result.stdout)
+    return json.loads(run_node(harness, json.dumps(payload)))
 
 
 def _run_profile_tooltip_position_js(
@@ -159,13 +147,7 @@ def _run_profile_tooltip_position_js(
         + "process.stdout.write(JSON.stringify(result));\n",
         encoding="utf-8",
     )
-    result = subprocess.run(
-        ["node", str(harness), json.dumps(payload)],
-        check=True,
-        capture_output=True,
-        encoding="utf-8",
-    )
-    return json.loads(result.stdout)
+    return json.loads(run_node(harness, json.dumps(payload)))
 
 
 def _day(date: str, tokens: int, *, cost: float = 0.0) -> dict:
@@ -1782,26 +1764,13 @@ def _run_activity_insights_js(
         + "process.stdout.write(JSON.stringify(result));\n",
         encoding="utf-8",
     )
-    result = subprocess.run(
-        [
-            "node",
-            str(harness),
-            json.dumps(payload),
-            json.dumps(
-                labels
-                or {
-                    "effortXhigh": "Extra High",
-                    "effortHigh": "High",
-                    "effortMedium": "Medium",
-                    "effortLow": "Low",
-                }
-            ),
-        ],
-        check=True,
-        capture_output=True,
-        encoding="utf-8",
-    )
-    return json.loads(result.stdout)
+    labels = labels or {
+        "effortXhigh": "Extra High",
+        "effortHigh": "High",
+        "effortMedium": "Medium",
+        "effortLow": "Low",
+    }
+    return json.loads(run_node(harness, json.dumps(payload), json.dumps(labels)))
 
 
 def test_activity_insights_display_values_cover_full_partial_and_unknown_effort(

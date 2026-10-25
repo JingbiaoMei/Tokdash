@@ -13,17 +13,11 @@ import ast
 import json
 import re
 from datetime import date, timedelta
-import subprocess
 from pathlib import Path
 
 import pytest
 
-import tokdash  # type: ignore[import-untyped]
-
-from support.frontend import extract_js_function, needs_node
-
-
-INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
+from support.frontend import extract_js_function, index_source, needs_node, run_node
 
 I18N_LANGS = ("en", "zh", "ja", "ko", "es", "pt")
 
@@ -53,7 +47,7 @@ HELPERS = (
 
 
 def _source() -> str:
-    return INDEX_HTML.read_text(encoding="utf-8")
+    return index_source()
 
 
 def _report_block(source: str) -> str:
@@ -64,20 +58,15 @@ def _report_block(source: str) -> str:
 
 
 def _run_node(tmp_path: Path, name: str, body: str, *argv: str) -> str:
-    """Run a harness under node and read its stdout as UTF-8.
+    """Write a harness to ``tmp_path`` and return what node prints.
 
-    The encoding is not optional: node writes UTF-8 whatever the platform, so
-    decoding with the locale default turns every em dash and middot this tab
-    prints into a replacement character on a Windows runner.
+    run_node decodes stdout as UTF-8 whatever the platform, which this tab needs:
+    the locale default turns every em dash and middot it prints into a
+    replacement character on a Windows runner.
     """
     harness = tmp_path / name
     harness.write_text(body, encoding="utf-8")
-    return subprocess.run(
-        ["node", str(harness), *argv],
-        capture_output=True,
-        check=True,
-        encoding="utf-8",
-    ).stdout
+    return run_node(harness, *argv)
 
 
 # --- wiring -----------------------------------------------------------------
@@ -1395,6 +1384,7 @@ def test_an_empty_200_does_not_wedge_the_report_tab(tmp_path: Path) -> None:
     assert out["loadingAtRest"] is False
 
 
+@needs_node
 def test_leaving_report_defers_summary_and_never_dispatches_speed(tmp_path: Path) -> None:
     block = _report_block(_source())
     out = json.loads(_run_node(tmp_path, "usage-report-defer.js", _loader_program(block)))

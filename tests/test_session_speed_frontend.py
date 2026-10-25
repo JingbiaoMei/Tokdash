@@ -4,13 +4,12 @@ from __future__ import annotations
 import json
 import re
 import shutil
-import subprocess
-from pathlib import Path
 
 import pytest
-import tokdash
 
-SRC = (Path(tokdash.__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
+from support.frontend import index_source, run_node
+
+SRC = index_source()
 
 
 def function(name: str) -> str:
@@ -29,8 +28,7 @@ def run_js(tmp_path, program):
         pytest.skip("Node unavailable")
     path = tmp_path / "session_speed.js"
     path.write_text(program, encoding="utf-8")
-    result = subprocess.run(["node", str(path)], capture_output=True, encoding="utf-8", check=True)
-    return json.loads(result.stdout)
+    return json.loads(run_node(path))
 
 
 STUBS = """

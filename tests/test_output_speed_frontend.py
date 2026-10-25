@@ -18,15 +18,13 @@ from __future__ import annotations
 import json
 import re
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
 
-import tokdash  # type: ignore[import-untyped]
+from support.frontend import index_source, run_node
 
-INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
-SRC = INDEX_HTML.read_text(encoding="utf-8")
+SRC = index_source()
 
 SPEED_SURFACES = ("usageReportSpeedPanel", "sessionSpeedPanel")
 LANGUAGES = ("en", "zh", "ja", "ko", "es", "pt")
@@ -74,9 +72,7 @@ def _run_node(tmp_path: Path, name: str, script: str):
         pytest.skip("node is not installed")
     harness = tmp_path / f"{name}.js"
     harness.write_text(script, encoding="utf-8")
-    result = subprocess.run(["node", str(harness)], check=True,
-                            capture_output=True, encoding="utf-8")
-    return json.loads(result.stdout)
+    return json.loads(run_node(harness))
 
 
 STUB_LINES = [

@@ -2,23 +2,18 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 
 import pytest
 
-import tokdash
+from support.frontend import INDEX_HTML, extract_js_function, index_source, needs_node, run_node
 
-from support.frontend import extract_js_function, needs_node
-
-
-INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 
 pytestmark = needs_node
 
 
 def _run(tmp_path: Path, script: str) -> dict:
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     functions = "\n".join(
         extract_js_function(source, signature)
         for signature in (
@@ -31,8 +26,7 @@ def _run(tmp_path: Path, script: str) -> dict:
     )
     harness = tmp_path / "refresh.js"
     harness.write_text(f"{functions}\n{script}", encoding="utf-8")
-    result = subprocess.run(["node", str(harness)], check=True, capture_output=True, text=True)
-    return json.loads(result.stdout)
+    return json.loads(run_node(harness))
 
 
 def test_refresh_keeps_same_range_snapshots_for_incomplete_servers(tmp_path: Path) -> None:

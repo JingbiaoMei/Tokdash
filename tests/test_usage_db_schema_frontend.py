@@ -10,16 +10,12 @@ on. These tests pin the message end to end through the two frontend seams.
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 
+import pytest
 
-import tokdash
+from support.frontend import extract_js_function, index_source, needs_node, run_node
 
-from support.frontend import extract_js_function, needs_node
-
-
-INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 
 # What the backend actually puts in the HTTP 500 body (api.py -> str(exc)).
 SCHEMA_DETAIL = (
@@ -28,16 +24,15 @@ SCHEMA_DETAIL = (
     "Tokdash processes using this data directory"
 )
 
-needs_node = needs_node
-
 
 def _functions() -> str:
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     return "\n".join(
         [
             extract_js_function(src, "function collectServerResults("),
             extract_js_function(src, "async function fetchSelectedServers("),
             extract_js_function(src, "function dashboardFetchStatusText("),
+            extract_js_function(src, "function setDashboardFetchStatus("),
         ]
     )
 
@@ -69,13 +64,7 @@ async function fetchJsonWithRetry(server) {
 def _run_node(tmp_path: Path, body: str, scenario: dict):
     harness = tmp_path / "harness.js"
     harness.write_text(_functions() + HARNESS_PREAMBLE + body, encoding="utf-8")
-    result = subprocess.run(
-        ["node", str(harness), json.dumps(scenario)],
-        check=True,
-        capture_output=True,
-        encoding="utf-8",
-    )
-    return json.loads(result.stdout)
+    return json.loads(run_node(harness, json.dumps(scenario)))
 
 
 FETCH_BODY = """
@@ -189,13 +178,32 @@ def test_status_text_keeps_detail_but_not_for_503(tmp_path: Path) -> None:
     assert empty_text == "loadFailed"
 
 
+LAST_UPDATE_BODY = """
+const lastUpdate = { textContent: 'Updated 12:00' };
+const document = { getElementById: (id) => (id === 'lastUpdate' ? lastUpdate : null) };
+process.stdout.write(JSON.stringify(scenario.cases.map((spec) => {
+  setDashboardFetchStatus(makeError(spec));
+  return lastUpdate.textContent;
+})));
+"""
+
+
 @needs_node
-def test_status_line_is_rendered_from_the_shared_helper() -> None:
-    """setDashboardFetchStatus must not keep its own copy of the message policy."""
-    src = INDEX_HTML.read_text(encoding="utf-8")
-    setter = extract_js_function(src, "function setDashboardFetchStatus(")
-    assert "dashboardFetchStatusText(error)" in setter
-    assert "temporaryOverload" not in setter
+def test_the_status_line_shows_the_remediation(tmp_path: Path) -> None:
+    """setDashboardFetchStatus writes the persistent #lastUpdate line, and that line
+    is where a dashboard-wide failure is read: it must carry the same detail as the
+    rest of the page, and keep the overload wording for a 503."""
+    out = _run_node(
+        tmp_path,
+        LAST_UPDATE_BODY,
+        {
+            "cases": [
+                {"status": 500, "message": SCHEMA_DETAIL},
+                {"status": 503, "message": "Too many cold requests; retry shortly"},
+            ]
+        },
+    )
+    assert out == [f"loadFailed: {SCHEMA_DETAIL}", "temporaryOverload"]
 
 
 # --- Quota tab ---------------------------------------------------------------
@@ -279,7 +287,7 @@ async function fetchJsonWithRetry(server) {
 
 
 def _run_quota(tmp_path: Path, scenario: dict):
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     functions = "\n".join(
         [
             extract_js_function(src, "function collectServerResults("),
@@ -291,13 +299,7 @@ def _run_quota(tmp_path: Path, scenario: dict):
     )
     harness = tmp_path / "quota.js"
     harness.write_text(functions + QUOTA_PREAMBLE, encoding="utf-8")
-    result = subprocess.run(
-        ["node", str(harness), json.dumps(scenario)],
-        check=True,
-        capture_output=True,
-        encoding="utf-8",
-    )
-    return json.loads(result.stdout)
+    return json.loads(run_node(harness, json.dumps(scenario)))
 
 
 @needs_node
@@ -360,18 +362,6 @@ def test_quota_success_clears_a_stale_error(tmp_path: Path) -> None:
     assert out["statusText"] == "" and out["failed"] == []
 
 
-def test_quota_path_has_no_private_settlement_logic() -> None:
-    """loadQuota must not grow a second copy of the settlement policy."""
-    src = INDEX_HTML.read_text(encoding="utf-8")
-    load_quota = extract_js_function(src, "async function loadQuota(")
-    assert "collectServerResults(servers, settled)" in load_quota
-    assert "setQuotaFetchStatus" in load_quota
-    # The old private bookkeeping is gone: no direct status writes, no bare
-    # loadFailed substituted for a real rejection.
-    assert "serverRuntimeStatus.set(" not in load_quota
-    assert "throw new Error(t('loadFailed'))" not in load_quota
-
-
 REFRESH_PREAMBLE = """
 const scenario = JSON.parse(process.argv[2]);
 let updateInFlight = false;
@@ -412,7 +402,7 @@ async function loadQuota() { loadQuotaCalls += 1; return scenario.reloadOk !== f
 
 
 def _run_refresh(tmp_path: Path, scenario: dict):
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     functions = "\n".join(
         [
             extract_js_function(src, "function dashboardFetchStatusText("),
@@ -423,11 +413,7 @@ def _run_refresh(tmp_path: Path, scenario: dict):
     )
     harness = tmp_path / "refresh.js"
     harness.write_text(functions + REFRESH_PREAMBLE, encoding="utf-8")
-    result = subprocess.run(
-        ["node", str(harness), json.dumps(scenario)],
-        check=True, capture_output=True, encoding="utf-8",
-    )
-    return json.loads(result.stdout)
+    return json.loads(run_node(harness, json.dumps(scenario)))
 
 
 @needs_node
@@ -514,7 +500,7 @@ async function fetchJsonWithRetry() {
 }
 
 (async () => {
-  await setQuotaEnabled(true);
+  await __WRITE__;
   process.stdout.write(JSON.stringify({
     statusText: quotaStatusElement().textContent,
     statusColor: quotaStatusElement().style.color || null,
@@ -526,8 +512,17 @@ async function fetchJsonWithRetry() {
 """
 
 
-def _run_write(tmp_path: Path, scenario: dict):
-    src = INDEX_HTML.read_text(encoding="utf-8")
+# Every settings writer the Quota tab has, and a call that sends one write.
+QUOTA_WRITERS = [
+    pytest.param("async function enableQuotaProvider(", "enableQuotaProvider('codex_api')", id="enableQuotaProvider"),
+    pytest.param("async function setQuotaCredentialScan(", "setQuotaCredentialScan(true)", id="setQuotaCredentialScan"),
+    pytest.param("async function setQuotaEnabled(", "setQuotaEnabled(true)", id="setQuotaEnabled"),
+    pytest.param("async function setQuotaInterval(", "setQuotaInterval(15)", id="setQuotaInterval"),
+]
+
+
+def _run_write(tmp_path: Path, scenario: dict, writer: str, call: str):
+    src = index_source()
     functions = "\n".join(
         [
             extract_js_function(src, "function collectServerResults("),
@@ -536,21 +531,18 @@ def _run_write(tmp_path: Path, scenario: dict):
             extract_js_function(src, "function setQuotaFetchStatus("),
             extract_js_function(src, "function setQuotaActionStatus("),
             extract_js_function(src, "async function loadQuota("),
-            extract_js_function(src, "async function setQuotaEnabled("),
+            extract_js_function(src, writer),
         ]
     )
     harness = tmp_path / "write.js"
-    harness.write_text(functions + WRITE_PREAMBLE, encoding="utf-8")
-    result = subprocess.run(
-        ["node", str(harness), json.dumps(scenario)],
-        check=True, capture_output=True, encoding="utf-8",
-    )
-    return json.loads(result.stdout)
+    harness.write_text(functions + WRITE_PREAMBLE.replace("__WRITE__", call), encoding="utf-8")
+    return json.loads(run_node(harness, json.dumps(scenario)))
 
 
 @needs_node
-def test_successful_write_with_failed_reload_keeps_the_fetch_error(tmp_path: Path) -> None:
-    out = _run_write(tmp_path, {"reloadFails": True, "message": SCHEMA_DETAIL})
+@pytest.mark.parametrize("writer, call", QUOTA_WRITERS)
+def test_successful_write_with_failed_reload_keeps_the_fetch_error(tmp_path: Path, writer: str, call: str) -> None:
+    out = _run_write(tmp_path, {"reloadFails": True, "message": SCHEMA_DETAIL}, writer, call)
     assert out["postCalls"] == 1, "the settings write itself must still be sent"
     # The remediation survives instead of being replaced by a write ack.
     assert "tokdash update" in out["statusText"]
@@ -560,28 +552,13 @@ def test_successful_write_with_failed_reload_keeps_the_fetch_error(tmp_path: Pat
 
 
 @needs_node
-def test_successful_write_with_successful_reload_still_acknowledges(tmp_path: Path) -> None:
+@pytest.mark.parametrize("writer, call", QUOTA_WRITERS)
+def test_successful_write_with_successful_reload_still_acknowledges(tmp_path: Path, writer: str, call: str) -> None:
     """The fix must not cost users their normal "Saved" confirmation."""
-    out = _run_write(tmp_path, {"reloadFails": False, "message": ""})
+    out = _run_write(tmp_path, {"reloadFails": False, "message": ""}, writer, call)
     assert out["postCalls"] == 1
     assert out["statusText"] == "quotaActionSaved"
     assert out["quotaLoaded"] is True
-
-
-def test_all_quota_write_paths_gate_their_acknowledgment() -> None:
-    """All four settings writers must gate 'saved' on the reload result."""
-    src = INDEX_HTML.read_text(encoding="utf-8")
-    writers = [
-        "async function enableQuotaProvider(",
-        "async function setQuotaCredentialScan(",
-        "async function setQuotaEnabled(",
-        "async function setQuotaInterval(",
-    ]
-    for signature in writers:
-        body = extract_js_function(src, signature)
-        assert "if (await loadQuota({ force: true })) setQuotaActionStatus('saved');" in body, signature
-        # The ungated sequence must not come back.
-        assert "await loadQuota({ force: true });\n        setQuotaActionStatus('saved');" not in body
 
 
 @needs_node

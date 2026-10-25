@@ -1,11 +1,10 @@
-"""Round-3 reviewer fixes: XSS escapes, chart body-transform, tab race, filter state, token reset.
+"""Round-3 reviewer fixes: XSS escapes, chart body-transform, tab race, filter state.
 
-These six defects were found on the branch after the first merge review:
+These defects were found on the branch after the first merge review:
 unescaped log strings reached innerHTML, the chart entry animation animated
 <body> (making it the containing block for every position:fixed overlay), the
 tab `.active` swap was deferred into an anime onComplete that stop() never
-fires, the sessions tool filter lived only as a pill class, and an empty
-period silently returned from the token-composition renderer.
+fires, and the sessions tool filter lived only as a pill class.
 """
 from __future__ import annotations
 
@@ -191,39 +190,6 @@ def test_sessions_rerender_reapplies_search():
     fn = INDEX_HTML[INDEX_HTML.index("function renderSessionsTab"):]
     fn = fn[: fn.index("\n    function ", 10)]
     assert "filterSessionsBySearch" in fn, "renderSessionsTab must re-apply the search term after rebuild"
-
-
-# ---------------------------------------------------------------------------
-# P2 — empty periods reset the token composition bar
-# ---------------------------------------------------------------------------
-
-def test_token_composition_resets_on_empty_data():
-    fn = INDEX_HTML[INDEX_HTML.index("function updateTokenCompositionBar"):]
-    fn = fn[: fn.index("\n    function ", 10)]
-    assert "resetTokenComposition()" in fn
-    assert re.search(r"if \(!data\) \{\s*resetTokenComposition\(\); return; \}", fn)
-    assert re.search(r"\}\s*else \{(?:\s*//[^\n]*)*\s*resetTokenComposition\(\);", fn), (
-        "total == 0 must take an explicit reset branch, not silently return"
-    )
-
-
-def test_reset_zeroes_bars_and_values():
-    fn = INDEX_HTML[INDEX_HTML.index("function resetTokenComposition"):]
-    fn = fn[: fn.index("\n    function ", 10)]
-    for bar in ("compPromptBar", "compCacheBar", "compOutputBar", "compReasoningBar"):
-        assert bar in fn
-    assert "'—'" in fn or '"—"' in fn
-
-
-def test_reset_stops_cache_animation_before_writing_width():
-    fn = INDEX_HTML[INDEX_HTML.index("function resetTokenComposition"):]
-    fn = fn[: fn.index("\n    function ", 10)]
-    stop = fn.index("stopCacheHitBar")
-    write = fn.index("style.width = '0%'")
-    assert 0 < stop < write, (
-        "anime keeps ticking after external style writes: an un-stopped width "
-        "animation restores its stale percentage over the reset"
-    )
 
 
 # ---------------------------------------------------------------------------

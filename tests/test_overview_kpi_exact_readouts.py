@@ -3,9 +3,13 @@
 Every card in the row carries the figure behind its rounded value in the same
 hover readout -- "186M" reads out as "185,952,048 tokens", "97.6%" as "97.59%" --
 so the precise number is available without widening six narrow cards. These tests
-pin the parts that break silently: that every card with a readout stays wired,
-that the readout survives the cursor crossing onto it, and that it borrows its
-colour from the card value it belongs to.
+pin the parts that break silently: that the markup ships every readout and ships
+it switched off, that the readout survives the cursor crossing onto it, and that
+it borrows its colour from the card value it belongs to.
+
+Turning the readouts on and off is the render's job, so it is run rather than
+read: test_overview_empty_states_frontend.py::test_the_kpi_readouts_follow_the_range
+renders a populated range and an empty one and checks every card's wiring.
 
 The Cost card deliberately has no readout: `/api/usage` rounds `total_cost` to
 two decimals before it reaches the browser, so a four-decimal readout would only
@@ -15,16 +19,11 @@ restate the card's own rounded figure with false precision.
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 
 
-import tokdash  # type: ignore[import-untyped]
+from support.frontend import INDEX_HTML, extract_js_function, needs_node, run_node
 
-from support.frontend import extract_js_function, needs_node
-
-
-INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 
 # The five cards in the Overview KPI row that carry a readout, as
 # (value id, readout id). Cost is absent by design -- see the module docstring.
@@ -46,20 +45,27 @@ def _tooltip_rule(source: str) -> str:
     return "".join(rule.split())
 
 
-def test_every_kpi_card_has_an_exact_readout() -> None:
+def test_the_markup_ships_every_readout_switched_off() -> None:
+    """Each readout is in the page, hidden, beside a value that is not yet a tab stop.
+
+    A card that has not loaded must not be a focus stop announcing a placeholder;
+    the render turns the wiring on once there is a figure to read out. The readout
+    ids are passed to that helper as arguments, so the generic id check in
+    test_frontend_element_ids.py cannot see whether they exist (it does cover the
+    value ids, which are looked up by name).
+    """
     source = INDEX_HTML.read_text(encoding="utf-8")
-    # The calls are wrapped differently line to line, so compare without the
-    # whitespace rather than pinning one call's formatting.
-    compact = "".join(source.split())
     for value_id, tooltip_id in KPI_READOUTS:
-        assert f'id="{value_id}"' in source, f"the {value_id} card is gone"
-        assert f'id="{tooltip_id}"' in source, f"{value_id} lost its exact readout"
-        assert (
-            f"'{value_id}','{tooltip_id}'" in compact
-        ), f"nothing writes the {value_id} readout"
-    # The Cost card keeps its value but not a readout: the API rounds the figure
-    # to cents, so four decimals would restate the card's own number.
-    assert 'id="totalCost"' in source
+        assert f'id="{value_id}" tabindex' not in source
+        assert f'id="{value_id}" aria-describedby' not in source
+        assert f'id="{tooltip_id}" class="overview-token-exact-tooltip"' in source, (
+            f"{value_id} lost its exact readout"
+        )
+        assert "hidden>-</div>" in source.split(f'id="{tooltip_id}"')[1][:200], (
+            f"{tooltip_id} should start hidden"
+        )
+    # The Cost card has no readout: the API rounds the figure to cents, so four
+    # decimals would restate the card's own number.
     assert 'id="totalCostExact"' not in source
 
 
@@ -121,27 +127,6 @@ def test_readout_is_larger_than_the_number_it_reports() -> None:
     assert "font-size:13px" in rule
 
 
-def test_values_start_unfocusable_and_readouts_start_hidden() -> None:
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    # Every value ships without tabindex/aria-describedby and every readout with
-    # `hidden`, so a card that has not loaded yet is not a focus stop and does not
-    # announce a placeholder. setKpiExactReadout adds the wiring only when there is
-    # a figure to read out.
-    for value_id, tooltip_id in KPI_READOUTS:
-        assert f'id="{value_id}" tabindex' not in source
-        assert f'id="{value_id}" aria-describedby' not in source
-        assert (
-            f'id="{tooltip_id}" class="overview-token-exact-tooltip"' in source
-            and "hidden>-</div>" in source.split(f'id="{tooltip_id}"')[1][:200]
-        ), f"{tooltip_id} should start hidden"
-    readout = extract_js_function(
-        source, "function setKpiExactReadout(valueId, tooltipId, text, note = '') {"
-    )
-    assert "valueElement.tabIndex = 0" in readout
-    assert "valueElement.removeAttribute('tabindex')" in readout
-    assert "tooltip.hidden = true" in readout
-
-
 @needs_node
 def test_exact_duration_formatter_reports_the_seconds_the_card_drops(tmp_path: Path) -> None:
     """The agent-time readout is the only exact formatter left.
@@ -167,15 +152,7 @@ def test_exact_duration_formatter_reports_the_seconds_the_card_drops(tmp_path: P
         "}));\n",
         encoding="utf-8",
     )
-    output = subprocess.run(
-        ["node", str(harness)],
-        capture_output=True,
-        text=True,
-        check=True,
-        encoding="utf-8",
-    ).stdout
-
-    assert json.loads(output) == {
+    assert json.loads(run_node(harness)) == {
         "hms": "1h 55m 54s",  # the seconds the card rounds away
         "ms": "45s",
         "seconds": "9s",

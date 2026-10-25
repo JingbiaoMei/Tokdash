@@ -20,6 +20,12 @@ Seven ways this regresses, none of which string assertions on the page can see:
 - a count-up frame formatted while it still held a fraction, which paints a
   string wider than the value the card was just fitted to.
 
+The same render owns the row's exact-value readouts and the token composition
+bar, so those follow the range here too: a populated range wires each card's
+readout for hover, focus and the screen reader, an empty one takes all of that
+back, and an empty range zeroes the composition bar after stopping the cache
+bar's animation, which would otherwise restore its old width over the reset.
+
 These run the real renderOverviewTab against a stub DOM, together with the real
 animation counters module and the real anime.js engine — imported from disk, not
 stand-ins — so the supersede/cancel behaviour is exercised for real.
@@ -28,16 +34,12 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 from pathlib import Path
 
 
-import tokdash
-
-from support.frontend import extract_js_function, needs_node
+from support.frontend import INDEX_HTML, extract_js_function, index_source, needs_node, run_node
 
 
-INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 COUNTERS_JS = INDEX_HTML.parent / "js" / "animations" / "counters.js"
 ANIME_JS = INDEX_HTML.parent / "js" / "anime.esm.js"
 
@@ -49,15 +51,30 @@ HARNESS_HEAD = """
 const nodes = {};
 function node(id) {
   if (!nodes[id]) {
-    nodes[id] = {
-      id, textContent: '', innerHTML: '', style: {}, attrs: {}, dataset: {},
+    const el = {
+      id, innerHTML: '', style: {}, attrs: {}, dataset: {}, classes: new Set(),
       _currentValue: undefined,
-      setAttribute(name, value) { nodes[id].attrs[name] = value; },
-      removeAttribute(name) { delete nodes[id].attrs[name]; },
+      _text: '',
+      // Writing text replaces an element's children, as it does in a browser, so a
+      // readout rewritten for the next range keeps none of the last one's spans.
+      get textContent() { return el._text; },
+      set textContent(value) { el._text = value === null ? '' : String(value); el.children = []; },
+      // The tabIndex property and the tabindex attribute are one value in a
+      // browser; the readout helper sets the one and removes the other.
+      get tabIndex() { return 'tabindex' in el.attrs ? Number(el.attrs.tabindex) : -1; },
+      set tabIndex(value) { el.attrs.tabindex = String(value); },
+      classList: {
+        add: (name) => el.classes.add(name),
+        remove: (name) => el.classes.delete(name),
+        contains: (name) => el.classes.has(name),
+      },
+      setAttribute(name, value) { el.attrs[name] = String(value); },
+      removeAttribute(name) { delete el.attrs[name]; },
       children: [],
-      appendChild(child) { nodes[id].children.push(child); return child; },
-      append(...kids) { nodes[id].children.push(...kids); },
+      appendChild(child) { el.children.push(child); return child; },
+      append(...kids) { el.children.push(...kids); },
     };
+    nodes[id] = el;
   }
   return nodes[id];
 }
@@ -110,14 +127,17 @@ function formatHitRate(rate) {
 const seenAtFit = {};
 function fitKpiValue(el) { if (el) seenAtFit[el.id] = el.textContent; }
 function fitOverviewKpis() { ['totalTokens', 'totalCost', 'totalMessages', 'overviewActiveTime'].forEach((id) => fitKpiValue(node(id))); }
-function renderOverviewActiveTime() {}
+// The agent-time card is repainted with the rest of the row, from its own
+// request's state; a scenario that needs a figure there sets one.
+const overviewActiveTimeState = { status: 'idle', data: null, key: null, requestId: 0 };
+function renderDelta() {}
+function formatToolName(tool) { return tool; }
 function updateComparisonDeltas() {}
 function updateToolChart() {}
 function updateModelChart() {}
 function updateToolsTable() {}
 function renderOverviewProfilePreview() {}
 function reconcileTodayProfileContribution(cached) { return cached; }
-function updateTokenCompositionBar() {}
 function updateStatsInsights() {}
 function updateAppsBreakdown() {}
 function updateCombinedModelsTable() {}
@@ -201,6 +221,27 @@ async function main() {
 
   const settle = () => new Promise((resolve) => setTimeout(resolve, 5));
   const advance = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // The five KPI cards with an exact-value readout, as (value, readout) ids.
+  // Cost has none: the API rounds its figure to cents before it gets here.
+  const KPI_READOUTS = [
+    ['totalTokens', 'totalTokensExact'],
+    ['totalMessages', 'totalMessagesExact'],
+    ['overviewActiveTime', 'overviewActiveTimeExact'],
+    ['avgCacheHitRate', 'avgCacheHitRateExact'],
+    ['topModel', 'topModelExact'],
+  ];
+  const readouts = () => Object.fromEntries(KPI_READOUTS.map(([valueId, tooltipId]) => {
+    const value = node(valueId);
+    const tooltip = node(tooltipId);
+    return [valueId, {
+      hidden: tooltip.hidden,
+      text: tooltip.children.map((child) => child.textContent).join(' '),
+      tabindex: value.attrs.tabindex ?? null,
+      describedby: value.attrs['aria-describedby'] ?? null,
+      label: value.attrs['aria-label'] ?? null,
+    }];
+  }));
 
   if (scenario === 'stale-animation-cannot-overwrite-empty-state') {
     // A populated range is rendered (starting real 1.2s count-ups), then an
@@ -451,6 +492,62 @@ async function main() {
     out.after = node('totalTokens').textContent;
   }
 
+  if (scenario === 'kpi-readouts-follow-the-range') {
+    // The page ships every readout hidden and every card value out of the tab order.
+    KPI_READOUTS.forEach(([, tooltipId]) => { node(tooltipId).hidden = true; });
+    renderOverviewTab(zeroPayload());
+    await settle();
+    out.emptyOnArrival = readouts();
+
+    overviewActiveTimeState.status = 'ready';
+    overviewActiveTimeState.data = { active_ms_sum: 6954017, active_gap_cap_ms: 300000, unavailable_tools: [] };
+    renderOverviewTab(populated());
+    await advance(1400);
+    out.populated = readouts();
+    out.tokensCard = node('totalTokens').textContent;
+
+    overviewActiveTimeState.data = { active_ms_sum: 0, active_gap_cap_ms: 300000, unavailable_tools: [] };
+    renderOverviewTab(zeroPayload());
+    await settle();
+    out.emptyAfterData = readouts();
+    // Nothing asked for a Cost readout at any point.
+    out.costReadoutLookedUp = 'totalCostExact' in nodes;
+  }
+
+  if (scenario === 'token-composition-resets-on-an-empty-range') {
+    // A stand-in for the bar animation that logs, in order, everything that
+    // touches the cache bar: an animation started, one stopped, a width written.
+    const events = [];
+    window.TokDashAnimations.animateCacheHitBar = (bar, pct) => {
+      events.push(`animate:${bar.id}:${pct.toFixed(1)}`);
+    };
+    window.TokDashAnimations.stopCacheHitBar = (bar) => { events.push(`stop:${bar.id}`); };
+    let cacheWidth = '';
+    Object.defineProperty(node('compCacheBar').style, 'width', {
+      get() { return cacheWidth; },
+      set(value) { cacheWidth = value; events.push(`width:${value}`); },
+    });
+    const composition = () => ({
+      bars: ['compPromptBar', 'compCacheBar', 'compOutputBar', 'compReasoningBar']
+        .map((id) => node(id).style.width),
+      values: ['compPromptVal', 'compCacheVal', 'compOutputVal', 'compReasoningVal']
+        .map((id) => node(id).textContent),
+      events: events.splice(0),
+    });
+    const full = {
+      total_tokens: 5000,
+      by_tool: { codex: { tokens_in: 1000, tokens_cache: 3000, tokens_out: 500, tokens_reasoning: 500 } },
+    };
+    updateTokenCompositionBar(full);
+    out.full = composition();
+    updateTokenCompositionBar({ by_tool: {} });
+    out.emptyRange = composition();
+    updateTokenCompositionBar(full);
+    composition();
+    updateTokenCompositionBar(null);
+    out.noPayload = composition();
+  }
+
   process.stdout.write(JSON.stringify(out));
 }
 
@@ -468,6 +565,9 @@ FUNCTIONS_UNDER_TEST = (
     "function formatDuration(ms, exact = false) {",
     "function formatExactDuration(ms) {",
     "function renderOverviewTokenTotal(value = overviewTotalTokensRaw, staticText = null) {",
+    "function renderOverviewActiveTime() {",
+    "function resetTokenComposition() {",
+    "function updateTokenCompositionBar(data) {",
     "function renderOverviewTab(data) {",
     # A partial read is built here, not asserted from a hand-written flag: these
     # are the two functions that turn per-server rows into the response body the
@@ -479,7 +579,7 @@ FUNCTIONS_UNDER_TEST = (
 
 
 def _run(tmp_path: Path, scenario: str) -> dict:
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     functions = "\n".join(
         extract_js_function(source, signature) for signature in FUNCTIONS_UNDER_TEST
     )
@@ -495,13 +595,7 @@ def _run(tmp_path: Path, scenario: str) -> dict:
         + SCENARIOS,
         encoding="utf-8",
     )
-    result = subprocess.run(
-        ["node", str(harness), scenario],
-        check=True,
-        capture_output=True,
-        encoding="utf-8",
-    )
-    return json.loads(result.stdout)
+    return json.loads(run_node(harness, scenario))
 
 
 def test_stale_animation_cannot_overwrite_the_empty_state(tmp_path):
@@ -751,3 +845,65 @@ def test_the_next_range_counts_from_the_value_on_screen(tmp_path):
     assert float(out["recountMessages"].replace(",", "")) < 100, (
         f"the Messages recount resumed from a stale total: {out['recountMessages']}"
     )
+
+
+def test_the_kpi_readouts_follow_the_range(tmp_path):
+    """Each card's exact figure is wired for hover, keyboard and screen reader.
+
+    A populated range turns every readout on: shown, the value a tab stop that
+    names its readout, and an aria-label carrying the exact figure. An empty range
+    takes all of it back, so a card with nothing exact to say is not a focus stop
+    that announces a stale number. Cost has no readout at all.
+    """
+    out = _run(tmp_path, "kpi-readouts-follow-the-range")
+
+    off = {"hidden": True, "text": "", "tabindex": None, "describedby": None, "label": None}
+    assert out["emptyOnArrival"] == {card: off for card in out["emptyOnArrival"]}
+    assert len(out["emptyOnArrival"]) == 5
+
+    expected = {
+        # The card is labelled "Total Tokens", so its value carries no unit; the
+        # exact count keeps the unit for the readout and the screen reader.
+        "totalTokens": "5,200,000 tokens",
+        "totalMessages": "300 messages",
+        "overviewActiveTime": "1h 55m 54s",
+        "avgCacheHitRate": "40.00%",
+        "topModel": "gpt",
+    }
+    for card, exact in expected.items():
+        readout = out["populated"][card]
+        assert readout["hidden"] is False, card
+        assert readout["tabindex"] == "0", f"{card} is not a tab stop"
+        assert readout["describedby"] == f"{card}Exact", card
+        assert readout["label"] == exact, card
+        assert readout["text"].startswith(exact), card
+    assert out["tokensCard"] == "5.2M"
+    # The agent-time readout also carries the idle cap the card used to keep in a
+    # native title tooltip.
+    assert out["populated"]["overviewActiveTime"]["text"] == "1h 55m 54s · idleCap: 5m"
+
+    assert out["emptyAfterData"] == {card: off for card in out["emptyAfterData"]}, (
+        "an empty range left a readout, a tab stop or an aria-label behind"
+    )
+    assert out["costReadoutLookedUp"] is False
+
+
+def test_an_empty_range_resets_the_token_composition(tmp_path):
+    """No tokens means empty bars and dashes, not the previous range's split.
+
+    The cache bar is animated, and anime keeps writing its target width after an
+    outside write. So the reset has to stop that animation before it zeroes the
+    width, or the old percentage comes back over the reset.
+    """
+    out = _run(tmp_path, "token-composition-resets-on-an-empty-range")
+
+    assert out["full"]["values"] == ["1.0k (20.0%)", "3.0k (60.0%)", "500 (10.0%)", "500 (10.0%)"]
+    assert out["full"]["events"] == ["animate:compCacheBar:60.0"]
+    assert all(width not in ("", "0%") for width in out["full"]["bars"][0:1] + out["full"]["bars"][2:])
+
+    for case in ("emptyRange", "noPayload"):
+        assert out[case]["bars"] == ["0%"] * 4, case
+        assert out[case]["values"] == ["—"] * 4, case
+        assert out[case]["events"] == ["stop:compCacheBar", "width:0%"], (
+            f"{case}: the cache bar's animation must be stopped before its width is reset"
+        )

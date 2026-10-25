@@ -134,29 +134,21 @@ process.stdout.write(JSON.stringify({
 
 
 def test_refresh_report_is_accessible_and_the_scan_stays_incremental() -> None:
+    """The markup half: the panel announces itself politely, and both ways out
+    of it (the close button and Escape) dismiss it for the range. When it opens,
+    and the forced request it reports on, are run in
+    tests/test_dashboard_queue_frontend.py::test_every_same_range_refresh_reports_but_initial_and_range_loads_do_not.
+    """
     html = INDEX_HTML.read_text(encoding="utf-8")
-    updater = extract_js_function(
-        html,
-        "async function updateDashboard(customDays = null, dateFrom = null, dateTo = null, options = {}) {",
-    )
+    start = html.index('<section id="refreshReport"')
+    panel = html[start : html.index(">", start)]
+    assert 'role="status"' in panel and 'aria-live="polite"' in panel, panel
+    assert html.count("hideUsageRefreshReport({ focusButton: true, dismissed: true });") == 2
+    # The snapshots live in memory for the session; nothing is persisted.
     reconcile = extract_js_function(
         html,
         "function reconcileUsageRows(rows, windowKey, servers = selectedServers(), cache = lastUsageRowsByServer) {",
     )
-
-    assert 'id="refreshReport"' in html
-    assert 'role="status"' in html
-    assert 'aria-live="polite"' in html
-    assert 'id="refreshReportClose"' in html
-    assert "refreshReportComplete: 'Refresh complete'" in html
-    assert "refreshReportComplete: '刷新完成'" in html
-    assert "usageApiUrl += '&refresh=1';" in updater
-    assert updater.count("fetchSelectedServers(usageApiUrl)") == 1
-    assert "reconcileUsageRows(rows, windowKey, usageServers)" in updater
-    assert "const shouldReportRefresh = (forceRefresh || previousUsageForReport !== null)" in updater
-    assert "&& refreshReportDismissedWindowKey !== windowKey;" in updater
-    assert updater.count("if (shouldReportRefresh) {") == 2
-    assert html.count("hideUsageRefreshReport({ focusButton: true, dismissed: true });") == 2
     assert "localStorage" not in reconcile
 
 

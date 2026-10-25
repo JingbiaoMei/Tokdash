@@ -1,11 +1,11 @@
-"""Round-3 reviewer fixes: chart body-transform, tab race, filter state.
+"""Round-3 reviewer fixes: chart body-transform, tab race.
 
 These defects were found on the branch after the first merge review: the
 chart entry animation animated <body> (making it the containing block for
-every position:fixed overlay), the tab `.active` swap was deferred into an
-anime onComplete that stop() never fires, and the sessions tool filter lived
-only as a pill class. The escaping fixes from the same review are tested in
-test_frontend_html_escaping.py.
+every position:fixed overlay), and the tab `.active` swap was deferred into an
+anime onComplete that stop() never fires. The escaping and sessions filter
+fixes from the same review are tested in test_frontend_html_escaping.py and
+test_sessions_tab_filters_frontend.py.
 """
 from __future__ import annotations
 
@@ -20,7 +20,6 @@ from support.frontend import needs_node
 
 
 STATIC = Path(tokdash.__file__).parent / "static"
-INDEX_HTML = (STATIC / "index.html").read_text(encoding="utf-8")
 CHARTS_JS = (STATIC / "js" / "animations" / "charts.js").read_text(encoding="utf-8")
 TRANSITIONS_JS = (STATIC / "js" / "animations" / "transitions.js").read_text(encoding="utf-8")
 
@@ -117,47 +116,3 @@ console.log(JSON.stringify({ bad, finalActive }));
     result = json.loads(proc.stdout.strip().splitlines()[-1])
     assert result["bad"] == 0, f"{result['bad']} transitions left != 1 active panel"
     assert len(result["finalActive"]) == 1, f"final state: {result['finalActive']}"
-
-
-# ---------------------------------------------------------------------------
-# P2 — sessions tool filter is state, not a pill class
-# ---------------------------------------------------------------------------
-
-def test_sessions_filter_state_variable_exists_and_drives_pills():
-    assert "let sessionToolFilter = 'all';" in INDEX_HTML
-    pills = INDEX_HTML[INDEX_HTML.index("function buildSessionQuickFilterPills"):]
-    pills = pills[: pills.index("function ", 10)]
-    assert "const previous = sessionToolFilter;" in pills
-    # rebuild re-applies filtering instead of only re-highlighting the pill
-    assert "filterSessionPanels(previous, active);" in pills
-
-
-def test_filter_session_panels_updates_state():
-    fn = INDEX_HTML[INDEX_HTML.index("function filterSessionPanels"):]
-    fn = fn[: fn.index("function ", 10)]
-    assert re.search(r"sessionToolFilter = toolName \|\| 'all';", fn)
-
-
-def test_sessions_rerender_reapplies_search():
-    fn = INDEX_HTML[INDEX_HTML.index("function renderSessionsTab"):]
-    fn = fn[: fn.index("\n    function ", 10)]
-    assert "filterSessionsBySearch" in fn, "renderSessionsTab must re-apply the search term after rebuild"
-
-
-# ---------------------------------------------------------------------------
-# P2 (round 4) — "All Tools" must not reveal or open empty session panels
-# ---------------------------------------------------------------------------
-
-def test_all_filter_restores_render_invariant_not_blanket_show():
-    fn = INDEX_HTML[INDEX_HTML.index("function filterSessionPanels"):]
-    fn = fn[: fn.index("\n    function ", 10)]
-    all_branch = fn[fn.index("if (toolName === 'all')"):]
-    all_branch = all_branch[: all_branch.index("} else if")]
-    assert "hasContent ? '' : 'none'" in all_branch, (
-        "the all-branch must hide zero-session wrappers (the updateSessionPanel "
-        "invariant), not blanket display:'' all 21 sections"
-    )
-    assert "sessionPanelShouldOpen" in all_branch, (
-        "open state returns to the collapse state machine, not forced open"
-    )
-    assert "panel.open = true" not in fn

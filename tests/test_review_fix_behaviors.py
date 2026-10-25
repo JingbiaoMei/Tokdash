@@ -1,4 +1,4 @@
-"""Behavior regressions for interrupted animations and sparse session filters."""
+"""Behavior regressions for interrupted animations."""
 import json
 import subprocess
 from pathlib import Path
@@ -86,27 +86,3 @@ console.log(JSON.stringify(out));
         "animatableRegistered": True,
         "animatableDetached": True,
     }
-
-
-def test_all_tools_keeps_empty_panels_hidden_and_errors_visible(tmp_path):
-    html = (STATIC / "index.html").read_text(encoding="utf-8")
-    source = html.split("    function filterSessionPanels(", 1)[1]
-    source = "function filterSessionPanels(" + source.split("\n    function ", 1)[0]
-    result = run_js(tmp_path, """
-let sessionToolFilter = 'all';
-const sessionCollapseOverrides = {};
-const lastSessionsResponses = {
-  codex: {sessions: [{}]}, claude: {sessions: []}, hermes: {sessions: [], error: 'offline'}
-};
-const panels = Object.keys(lastSessionsResponses).map(tool => ({
-  dataset: {panelDetails: tool}, parentElement: {style: {}}, open: false
-}));
-const document = {querySelectorAll: selector => selector.includes('modern-tool-pill') ? [] : panels};
-function sessionPanelShouldOpen(override, data) { return !!data?.sessions?.length; }
-function sessionPanelSetOpen(panel, open) { panel.open = open; }
-""" + source + """
-filterSessionPanels('codex');
-filterSessionPanels('all');
-console.log(JSON.stringify(panels.filter(p => p.parentElement.style.display !== 'none').map(p => p.dataset.panelDetails)));
-""")
-    assert result == ["codex", "hermes"]

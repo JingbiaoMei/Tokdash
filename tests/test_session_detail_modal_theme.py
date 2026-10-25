@@ -1,17 +1,21 @@
 """Theme and translation contract for the session detail modal.
 
 Clicking a session row in the Sessions explorer raises a modal with an
-Overview & Graphs / View Chat switch, three token charts and the message
-transcript. That markup used to carry a fixed slate-and-indigo palette, so on
-the light themes the tab labels, graph headings and chat chips read as
+Overview & Graphs / View Chat switch, three token charts, a speed chart and the
+message transcript. That markup used to carry a fixed slate-and-indigo palette,
+so on the light themes the tab labels, graph headings and chat chips read as
 dark-on-dark text, and none of those strings were in the six dictionaries, so
 every locale showed English. Neither failure raises an error at runtime, so
 both are pinned here:
 
-* the modal paints with theme tokens only (no fixed palette utilities, no
-  hardcoded chart ink), and its labels clear a readable contrast in both modes;
-* every visible string in the modal, and every label the transcript renderer
-  writes, has a key in all six language dictionaries.
+* the modal markup paints with theme tokens only (no fixed palette utilities),
+  and its labels clear a readable contrast in both modes, measured in Chromium;
+* the modal's own code, run under node on the stub DOM in
+  ``tests/support/i18n_profile.py``: the view switch marks its state with
+  aria-pressed, every chart takes its ink and series colours from the theme and
+  its words from the current language, an open modal repaints on a language or
+  theme switch, a new open clears the last session and translates a failure,
+  and the transcript is written in each of the six languages.
 """
 
 from __future__ import annotations
@@ -19,18 +23,16 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
-import subprocess
-import tempfile
 from pathlib import Path
 
 import pytest
 
 import tokdash  # type: ignore[import-untyped]
 
-INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
+from support.frontend import extract_js_function, needs_node
+from support.i18n_profile import APPLY_I18N_FUNCTIONS, APPLY_I18N_STATE, page_script, run_page
 
-EXPECTED_LANGUAGES = ("en", "zh", "ja", "ko", "es", "pt")
+INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 
 MODAL_START = '<div id="sessionModal" class='
 MODAL_END = "<!-- Slide-Over Session Inspector Drawer -->"
@@ -48,31 +50,6 @@ FIXED_PALETTE = re.compile(
     r"(?:bg|text|border|from|to)-(?:slate|gray|zinc|neutral|indigo|violet|purple|white)\b"
 )
 
-# Strings only the JavaScript writes: the transcript cards, the fullscreen
-# chart's title and subtitles, and the turn axis label. A dictionary entry that
-# goes missing here is invisible in the markup, so it is listed on purpose.
-RENDERER_KEYS = (
-    "turnNumber",
-    "graphExpandTitle",
-    "graphExpandSubPerTurn",
-    "graphExpandSubCumulative",
-    "graphExpandSubTimeline",
-    "sessionChatMessages",
-    "sessionChatToolCalls",
-    "sessionChatEmpty",
-    "sessionChatEmptyHint",
-    "sessionChatRoleUser",
-    "sessionChatRoleAssistant",
-    "sessionChatRoleSystem",
-    "sessionChatMessageIndex",
-    "sessionChatChars",
-    "sessionChatTokens",
-    "sessionChatToolCallChip",
-    "sessionChatNoContent",
-    "sessionChatReasoning",
-)
-
-
 @pytest.fixture(scope="module")
 def source() -> str:
     return INDEX_HTML.read_text(encoding="utf-8")
@@ -82,56 +59,6 @@ def source() -> str:
 def modal_region(source: str) -> str:
     start = source.index(MODAL_START)
     return source[start : source.index(MODAL_END, start)]
-
-
-def _function(name: str, source: str) -> str:
-    """The named function, from its signature to its closing brace."""
-    signature = "function " + name + "("
-    start = source.index(signature)
-    # Walk past the parameter list before counting braces: a default such as
-    # `options = {}` closes the count early if the scan starts too soon.
-    depth = 0
-    cursor = start
-    while True:
-        char = source[cursor]
-        cursor += 1
-        if char == "(":
-            depth += 1
-        elif char == ")":
-            depth -= 1
-            if depth == 0:
-                break
-    depth = 0
-    for index in range(source.index("{", cursor), len(source)):
-        char = source[index]
-        if char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                return source[start : index + 1]
-    raise AssertionError("unterminated function: " + name)
-
-
-def _i18n_keys() -> dict[str, list[str]]:
-    """Every dictionary's key list, read by evaluating the literal in node."""
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    start = source.index("const I18N = {")
-    end = source.index("\n    };", start)
-    # `end + 6` keeps the object's closing brace but drops its semicolon.
-    # The literal is too big for an -e argument, so it goes through a file.
-    with tempfile.TemporaryDirectory() as scratch:
-        program = Path(scratch) / "i18n_keys.js"
-        program.write_text(
-            source[start : end + 6]
-            + ";\nconsole.log(JSON.stringify(Object.fromEntries("
-            + "Object.keys(I18N).map((lang) => [lang, Object.keys(I18N[lang])]))));\n",
-            encoding="utf-8",
-        )
-        result = subprocess.run(
-            ["node", str(program)], capture_output=True, text=True, check=True
-        )
-    return json.loads(result.stdout)
 
 
 # --- no fixed palette in the modal ------------------------------------------
@@ -149,19 +76,15 @@ def test_modal_markup_has_no_fixed_palette_classes(modal_region: str) -> None:
     )
 
 
-def test_view_switch_selected_state_is_state_driven(modal_region: str, source: str) -> None:
-    """aria-pressed styles the switch, so each theme paints its own pill."""
+def test_view_switch_buttons_carry_the_themed_class_and_state(modal_region: str) -> None:
+    """The stylesheet paints the switch from .session-view-btn[aria-pressed];
+    test_the_view_switch_marks_its_state_with_aria_pressed runs the switcher."""
     for element_id in ("sessionModalAnalyticsBtn", "sessionModalChatToggleBtn"):
         button = re.search(r'<button id="' + element_id + r'"[^>]*>', modal_region)
         assert button, element_id + " is gone"
         tag = button.group(0)
         assert "session-view-btn" in tag, element_id + " lost its themed class"
         assert 'aria-pressed="' in tag, element_id + " lost its selected state"
-    switcher = _function("setSessionModalView", source)
-    assert "setAttribute('aria-pressed'" in switcher
-    assert ".className =" not in switcher, (
-        "rewriting className re-hardcodes the selected pill outside the theme"
-    )
 
 
 def test_every_modal_class_has_a_stylesheet_rule(modal_region: str, source: str) -> None:
@@ -174,60 +97,7 @@ def test_every_modal_class_has_a_stylesheet_rule(modal_region: str, source: str)
     assert not missing, f"no stylesheet rule for {missing}"
 
 
-# --- chart ink follows the theme --------------------------------------------
-
-
-def test_session_chart_ink_reads_the_theme_tokens(source: str) -> None:
-    ink = _function("sessionChartInk", source)
-    assert "getCssVar('--color-muted')" in ink
-    assert "getCssVar('--color-text')" in ink
-    assert "isDark()" in ink
-    options = _function("buildTurnChartOptions", source)
-    assert "sessionChartInk()" in options, "the chart options ignore the theme ink"
-    assert "#475569" not in options, "hardcoded tick ink returns on dark themes"
-    assert "rgba(226,232,240" not in options, "near-white gridlines vanish on light surfaces"
-    assert "labels: { color: ink.legend }" in options
-    # Without a colour Chart.js draws the axis title in its own #666, which sits
-    # under 3.5:1 on every dark theme's card.
-    assert "text: xAxisTitle, color: ink.tick" in options, "the axis title ignores the theme ink"
-
-
-def test_turn_series_colors_split_by_mode(source: str) -> None:
-    colors = _function("turnSeriesColors", source)
-    assert "isDark()" in colors, "one series palette cannot serve both modes"
-    datasets = _function("makeTurnDatasets", source)
-    assert "turnSeriesColors()" in datasets
-    for hex_color in ("#1E40AF", "#0F766E", "#F59E0B", "#7C3AED", "#111827"):
-        assert hex_color not in datasets, (
-            f"{hex_color} is the light-only series colour; read it from "
-            "turnSeriesColors() instead"
-        )
-    assert "barColors." in _function("expandSessionChart", source)
-
-
-def test_an_open_modal_follows_a_language_or_theme_switch(source: str) -> None:
-    """Both repaint paths rebuild the modal; a stale one keeps the old colours."""
-    # A language switch reaches the modal through applyI18n's token pass.
-    assert "rerenderTokenPresentation();" in _function("applyI18n", source)
-    i18n_pass = _function("rerenderTokenPresentation", source)
-    theme_pass = _function("rerenderPresentation", source)
-    for name, block in (("rerenderTokenPresentation", i18n_pass), ("rerenderPresentation", theme_pass)):
-        assert "renderSessionCharts(" in block, name + " no longer repaints the modal charts"
-        assert "expandSessionChart(graphExpandChartType)" in block, name + " leaves the expanded chart stale"
-    assert "renderSessionChat(sessionChatPayload.messages" in i18n_pass
-
-
-# --- every modal string goes through a dictionary ---------------------------
-
-
-def test_expanded_chart_wording_is_translated(source: str) -> None:
-    expand = _function("expandSessionChart", source)
-    assert "t('graphExpandTitle'" in expand
-    assert "(Full Screen)`" not in expand, "the full-screen suffix is hardcoded again"
-    assert "t('turnNumber', { n:" in expand, "the turn axis labels are hardcoded English"
-    assert "t('sessionSpeedColTurn')" in expand, "the turn axis title is hardcoded English"
-    literals = re.findall(r"subEl\.textContent = (['\"])(.*?)\1", expand)
-    assert not literals, f"expanded-chart subtitles bypass t(): {literals}"
+# --- chart axis titles ------------------------------------------------------
 
 
 def test_turn_chart_axis_titles_come_from_the_dictionary(source: str) -> None:
@@ -242,38 +112,537 @@ def test_turn_chart_axis_titles_come_from_the_dictionary(source: str) -> None:
     assert not literal, f"axis titles bypass t(): {literal}"
 
 
-def test_chat_renderer_writes_no_hardcoded_labels(source: str) -> None:
-    chat = _function("renderSessionChat", source)
-    literals = re.findall(r"textContent = (['\"])(.*?)\1", chat)
-    assert not literals, f"chat labels bypass t(): {literals}"
-    for key in RENDERER_KEYS:
-        where = chat if key.startswith("sessionChat") else _function("expandSessionChart", source)
-        if key in ROLE_KEYS:
-            # The renderer picks one of the three role names, then translates
-            # the choice, so the key reaches t() through a variable.
-            assert "'" + key + "'" in where, key + " is no longer a role label"
-            assert "t(roleKey)" in where, "the role label stopped going through t()"
-            continue
-        # `t('key'` only: several of these take placeholders, so the closing
-        # paren is not part of the call.
-        assert "t('" + key + "'" in where, key + " no longer goes through t()"
+# --- the modal's own code, run under node -----------------------------------
+#
+# The renderers run on the stub DOM in tests/support/i18n_profile.py with the
+# real dictionaries. Chart.js is replaced by createChart recording the config it
+# would have been given, which is where every colour and axis word lives.
 
 
-ROLE_KEYS = ("sessionChatRoleUser", "sessionChatRoleAssistant", "sessionChatRoleSystem")
+@needs_node
+def test_the_view_switch_marks_its_state_with_aria_pressed(tmp_path: Path) -> None:
+    """aria-pressed carries the selected state, so each theme paints its own pill;
+    the class list is never rewritten. Opening the chat stops the speed read."""
+    script = page_script(
+        ["function setSessionModalView(mode) {"],
+        prelude="""
+const sessionSpeedModalState = { token: 3, request: 0, loading: true, payload: null, requestedGroup: 'g', controller: null, stopJob: null };
+let activeSessionDetail = null;
+document.body.append(
+  el('button', { id: 'sessionModalAnalyticsBtn', class: 'session-view-btn', 'aria-pressed': 'true' }),
+  el('button', { id: 'sessionModalChatToggleBtn', class: 'session-view-btn', 'aria-pressed': 'false' }),
+  el('div', { id: 'sessionModalAnalyticsView' }),
+  el('div', { id: 'sessionModalChatView' }),
+);
+""",
+        body="""
+let aborted = 0;
+let stopped = 0;
+sessionSpeedModalState.controller = { abort() { aborted += 1; } };
+sessionSpeedModalState.stopJob = () => { stopped += 1; };
+const ids = ['sessionModalAnalyticsBtn', 'sessionModalChatToggleBtn'];
+const snap = () => ({
+  views: ['sessionModalAnalyticsView', 'sessionModalChatView'].map((id) => document.getElementById(id).style.display),
+  pressed: ids.map((id) => document.getElementById(id).getAttribute('aria-pressed')),
+  classes: ids.map((id) => document.getElementById(id).className),
+});
+setSessionModalView('chat');
+const chat = { ...snap(), aborted, stopped, stopJob: sessionSpeedModalState.stopJob,
+  request: sessionSpeedModalState.request, loading: sessionSpeedModalState.loading };
+activeSessionDetail = { tool: 'codex' };
+setSessionModalView('analytics');
+print({ chat, analytics: { ...snap(), reloads: calls('loadSessionSpeedTimeline') } });
+""",
+    )
+    report = run_page(tmp_path, "session-view-switch", script)
+    assert report["chat"] == {
+        "views": ["none", "block"],
+        "pressed": ["false", "true"],
+        "classes": ["session-view-btn", "session-view-btn"],
+        "aborted": 1,
+        "stopped": 1,
+        "stopJob": None,
+        "request": 1,
+        "loading": False,
+    }
+    assert report["analytics"] == {
+        "views": ["block", "none"],
+        "pressed": ["true", "false"],
+        "classes": ["session-view-btn", "session-view-btn"],
+        "reloads": [[3, False, "g"]],
+    }
 
 
-@pytest.fixture(scope="module")
-def _dictionary_keys() -> dict[str, list[str]]:
-    if shutil.which("node") is None:
-        pytest.skip("node not available")
-    return _i18n_keys()
+@needs_node
+def test_session_charts_take_their_ink_and_words_from_the_theme_and_language(tmp_path: Path) -> None:
+    """Every session chart (the three turn charts, the speed chart and the three
+    full-screen views) paints ticks, axis titles, grid and legend with the
+    theme's own --color-muted / --color-text, uses the series colours of the
+    current mode, and names its axes and titles in the current language.
+
+    Chart.js's defaults (#666 ticks, black-tinted grid) all but vanish on a dark
+    card, and a canvas label stays English whatever the page is translated to.
+    """
+    script = page_script(
+        [
+            "function isDark() {",
+            "function getCssVar(name) {",
+            "function sessionChartInk() {",
+            "function turnSeriesColors() {",
+            "function turnSeriesFill(hex) {",
+            "function makeTurnDatasets(series) {",
+            "function buildTurnChartOptions(xAxisTitle, options = {}) {",
+            "function buildTurnSeries(turns) {",
+            "function renderSessionCharts(turns) {",
+            "function buildCumulativeTurnSeries(turns) {",
+            "function buildCumulativeTimeSeries(turns) {",
+            "function expandSessionChart(type) {",
+            "function renderSessionSpeedTimeline(payload) {",
+        ],
+        prelude="""
+let sessionPerTurnChart = null;
+let sessionCumulativeChart = null;
+let sessionTimeCumulativeChart = null;
+let sessionOutputSpeedChart = null;
+let graphExpandChartInstance = null;
+let graphExpandChartType = null;
+let activeSessionDetail = null;
+const sessionSpeedModalState = { group: '', view: 'chart' };
+const charts = [];
+function createChart(context, config) {
+  charts.push({ canvas: context.canvas.id, config });
+  return { config, data: config.data, destroy() {} };
+}
+function buildTimeCumulativeSeries() {
+  return { labels: ['10:00', '10:05'],
+    cumulative: { input: [1, 6], cache: [2, 8], output: [3, 10], reasoning: [4, 12], total: [10, 36] } };
+}
+function buildSessionSpeedPlot() {
+  return { useTime: false, streams: [
+    { stream: 'gpt-5', points: [{ x: 1, y: 40 }] },
+    { stream: 'gpt-5-mini', points: [{ x: 2, y: 30 }] },
+  ] };
+}
+function getChartPalette() { return ['#palette0', '#palette1']; }
+function formatNumber(value) { return String(value); }
+function formatPercent(value) { return `${Math.round(Number(value) * 100)}%`; }
+function formatTokenCount(value) { return String(value); }
+function createTableCell(tag, className, content) { return el(tag, className ? { class: className } : {}, String(content ?? '')); }
+document.body.append(
+  ...['sessionPerTurnChart', 'sessionCumulativeChart', 'sessionTimeCumulativeChart'].map((id) => el('canvas', { id })),
+  el('div', { id: 'graphExpandModal', class: 'hidden' },
+    el('h3', { id: 'graphExpandTitle' }),
+    el('p', { id: 'graphExpandSubtitle' }),
+    el('canvas', { id: 'graphExpandCanvas' })),
+  el('section', { id: 'sessionSpeedPanel' },
+    el('p', { id: 'sessionSpeedCoverage' }),
+    el('canvas', { id: 'sessionOutputSpeedChart' }),
+    el('table', {}, el('tbody', { id: 'sessionSpeedBody' }))),
+);
+""",
+        i18n=True,
+        body="""
+const root = document.documentElement;
+const turns = [
+  { turn_index: 1, tokens: 10, tokens_in: 1, tokens_cache: 2, tokens_out: 3, tokens_reasoning: 4, timestamp: '2026-10-01T10:00:00Z' },
+  { turn_index: 2, tokens: 26, tokens_in: 5, tokens_cache: 6, tokens_out: 7, tokens_reasoning: 8, timestamp: '2026-10-01T10:05:00Z' },
+];
+activeSessionDetail = { tool: 'codex', data: { turns } };
+const speed = { groups: [{ model: 'gpt-5', speed_calls: 3 }], summary: {}, cache: { state: 'ready' },
+  series: [{ model: 'gpt-5', measurement_status: 'measured', output_tok_per_s: 40, sequence: 1 }] };
+function inkOf(config) {
+  const { x, y } = config.options.scales;
+  return {
+    x: [x.title.color, x.ticks.color, x.grid.color],
+    y: [y.title ? y.title.color : null, y.ticks.color, y.grid.color],
+    legend: config.options.plugins.legend.labels.color,
+    xTitle: x.title.text,
+    yTitle: y.title ? y.title.text : null,
+  };
+}
+const out = {};
+for (const [mode, lang, tokens] of [
+  ['light', 'en', { '--color-muted': '#muted-light', '--color-text': '#text-light' }],
+  ['dark', 'ja', { '--color-muted': '#muted-dark', '--color-text': '#text-dark' }],
+]) {
+  root.classList.toggle('dark', mode === 'dark');
+  root.__computed = tokens;
+  currentLang = lang;
+  charts.length = 0;
+  renderSessionCharts(turns);
+  renderSessionSpeedTimeline(speed);
+  const expanded = [];
+  for (const type of ['perTurn', 'cumulative', 'timeline']) {
+    expandSessionChart(type);
+    expanded.push([document.getElementById('graphExpandTitle').textContent,
+      document.getElementById('graphExpandSubtitle').textContent]);
+  }
+  out[mode] = {
+    ink: sessionChartInk(),
+    colors: turnSeriesColors(),
+    charts: charts.map(({ canvas, config }) => ({
+      canvas,
+      type: config.type,
+      ink: inkOf(config),
+      series: config.data.datasets.map((dataset) => dataset.borderColor || dataset.backgroundColor),
+      labels: config.data.labels || null,
+    })),
+    expanded,
+    words: {
+      expanded: [
+        [t('graphExpandTitle', { chart: t('turnTrend') }), t('graphExpandSubPerTurn')],
+        [t('graphExpandTitle', { chart: t('cumulativeTurnTrend') }), t('graphExpandSubCumulative')],
+        [t('graphExpandTitle', { chart: t('cumulativeTrendByTime') }), t('graphExpandSubTimeline')],
+      ],
+      turnAxis: t('sessionSpeedColTurn'),
+      timeAxis: t('time'),
+      turnLabels: [t('turnNumber', { n: 1 }), t('turnNumber', { n: 2 })],
+      speedAxes: [t('sessionSpeedResponseOrder'), t('sessionSpeedColRate')],
+    },
+  };
+}
+// Both take placeholders, so the parity test cannot see them.
+out.absent = Object.keys(I18N).filter((lang) => ['graphExpandTitle', 'turnNumber']
+  .some((key) => !Object.prototype.hasOwnProperty.call(I18N[lang], key)));
+print(out);
+""",
+    )
+    report = run_page(tmp_path, "session-chart-ink", script)
+    assert report.pop("absent") == [], "a language falls back to English for the chart titles"
+    assert report["light"]["ink"] == {
+        "tick": "#muted-light",
+        "legend": "#text-light",
+        "grid": "rgba(100,116,139,0.24)",
+    }
+    assert report["dark"]["ink"] == {
+        "tick": "#muted-dark",
+        "legend": "#text-dark",
+        "grid": "rgba(148,163,184,0.2)",
+    }
+    light_colors = set(report["light"]["colors"].values())
+    assert light_colors.isdisjoint(report["dark"]["colors"].values()), "one series palette serves both modes"
+
+    for mode, row in report.items():
+        ink, colors, words = row["ink"], row["colors"], row["words"]
+        assert [chart["canvas"] for chart in row["charts"]] == [
+            "sessionPerTurnChart",
+            "sessionCumulativeChart",
+            "sessionTimeCumulativeChart",
+            "sessionOutputSpeedChart",
+            "graphExpandCanvas",
+            "graphExpandCanvas",
+            "graphExpandCanvas",
+        ], mode
+        for chart in row["charts"]:
+            where = f"{mode} {chart['canvas']}"
+            assert chart["ink"]["x"] == [ink["tick"], ink["tick"], ink["grid"]], where
+            assert chart["ink"]["y"][1:] == [ink["tick"], ink["grid"]], where
+            assert chart["ink"]["y"][0] in (None, ink["tick"]), where
+            assert chart["ink"]["legend"] == ink["legend"], where
+
+        line = [colors[key] for key in ("input", "cache", "output", "reasoning", "total")]
+        turn_charts = [chart for chart in row["charts"] if chart["canvas"] != "sessionOutputSpeedChart"]
+        for chart in turn_charts:
+            expected = line[:4] if chart["type"] == "bar" else line
+            assert chart["series"] == expected, f"{mode} {chart['canvas']} ignores turnSeriesColors"
+
+        assert row["expanded"] == words["expanded"], mode
+        assert [chart["ink"]["xTitle"] for chart in turn_charts] == [
+            words["turnAxis"], words["turnAxis"], words["timeAxis"],
+            words["turnAxis"], words["turnAxis"], words["timeAxis"],
+        ], mode
+        speed = row["charts"][3]
+        assert [speed["ink"]["xTitle"], speed["ink"]["yTitle"]] == words["speedAxes"], mode
+        assert row["charts"][4]["labels"] == words["turnLabels"], mode
+    assert report["dark"]["words"]["expanded"] != report["light"]["words"]["expanded"]
 
 
-def test_modal_keys_exist_in_all_six_languages(_dictionary_keys) -> None:
-    assert tuple(_dictionary_keys) == EXPECTED_LANGUAGES, "dictionary languages drifted"
-    for lang in EXPECTED_LANGUAGES:
-        missing = sorted(set(RENDERER_KEYS) - set(_dictionary_keys[lang]))
-        assert not missing, f"{lang} dictionary is missing {missing}"
+MODAL_REPAINTS = (
+    "renderSessionModalMeta",
+    "setShareBar",
+    "renderSessionCharts",
+    "renderSessionSpeedTimeline",
+    "renderSessionChat",
+    "expandSessionChart",
+)
+
+
+@needs_node
+def test_an_open_modal_repaints_on_a_language_or_theme_switch(tmp_path: Path) -> None:
+    """A theme switch (rerenderPresentation) and a language switch (applyI18n,
+    through rerenderTokenPresentation) both repaint an open modal; a closed one
+    is left alone.
+
+    The speed chart repaints before the full-screen view is rebuilt, because the
+    expanded copy clones the small chart's options and would keep the old ink.
+    """
+    script = page_script(
+        ["function rerenderPresentation() {", "function rerenderTokenPresentation() {", *APPLY_I18N_FUNCTIONS],
+        prelude=APPLY_I18N_STATE
+        + """
+let toolChart = null;
+let modelChart = null;
+let lastUsageResponse = null;
+let statsLoaded = false;
+const calendarState = { contributions: [], view: 'month' };
+const usageReportState = { model: null, loading: false };
+let activeDayDetail = null;
+const turns = [{ turn_index: 1 }, { turn_index: 2 }];
+const session = { tokens: 10, tokens_in: 4, tokens_cache: 3, tokens_out: 2, tokens_reasoning: 1 };
+let activeSessionDetail = { tool: 'codex', data: { session, turns } };
+const speedPayload = { series: ['measured'] };
+const chatPayload = { messages: ['hello'], toolCalls: ['exec'] };
+const sessionSpeedModalState = { payload: speedPayload };
+let sessionChatPayload = chatPayload;
+let graphExpandChartType = 'speed';
+document.body.append(
+  el('section', { id: 'stats-content', class: 'tab-content' }),
+  el('div', { id: 'sessionModal', class: 'fixed inset-0 z-50' },
+    ...['Input', 'Cache', 'Output', 'Total'].map((name) => el('span', { id: `sessionModal${name}` }))),
+);
+""",
+        i18n=True,
+        body=f"const REPAINTS = {json.dumps(MODAL_REPAINTS)};\n"
+        + """
+function repaints(run) {
+  __calls.length = 0;
+  run();
+  return __calls.filter((call) => REPAINTS.includes(call.name)).map((call) => [call.name, ...call.args]);
+}
+const both = () => ({
+  theme: repaints(() => rerenderPresentation()),
+  language: repaints(() => { currentLang = currentLang === 'ja' ? 'ko' : 'ja'; applyI18n(); }),
+});
+const open = both();
+graphExpandChartType = null;
+sessionSpeedModalState.payload = null;
+sessionChatPayload = null;
+const nothingExtra = both();
+graphExpandChartType = 'speed';
+sessionSpeedModalState.payload = speedPayload;
+sessionChatPayload = chatPayload;
+document.getElementById('sessionModal').classList.add('hidden');
+const closed = both();
+print({ open, nothingExtra, closed });
+""",
+    )
+    report = run_page(tmp_path, "session-modal-repaints", script)
+    turns = [{"turn_index": 1}, {"turn_index": 2}]
+    session = {"tokens": 10, "tokens_in": 4, "tokens_cache": 3, "tokens_out": 2, "tokens_reasoning": 1}
+    speed = ["renderSessionSpeedTimeline", {"series": ["measured"]}]
+    shares = [
+        ["setShareBar", "sessionShareInput", 4, 10],
+        ["setShareBar", "sessionShareCache", 3, 10],
+        ["setShareBar", "sessionShareOutput", 2, 10],
+        ["setShareBar", "sessionShareReasoning", 1, 10],
+    ]
+    assert report["open"]["theme"] == [
+        ["renderSessionCharts", turns],
+        speed,
+        ["expandSessionChart", "speed"],
+    ]
+    assert report["open"]["language"] == [
+        ["renderSessionModalMeta", "codex", session],
+        *shares,
+        ["renderSessionCharts", turns],
+        speed,
+        ["renderSessionChat", ["hello"], ["exec"]],
+        ["expandSessionChart", "speed"],
+    ]
+    for calls in report["open"].values():
+        names = [call[0] for call in calls]
+        assert names.index("renderSessionSpeedTimeline") < names.index("expandSessionChart")
+    assert report["nothingExtra"] == {
+        "theme": [["renderSessionCharts", turns]],
+        "language": [["renderSessionModalMeta", "codex", session], *shares, ["renderSessionCharts", turns]],
+    }
+    assert report["closed"] == {"theme": [], "language": []}
+
+
+@needs_node
+def test_opening_a_session_clears_the_last_one_and_translates_a_failure(tmp_path: Path) -> None:
+    """A new open blanks the previous session's figures, bars and charts before
+    it reads; a failed read says so in the current language and follows a
+    language switch through its data-i18n hook; the next open takes that hook
+    off before reading, so a later switch cannot paint the failure over a
+    loaded session, whose meta line is rewritten in the new language instead.
+    """
+    script = page_script(
+        [
+            "async function openSessionModal(tool, sessionId, ownerServer = null) {",
+            "function renderSessionModalMeta(tool, session) {",
+            "function renderLoadingPlaceholder(element, label = t('loading')) {",
+            "function rerenderTokenPresentation() {",
+            *APPLY_I18N_FUNCTIONS,
+        ],
+        prelude=APPLY_I18N_STATE
+        + """
+let toolChart = null;
+let lastUsageResponse = null;
+let statsLoaded = false;
+const calendarState = { view: 'month' };
+let activeDayDetail = null;
+let activeSessionDetail = null;
+let sessionChatPayload = null;
+let graphExpandChartType = null;
+const sessionSpeedModalState = { token: 1, payload: null };
+function sessionModalCurrent() { return true; }
+function formatToolName(tool) { return tool === 'codex' ? 'Codex' : tool; }
+function formatNumber(value) { return String(value); }
+function formatDuration(ms) { return `${Math.round(Number(ms || 0) / 1000)}s`; }
+console.error = () => {};
+const SHARES = ['sessionShareInput', 'sessionShareCache', 'sessionShareOutput', 'sessionShareReasoning'];
+document.body.append(
+  el('section', { id: 'stats-content', class: 'tab-content' }),
+  el('div', { id: 'sessionModal', class: 'hidden fixed inset-0 z-50' },
+    el('h2', { id: 'sessionModalTitle' }),
+    el('p', { id: 'sessionModalMeta' }),
+    ...['Input', 'InputPct', 'Cache', 'CachePct', 'Output', 'OutputPct', 'Total', 'ReasoningPct']
+      .map((name) => el('span', { id: `sessionModal${name}` })),
+    ...SHARES.flatMap((prefix) => [el('span', { id: `${prefix}Label` }), el('div', { id: `${prefix}Bar` })]),
+    el('section', { id: 'sessionSpeedPanel' })),
+);
+function paintLastSession() {
+  SHARES.forEach((prefix) => {
+    document.getElementById(`${prefix}Label`).textContent = '60% · 600';
+    document.getElementById(`${prefix}Bar`).style.width = '60%';
+  });
+}
+// What the modal shows at the moment it starts reading the next session.
+const reads = [];
+let answer = null;
+function fetchFromHost(server, url) {
+  reads.push({
+    url,
+    metaHook: document.getElementById('sessionModalMeta').getAttribute('data-i18n'),
+    labels: SHARES.map((prefix) => document.getElementById(`${prefix}Label`).textContent),
+    bars: SHARES.map((prefix) => document.getElementById(`${prefix}Bar`).style.width),
+    chartsCleared: calls('renderSessionCharts').some((args) => Array.isArray(args[0]) && args[0].length === 0),
+  });
+  return answer();
+}
+""",
+        i18n=True,
+        body="""
+const meta = document.getElementById('sessionModalMeta');
+const line = () => ({ text: meta.textContent, hook: meta.getAttribute('data-i18n') });
+paintLastSession();
+__calls.length = 0;
+answer = () => Promise.reject(new Error('session gone'));
+await openSessionModal('codex', 'abc123');
+const failed = line();
+currentLang = 'ja';
+applyI18n();
+const failedJa = line();
+renderSessionModalMeta('codex', { project: 'p', model: 'm', token_events: 1, active_ms: 1000, span_ms: 1000 });
+const untouched = line();
+paintLastSession();
+__calls.length = 0;
+answer = () => Promise.resolve({
+  session: { project: 'tokdash', model: 'gpt-5', token_events: 7, active_ms: 5000, span_ms: 9000, tokens: 10, tokens_in: 4 },
+  turns: [], messages: [], tool_calls: [],
+});
+await openSessionModal('codex', 'def456');
+const loaded = line();
+currentLang = 'ko';
+applyI18n();
+const loadedKo = line();
+const words = (lang) => ({ failed: I18N[lang].sessionDetailLoadFailed, events: I18N[lang].events, activeTime: I18N[lang].activeTime });
+print({ reads, failed, failedJa, untouched, loaded, loadedKo, en: words('en'), ja: words('ja'), ko: words('ko') });
+""",
+    )
+    report = run_page(tmp_path, "session-modal-open", script)
+    blank = {"metaHook": None, "labels": ["-"] * 4, "bars": ["0%"] * 4, "chartsCleared": True}
+    assert report["reads"] == [
+        {"url": "/api/session?tool=codex&session_id=abc123", **blank},
+        {"url": "/api/session?tool=codex&session_id=def456", **blank},
+    ]
+    en, ja, ko = report["en"], report["ja"], report["ko"]
+    assert ja["failed"] != en["failed"]
+    assert report["failed"] == {"text": en["failed"], "hook": "sessionDetailLoadFailed"}
+    assert report["failedJa"] == {"text": ja["failed"], "hook": "sessionDetailLoadFailed"}
+    assert report["untouched"] == report["failedJa"]
+    assert report["loaded"] == {
+        "text": f"Codex · tokdash · gpt-5 · 7 {ja['events']} · {ja['activeTime']} 5s",
+        "hook": None,
+    }
+    assert report["loadedKo"] == {
+        "text": f"Codex · tokdash · gpt-5 · 7 {ko['events']} · {ko['activeTime']} 5s",
+        "hook": None,
+    }
+
+
+@needs_node
+def test_the_transcript_is_written_in_the_current_language(tmp_path: Path) -> None:
+    """Every label renderSessionChat writes comes from the dictionary of the
+    current language, and every language defines the ones that reach t() with
+    placeholders or through a variable (the three role names), which the i18n
+    parity test cannot follow. No raw key ever shows."""
+    script = page_script(
+        ["function renderSessionChat(messages, toolCalls) {", "function escapeHtml(str) {"],
+        prelude="""
+let sessionChatPayload = null;
+document.body.append(
+  el('span', { id: 'sessionChatMsgCount' }),
+  el('span', { id: 'sessionChatToolCount' }),
+  el('div', { id: 'sessionChatContainer' }),
+);
+""",
+        i18n=True,
+        body="""
+const messages = [
+  { role: 'user', content_chars: 1840, timestamp: '2026-10-11 09:14:22' },
+  { role: 'assistant', has_reasoning: true, token_count: 512, has_tool_calls: true, model: 'gpt-5' },
+  { role: 'system' },
+];
+const KEYS = Object.keys(I18N.en).filter((key) => key.startsWith('sessionChat'));
+// t() falls back to English, so a key missing from one language would still
+// render; these reach t() with placeholders or through a variable, where the
+// parity test cannot see them.
+const RUNTIME_KEYS = ['sessionChatMessages', 'sessionChatToolCalls', 'sessionChatMessageIndex', 'sessionChatChars',
+  'sessionChatTokens', 'sessionChatRoleUser', 'sessionChatRoleAssistant', 'sessionChatRoleSystem'];
+const container = document.getElementById('sessionChatContainer');
+const out = {};
+for (const lang of Object.keys(I18N)) {
+  currentLang = lang;
+  renderSessionChat(messages, [{ name: 'exec' }]);
+  const html = container.innerHTML;
+  const counts = [document.getElementById('sessionChatMsgCount').textContent, document.getElementById('sessionChatToolCount').textContent];
+  const want = [
+    t('sessionChatMessageIndex', { role: t('sessionChatRoleUser'), index: 1 }),
+    t('sessionChatMessageIndex', { role: t('sessionChatRoleAssistant'), index: 2 }),
+    t('sessionChatMessageIndex', { role: t('sessionChatRoleSystem'), index: 3 }),
+    t('sessionChatChars', { count: Number(1840).toLocaleString() }),
+    t('sessionChatTokens', { count: Number(512).toLocaleString() }),
+    t('sessionChatToolCallChip'),
+    t('sessionChatReasoning'),
+    t('sessionChatNoContent'),
+  ];
+  renderSessionChat([], []);
+  const empty = container.innerHTML;
+  const emptyWant = [t('sessionChatEmpty'), t('sessionChatEmptyHint')];
+  out[lang] = {
+    missing: want.filter((label) => !html.includes(escapeHtml(label))),
+    emptyMissing: emptyWant.filter((label) => !empty.includes(escapeHtml(label))),
+    rawKeys: KEYS.filter((key) => html.includes(key) || empty.includes(key)),
+    counts,
+    countsWant: [t('sessionChatMessages', { count: 3 }), t('sessionChatToolCalls', { count: 1 })],
+    absent: RUNTIME_KEYS.filter((key) => !Object.prototype.hasOwnProperty.call(I18N[lang], key)),
+    user: t('sessionChatRoleUser'),
+  };
+}
+print(out);
+""",
+    )
+    report = run_page(tmp_path, "session-chat-language", script)
+    assert len(report) == 6
+    for lang, row in report.items():
+        assert row["missing"] == [], lang
+        assert row["emptyMissing"] == [], lang
+        assert row["rawKeys"] == [], lang
+        assert row["counts"] == row["countsWant"], lang
+        assert row["absent"] == [], f"{lang} falls back to English for {row['absent']}"
+    assert report["zh"]["user"] != report["en"]["user"]
 
 
 # --- the labels are actually readable in both modes -------------------------
@@ -451,7 +820,7 @@ def modal_pages(source: str, modal_region: str, chromium):
 
 def test_chat_fixture_classes_match_the_renderer(source: str, modal_region: str) -> None:
     """The measured markup cannot drift away from the modal and its renderer."""
-    owned = _function("renderSessionChat", source) + modal_region
+    owned = extract_js_function(source, "function renderSessionChat(") + modal_region
     used = {
         name
         for group in re.findall(r'class="([^"]+)"', CHAT_FIXTURE)
@@ -479,67 +848,12 @@ def test_modal_labels_clear_aa_contrast(modal_pages, mode: str) -> None:
 # --- the #217 follow-ups -----------------------------------------------------
 
 
-def test_session_speed_chart_reads_the_theme_ink(source: str) -> None:
-    """The speed chart drew Chart.js's own #666 ticks and black-tinted grid on
-    every theme, which all but vanish on a dark card."""
-    speed = _function("renderSessionSpeedTimeline", source)
-    assert "const ink = sessionChartInk();" in speed
-    assert speed.count("color: ink.tick") >= 4, "an axis title or tick list ignores the theme ink"
-    assert speed.count("grid: { color: ink.grid }") == 2, "a gridline ignores the theme ink"
-    assert "labels: { color: ink.legend }" in speed, "the stream legend ignores the theme ink"
-
-
-def test_an_open_modal_repaints_its_speed_chart_on_either_switch(source: str) -> None:
-    """The expanded speed chart clones the small one's options, so the small
-    one must repaint first or the expanded copy keeps the old ink."""
-    for name in ("rerenderPresentation", "rerenderTokenPresentation"):
-        block = _function(name, source)
-        repaint = "renderSessionSpeedTimeline(sessionSpeedModalState.payload)"
-        assert repaint in block, name + " leaves the speed chart in the old theme"
-        assert block.index(repaint) < block.index("expandSessionChart(graphExpandChartType)"), (
-            name + " expands the speed chart before repainting it"
-        )
-
-
-def test_session_load_failure_is_translated(source: str, _dictionary_keys) -> None:
-    opener = _function("openSessionModal", source)
-    assert '"Failed to load session detail"' not in opener, "the failure line is hardcoded English"
-    assert 't("sessionDetailLoadFailed")' in opener
-    # A language switch with the failure showing goes through applyI18n's
-    # data-i18n pass; the next open must take that hook off, or the pass would
-    # overwrite the next session's meta line with the failure text.
-    assert 'setAttribute("data-i18n", "sessionDetailLoadFailed")' in opener
-    assert opener.index('removeAttribute("data-i18n")') < opener.index("fetchFromHost(")
-    for lang in EXPECTED_LANGUAGES:
-        assert "sessionDetailLoadFailed" in _dictionary_keys[lang], lang
-
-
-def test_an_open_modal_retranslates_its_meta_line_but_not_a_failure(source: str) -> None:
-    """The meta line is written from t(), so a language switch must write it
-    again; the failure line has its own data-i18n hook and must survive."""
-    helper = _function("renderSessionModalMeta", source)
-    assert 'hasAttribute("data-i18n")' in helper, "a rewrite would replace the failure line"
-    assert 't("events")' in helper and 't("activeTime")' in helper
-    assert "renderSessionModalMeta(activeSessionDetail.tool, session)" in _function("rerenderTokenPresentation", source)
-    opener = _function("openSessionModal", source)
-    assert "renderSessionModalMeta(tool, session)" in opener
-    assert 't("events")' not in opener, "the meta line is built in one place"
-
-
-def test_a_new_open_clears_the_last_sessions_bars_and_charts(source: str) -> None:
-    opener = _function("openSessionModal", source)
-    reset = opener.index("renderSessionCharts([])")
-    assert reset < opener.index("fetchFromHost("), "the old charts stay up while the next session loads"
-    assert '"sessionShareInput", "sessionShareCache", "sessionShareOutput", "sessionShareReasoning"' in opener
-    assert 'bar.style.width = "0%"' in opener
-
-
 def test_script_written_modal_labels_are_marked_for_the_cjk_rules(source: str, modal_region: str) -> None:
     """#215's CJK rules key off data-i18n, which these labels cannot carry."""
     for element_id in ("graphExpandTitle", "sessionChatMsgCount", "sessionChatToolCount", "sessionSpeedCoverage"):
         tag = re.search(r'<[a-z0-9]+ [^>]*id="' + element_id + r'"[^>]*>', modal_region)
         assert tag and "data-i18n-dynamic" in tag.group(0), element_id + " misses the CJK rules"
-    chat = _function("renderSessionChat", source)
+    chat = extract_js_function(source, "function renderSessionChat(")
     role = re.search(r'<span class="session-chat-role[^"]*"[^>]*>', chat).group(0)
     assert "data-i18n-dynamic" in role, "the role badge misses the CJK rules"
     assert '"session-chat-meta-chip text-[10px] px-2 py-0.5 rounded font-mono" data-i18n-dynamic>${escapeHtml(c)}' in chat
@@ -558,7 +872,7 @@ def test_share_bars_use_the_series_colours_of_their_mode(source: str, modal_regi
         assert "background" not in bar, name + " bar hardcodes its colour inline"
         assert "session-share-fill--" + name.lower() in bar
     # turnSeriesColors() returns `isDark() ? { dark set } : { light set }`.
-    dark, light = re.findall(r"\{ (input: [^}]+)\}", _function("turnSeriesColors", source))
+    dark, light = re.findall(r"\{ (input: [^}]+)\}", extract_js_function(source, "function turnSeriesColors("))
     style = re.search(r"<style>(.*?)</style>", source, re.S).group(1)
     for mode, palette, prefix in (("light", light, "    ."), ("dark", dark, "    html.dark .")):
         for series in ("input", "cache", "output", "reasoning"):
@@ -647,7 +961,7 @@ def test_share_bars_switch_to_the_bright_set_in_dark_mode(followup_pages) -> Non
 
 
 def test_empty_transcript_note_gets_its_own_leading(followup_pages, source: str) -> None:
-    empty = re.search(r'<div class="(session-chat-empty[^"]*)"', _function("renderSessionChat", source)).group(1)
+    empty = re.search(r'<div class="(session-chat-empty[^"]*)"', extract_js_function(source, "function renderSessionChat(")).group(1)
     assert "text-xs" not in empty.split(), "a text-xs utility brings back its 1rem leading"
     note = _probe(followup_pages[("en", "light")], ".session-chat-empty")
     assert note["fontSize"] == "12px"

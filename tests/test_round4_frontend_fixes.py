@@ -1,10 +1,11 @@
-"""Round-3 reviewer fixes: XSS escapes, chart body-transform, tab race, filter state.
+"""Round-3 reviewer fixes: chart body-transform, tab race, filter state.
 
-These defects were found on the branch after the first merge review:
-unescaped log strings reached innerHTML, the chart entry animation animated
-<body> (making it the containing block for every position:fixed overlay), the
-tab `.active` swap was deferred into an anime onComplete that stop() never
-fires, and the sessions tool filter lived only as a pill class.
+These defects were found on the branch after the first merge review: the
+chart entry animation animated <body> (making it the containing block for
+every position:fixed overlay), the tab `.active` swap was deferred into an
+anime onComplete that stop() never fires, and the sessions tool filter lived
+only as a pill class. The escaping fixes from the same review are tested in
+test_frontend_html_escaping.py.
 """
 from __future__ import annotations
 
@@ -22,55 +23,6 @@ STATIC = Path(tokdash.__file__).parent / "static"
 INDEX_HTML = (STATIC / "index.html").read_text(encoding="utf-8")
 CHARTS_JS = (STATIC / "js" / "animations" / "charts.js").read_text(encoding="utf-8")
 TRANSITIONS_JS = (STATIC / "js" / "animations" / "transitions.js").read_text(encoding="utf-8")
-
-
-# ---------------------------------------------------------------------------
-# P1 — timeline timestamps / model names must be escaped at every sink
-# ---------------------------------------------------------------------------
-
-def _sink(pattern: str, *, count: int = 1) -> None:
-    found = re.findall(pattern, INDEX_HTML)
-    assert len(found) == count, f"expected {count} of {pattern!r}, found {len(found)}"
-
-
-def test_session_chat_timestamp_is_escaped():
-    _sink(r"renderSessionChat[\s\S]{0,4000}?escapeHtml\(String\(m\.timestamp", count=1)
-
-
-def test_drawer_timeline_timestamp_is_escaped():
-    _sink(r"renderDrawerMessages[\s\S]{0,4000}?escapeHtml\(String\(m\.timestamp", count=1)
-
-
-def test_apps_breakdown_model_name_escaped_in_text_and_title_attr():
-    # the model-name cell: title attribute AND text node both escaped
-    row = INDEX_HTML[INDEX_HTML.index("function updateAppsBreakdown"):]
-    row = row[: row.index("function updateCombinedModelsTable")]
-    assert row.count('escapeHtml(String(model.name ?? \'\'))') == 2, (
-        "apps breakdown must escape model.name in both the title attribute and the text node"
-    )
-
-
-def test_combined_models_table_name_escaped():
-    row = INDEX_HTML[INDEX_HTML.index("function updateCombinedModelsTable"):]
-    row = row[: row.index("function ", row.index("function updateCombinedModelsTable") + 10)
-              if "function " in row[10:] else len(row)]
-    assert "escapeHtml(String(model.name ?? ''))" in row or "escapeHtml(String(m.name ?? ''))" in row
-
-
-def test_day_details_model_and_date_escaped():
-    day = INDEX_HTML[INDEX_HTML.index("function showDayDetails"):]
-    assert "escapeHtml(String(src.modelId ?? ''))" in day
-    assert "escapeHtml(String(day.date ?? ''))" in day
-
-
-def test_no_bare_timestamp_interpolations_remain():
-    # every ${...timestamp...} template interpolation inside the renderers must
-    # sit behind escapeHtml; bare ones are the regression.
-    for name in ("renderSessionChat", "renderDrawerMessages"):
-        start = INDEX_HTML.index(f"function {name}")
-        body = INDEX_HTML[start:start + 6000]
-        for m in re.finditer(r"\$\{([^}]*timestamp[^}]*)\}", body, re.IGNORECASE):
-            assert "escapeHtml" in m.group(1), f"{name}: unescaped timestamp sink: {m.group(0)}"
 
 
 # ---------------------------------------------------------------------------

@@ -109,9 +109,11 @@ def test_i18n_language_parity(tmp_path: Path) -> None:
     referenced = set(
         re.findall(r'data-i18n(?:-placeholder|-title|-aria)?="([^"]+)"', source)
     )
-    # t('key') and t("key") alike: the page uses both quote styles.
+    # t('key') and t("key") alike, with or without placeholder values after the
+    # key: the page uses both quote styles, and t('key', {...}) is how every
+    # counted or named label is looked up.
     referenced.update(
-        key for _, key in re.findall(r"""\bt\((['"])([^'"]+)\1\)""", source)
+        key for _, key in re.findall(r"""\bt\((['"])([^'"]+)\1\s*[,)]""", source)
     )
     missing = referenced - set(reference)
     assert not missing, f"referenced i18n keys are undefined: {sorted(missing)}"

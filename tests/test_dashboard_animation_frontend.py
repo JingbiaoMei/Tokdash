@@ -1,23 +1,20 @@
-"""Behavior regressions for interrupted animations."""
+"""Dashboard animations that are interrupted must let go of what they animated.
+
+These run the shipped animation modules in Node against the shipped anime.js
+engine, imported from disk, so cancellation is the engine's own.
+"""
 import json
-import subprocess
-from pathlib import Path
 
-import tokdash
-
-from support.frontend import needs_node
+from support.frontend import STATIC_DIR as STATIC, needs_node, run_node
 
 
-STATIC = Path(tokdash.__file__).parent / "static"
 pytestmark = needs_node
 
 
 def run_js(tmp_path, source):
     script = tmp_path / "probe.mjs"
     script.write_text(source, encoding="utf-8")
-    result = subprocess.run(["node", str(script)], capture_output=True, text=True, encoding="utf-8", timeout=10)
-    assert result.returncode == 0, result.stderr
-    return json.loads(result.stdout)
+    return json.loads(run_node(script))
 
 
 def test_stopped_cache_animation_cannot_restore_previous_width(tmp_path):

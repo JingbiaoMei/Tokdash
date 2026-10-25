@@ -76,10 +76,14 @@ file. A test that only checks a string is present in the page passes as long as 
 does, whatever the code around it now does. Keep text checks for what really is text: the
 translation tables, the vendored assets, the theme registry.
 
-The TUI tests drive the real app through Textual's pilot. Wait on a condition, never on a fixed
-sleep: `settle()` in `tests/test_tui_revision5.py` returns as soon as the app is idle, and
-`wait_for()` in `tests/test_tui_app.py` polls a predicate. A fixed `pilot.pause(0.25)` costs
-every leg of CI that long on every call, and is still too short on a slow Windows runner.
+The TUI tests drive the real app through Textual's pilot, one file per pane or concern
+(`test_tui_speed_pane.py`, `test_tui_range_strip.py`, `test_tui_resize_refit.py`, ...). The
+contract-shaped payloads, the fake service behind the `api` fixture and the pilot helpers live
+in `tests/support/tui.py`; a test file imports them after its `pytest.importorskip("textual")`,
+never from another test file. Wait on a condition, never on a fixed sleep: `settle()` returns
+as soon as the app is idle, and `wait_for()` polls a predicate, both from `tests/support/tui.py`.
+A fixed `pilot.pause(0.25)` costs every leg of CI that long on every call, and is still too
+short on a slow Windows runner.
 
 The suite points `TOKDASH_DATA_DIR` at a temporary directory itself, so it never touches
 your real data.

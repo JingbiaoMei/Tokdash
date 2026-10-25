@@ -7,6 +7,21 @@ import tokdash.cli as cli
 from tokdash.onboard import engine
 
 
+@pytest.fixture(autouse=True)
+def no_real_daemons(monkeypatch):
+    """No test here may leave a real background thread behind.
+
+    ``serve`` starts the usage-DB watch and the quota poll as process-wide
+    daemons, guarded by module flags. The serve tests that let them start for
+    real left a quota poll that woke 60 s later inside whatever test the process
+    had reached -- under pytest-xdist, the TUI's quota tests -- and called the
+    stub that test had installed. Both are marked as already running; the two
+    tests that check the starters clear their own flag.
+    """
+    monkeypatch.setattr(cli, "_DB_WATCH_THREAD_STARTED", True)
+    monkeypatch.setattr(cli, "_QUOTA_POLL_THREAD_STARTED", True)
+
+
 def test_no_open_flag_defaults_false():
     args = cli.build_parser("tokdash").parse_args(["serve"])
     assert args.no_open is False

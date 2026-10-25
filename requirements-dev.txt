@@ -3,4 +3,5 @@ fastapi==0.115.0
 httpx>=0.27,<1
 pytest>=8.0.0
 pytest-timeout>=2.4,<3
+pytest-xdist>=3.6,<4
 uvicorn[standard]==0.32.0

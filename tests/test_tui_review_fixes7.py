@@ -20,6 +20,7 @@ ones in ``test_tui_revision5``; every figure is synthetic.
 from __future__ import annotations
 
 import threading
+import time
 
 import pytest
 
@@ -158,6 +159,58 @@ def test_a_footer_that_changes_its_depth_leaves_the_page_fitted(api):
             assert band.region.bottom <= strip.region.y, (band.region, strip.region)
             assert app._body_fitted["overview"] == app._body_stamp("overview"), (
                 app._body_fitted.get("overview"), app._body_stamp("overview"))
+
+    run(api, body, size=WIDE)
+
+
+def test_a_strip_that_wraps_and_unwraps_between_layouts_leaves_the_page_fitted(api):
+    """A height the layout never got to is not a pane that is already fitted.
+
+    A load's "computing…" line can wrap the strip to two rows, and its answer
+    unwrap it, with no layout in between. The first fit asks the pane for a row
+    less; the second, reading only the laid-out height, found it already right
+    and let the shorter request land. A busy load had spent the re-measures, so
+    nothing took the row back: the Report's Sunday sat under the footer for good.
+    """
+
+    async def body(app, pilot):
+        await _settled(app, pilot)
+        await settle(pilot, 3)
+        strip = app.query_one("#status")
+        pane = app.query_one("#pane-overview")
+        short = app._db_line
+        assert app._strip_rows == 1, "the flip needs a strip that starts on one row"
+        app._fit_rearms = app._FIT_MAX_REARMS  # what a busy load leaves behind
+        app._db_line = "usage.db " + "x" * 200
+        app._update_status()  # two rows: the pane is asked for one row less...
+        assert app._strip_rows == 2
+        app._db_line = short
+        app._update_status()  # ...and handed it back before any layout ran
+        await settle(pilot, 3)
+        assert app._strip_rows == 1
+        assert pane.region.height == strip.region.y - pane.region.y, (
+            pane.region, strip.region)
+
+    run(api, body, size=(160, 36))
+
+
+def test_a_status_tick_on_the_way_out_asks_for_nothing(api):
+    """Textual stops the app's timers only after it has torn the screens down.
+
+    A tick in that gap, with a read still in flight, asked for a status strip
+    that was already gone and failed the run on its way out.
+    """
+
+    async def body(app, pilot):
+        await _settled(app, pilot)
+        app._load_started["overview"] = time.monotonic()  # a read in flight
+        await app.query_one("#status").remove()
+        app._running = False  # where App._shutdown stands while it tears down
+        try:
+            app._tick_status()
+        finally:
+            app._running = True
+            app._load_started.pop("overview", None)
 
     run(api, body, size=WIDE)
 

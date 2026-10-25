@@ -2122,6 +2122,12 @@ class TokdashApp(App):
                 err = getattr(exc, "error", exc)
                 self._sn_detail_note = f"session unavailable: {err}"
         self._paint_sessions()
+        # The timing (or the note saying it failed) has just grown the summary
+        # above the turns, pushing the bottom of the table back under the fold
+        # the first reveal scrolled it out of. A slow timing fetch left the last
+        # turn hidden under the footer at 100x30.
+        if self.focused is self.query_one("#sn-turns", DataTable):
+            self._reveal_turns()
 
     @work(group="quota", exclusive=True, exit_on_error=False)
     async def _load_quota(self, refresh: bool) -> None:
@@ -2565,7 +2571,14 @@ class TokdashApp(App):
             # A set height is honoured to the row, which makes the second call
             # compute exactly what the first one set.
             room = max(1, limit - pane.region.y)
-            if pane.region.height != room:
+            # The height ASKED counts as well as the one laid out. A strip that
+            # wraps to two rows and back before the next layout leaves a request
+            # for the shorter pane behind it; measured by the laid-out height
+            # alone, the second pass reads "already right" and lets that request
+            # land. With the re-measures spent, nothing takes the row back.
+            asked = pane.styles.height
+            if (pane.region.height != room or asked is None or not asked.is_cells
+                    or int(asked.value) != room):
                 pane.styles.height = f"{room}"
                 changed = True
         if self._fit_forced:
@@ -2621,7 +2634,10 @@ class TokdashApp(App):
         self._refit_body()
 
     def _tick_status(self) -> None:
-        if self._load_started:
+        # The interval outlives the page on the way out: Textual tears the
+        # screens down before it stops the app's timers, and a tick in between
+        # would ask for a status strip that is already gone.
+        if self._load_started and self.is_running:
             self._update_status()
 
     # ------------------------------------------------------------ actions --
@@ -5227,16 +5243,25 @@ class TokdashApp(App):
             # follows the thing they asked for. Anywhere else (search box, a
             # repaint after sorting) focus stays exactly where it was.
             turns.focus()
-            # ...and the pane scrolls to meet it. The table only just became
-            # visible, so focus's own scroll-into-view measured a zero-height
-            # widget; at 80x24 that left the focused rows under the fold, with
-            # the arrow keys busy somewhere the reader could not see. Two hops
-            # because the summary block above this table re-wraps when the
-            # session's own text arrives, and the first refresh measures the
-            # pane as it was BEFORE that re-wrap -- one hop stops a row short.
-            self.call_after_refresh(
-                lambda: self.call_after_refresh(turns.scroll_visible)
-            )
+            # ...and the pane scrolls to meet it.
+            self._reveal_turns()
+
+    def _reveal_turns(self) -> None:
+        """Scroll the Sessions pane until the open session's turns are all on screen.
+
+        The table only just became visible, so focus's own scroll-into-view
+        measured a zero-height widget; at 80x24 that left the focused rows under
+        the fold, with the arrow keys busy somewhere the reader could not see.
+        Two hops because the summary block above this table re-wraps when the
+        session's own text arrives, and the first refresh measures the pane as
+        it was BEFORE that re-wrap -- one hop stops a row short. The session's
+        timing comes from a fetch of its own and grows the summary again
+        whenever it lands, so _load_session_detail asks for this once more then.
+        """
+        turns = self.query_one("#sn-turns", DataTable)
+        self.call_after_refresh(
+            lambda: self.call_after_refresh(turns.scroll_visible)
+        )
 
     def _paint_stats(self) -> None:
         self._paint_scope("stats")

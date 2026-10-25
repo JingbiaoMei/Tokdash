@@ -304,9 +304,15 @@ def drive(app, steps, size=(80, 24)):
     asyncio.run(main())
 
 
-async def wait_for(app, pilot, predicate, tries=100):
-    """Thread jobs + chained awaits need more than one pause to settle."""
-    for _ in range(tries):
+async def wait_for(app, pilot, predicate, timeout=10.0):
+    """Thread jobs + chained awaits need more than one pause to settle.
+
+    The timeout is patience, not a cost: a predicate that holds returns at once,
+    and a CI runner shared by four workers has taken more than the two seconds
+    this used to allow to run one thread job.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         if predicate():
             return True
         await pilot.pause(0.02)
@@ -728,12 +734,17 @@ def test_report_pane_recovers_after_other_pane_supersedes_it(monkeypatch):
     async def steps(pilot):
         await pilot.pause()
         await pilot.press("2")  # report lazy-load starts (blocked on gate)
+        # The bump only supersedes a load that is already in flight; one still
+        # queued on a busy runner would start in the new generation instead.
+        assert await wait_for(app, pilot, lambda: "report" in app._inflight)
         await pilot.press("1")  # back to Overview
         await pilot.press("r")  # Overview-side gen bump: supersede the load
         gate.set()
         assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
+        # The superseded read records itself when its blocked thread wakes,
+        # which is not tied to when Overview's reload lands.
+        assert await wait_for(app, pilot, lambda: "report" in app._stranded)
         assert app._state["report"] == "empty"  # superseded load painted nothing
-        assert "report" in app._stranded  # hidden: it waits for the tab hook
         insights_before = len(calls.insights)
         await pilot.press("2")  # re-activation must re-issue the fetch
         assert await wait_for(app, pilot, lambda: app._state["report"] == "ok")

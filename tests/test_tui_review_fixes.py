@@ -550,6 +550,46 @@ def test_the_earliest_turn_reaches_the_screen(api, size):
     run(api, body, size=size)
 
 
+@pytest.mark.parametrize("size", [(100, 30), (80, 24)])
+def test_the_last_turn_stays_on_screen_when_the_timing_lands_late(api, size):
+    # The session's timing is a fetch of its own, after the turns. Landing once
+    # the pane had already scrolled the turns into view, it grew the summary by
+    # a line and pushed the last turn under the footer (a loaded CI runner, at
+    # 100x30).
+    api.session_detail = twenty_turns()
+    gate = threading.Event()
+
+    def held(*_args, **_kwargs):
+        gate.wait(8)
+        return None
+
+    api.hooks["session_speed"] = held
+
+    async def body(app, pilot):
+        try:
+            app.action_show_pane("sessions")
+            await settle(pilot, 2)
+            await pilot.press("w")
+            await settle(pilot, 2)
+            app.query_one("#sn-table", DataTable).focus()
+            await pilot.press("enter")
+            await settle(pilot, 4)
+            turns = app.query_one("#sn-turns", DataTable)
+            assert turns.has_focus
+            assert app._sn_detail_speed is None, "the timing was not held back"
+        finally:
+            gate.set()
+        await settle(pilot, 2)
+        assert app._sn_detail_speed is not None
+        for _ in range(19):
+            await pilot.press("down")
+        await settle(pilot, 2)
+        assert turns.cursor_row == 19, turns.cursor_row
+        assert "unique-model-20" in visible(app, "#sn-turns"), visible(app, "#sn-turns")
+
+    run(api, body, size=size)
+
+
 # -------------------------------------------------------------------- F10 --
 # Report -> When routed to the summary renderer: three hours, one weekday, and
 # the rest of the facet unreachable.

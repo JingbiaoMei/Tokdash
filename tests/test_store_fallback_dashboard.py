@@ -17,18 +17,13 @@ really produces rather than a hand-written one.
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 
 import pytest
 
-import tokdash
 from tokdash import compute
 
-from support.frontend import extract_js_function, needs_node
-
-
-INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
+from support.frontend import extract_js_function, index_source, needs_node, run_node
 
 pytestmark = needs_node
 
@@ -66,7 +61,7 @@ process.stdout.write(JSON.stringify({
 
 
 def _reconcile(tmp_path: Path, fresh: dict, stale: dict = None, *, snapshot: bool = True) -> dict:
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     functions = "\n".join(
         extract_js_function(source, signature)
         for signature in (
@@ -78,13 +73,9 @@ def _reconcile(tmp_path: Path, fresh: dict, stale: dict = None, *, snapshot: boo
     harness.write_text(
         HARNESS.replace("__FUNCTIONS__", functions), encoding="utf-8"
     )
-    result = subprocess.run(
-        ["node", str(harness), json.dumps(fresh), json.dumps(stale or {}), str(snapshot).lower()],
-        check=True,
-        capture_output=True,
-        encoding="utf-8",
+    return json.loads(
+        run_node(harness, json.dumps(fresh), json.dumps(stale or {}), str(snapshot).lower())
     )
-    return json.loads(result.stdout)
 
 
 @pytest.fixture

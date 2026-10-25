@@ -9,27 +9,15 @@ original defect through.
 from __future__ import annotations
 
 import json
-import re
-import subprocess
 from pathlib import Path
 
-
-import tokdash
-
-from support.frontend import extract_js_function, needs_node
-
-
-INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
+from support.frontend import extract_js_function, index_source, needs_node, run_node
 
 
 def _run_js(tmp_path: Path, name: str, script: str, value=None):
     harness = tmp_path / f"{name}.js"
     harness.write_text(script, encoding="utf-8")
-    argv = ["node", str(harness)]
-    if value is not None:
-        argv.append(json.dumps(value))
-    result = subprocess.run(argv, check=True, capture_output=True, encoding="utf-8")
-    return json.loads(result.stdout)
+    return json.loads(run_node(harness, *([json.dumps(value)] if value is not None else [])))
 
 
 def _payload(models: list[tuple[str, int, float]]) -> dict:
@@ -46,7 +34,7 @@ def _payload(models: list[tuple[str, int, float]]) -> dict:
 
 @needs_node
 def test_multi_server_merge_keeps_token_ranking(tmp_path):
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     function = extract_js_function(source, "function combineUsagePayloads(list) {")
 
     # Halved across two servers so the merge, not either input, fixes the order.
@@ -74,7 +62,7 @@ def test_multi_server_merge_keeps_token_ranking(tmp_path):
 
 @needs_node
 def test_cost_chart_picks_its_own_top_five_by_cost(tmp_path):
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     function = extract_js_function(source, "function updateModelChart(topModels) {")
     # The real chart factory, not a stub: updateModelChart now reaches Chart.js
     # through it, and a stub would let the function under test keep passing even
@@ -123,21 +111,74 @@ def test_cost_chart_picks_its_own_top_five_by_cost(tmp_path):
     assert "ocl-big" not in out["labels"]
 
 
-def test_cost_chart_reads_the_served_cost_podium():
-    """The five biggest models are not the five priciest, so top_models will not do."""
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    call = re.search(r"updateModelChart\((.*?)\);", source, re.S)
-    assert call, "updateModelChart call site not found"
-    argument = call.group(1)
-    assert "top_models_by_cost" in argument, "the cost chart must read the served cost podium"
-    # An older server, or a cached payload from before the field existed, still
-    # has to render something sensible.
-    assert "combined_models" in argument and "top_models" in argument
+# Everything renderOverviewTab touches besides the chart call, stubbed flat: this
+# harness only records which model list the cost chart is handed.
+OVERVIEW_RENDER_STUBS = """
+const charted = [];
+function updateModelChart(models) { charted.push(models.map((model) => model.name)); }
+const node = () => ({ textContent: '', style: {}, dataset: {}, setAttribute() {}, removeAttribute() {} });
+const document = { getElementById: () => node() };
+const t = (key) => key;
+let overviewTotalTokensRaw = 0, overviewReadableTokens = false, overviewRenderToken = 0;
+let lastByTool = {}, lastCombinedModels = [], lastAppsBreakdown = null;
+let lastWindowKey = null, overviewBreakdownWindowKey = null;
+let currentStartDate = null, currentEndDate = null;
+const overviewFacetsState = { status: 'idle' };
+const statsCache = { default: null };
+function overviewRangeIsEmpty() { return false; }
+function renderOverviewTokenTotal() {}
+function setOverviewCounterText() {}
+function setKpiExactReadout() {}
+function animateOverviewCounter() {}
+function formatCurrency(value) { return String(value); }
+function formatNumber(value) { return String(value); }
+function formatHitRate(value) { return String(value); }
+function formatTokenCount(value) { return String(value); }
+function formatCompactTokenCount(value) { return String(value); }
+function fitOverviewKpis() {}
+function renderOverviewActiveTime() {}
+function updateComparisonDeltas() {}
+function updateToolChart() {}
+function updateToolsTable() {}
+function scheduleIdle() {}
+function updateAppsBreakdown() {}
+function updateCombinedModelsTable() {}
+function updateProjectDetailsTable() {}
+function reconcileTodayProfileContribution(cached) { return cached; }
+function renderOverviewProfilePreview() {}
+"""
+
+
+@needs_node
+def test_cost_chart_is_handed_the_served_cost_podium(tmp_path):
+    """The five biggest models are not the five priciest, so top_models will not do.
+
+    An older server, or a cached payload from before the field existed, has no
+    top_models_by_cost and still has to chart something sensible.
+    """
+    source = index_source()
+    script = (
+        OVERVIEW_RENDER_STUBS
+        + extract_js_function(source, "function renderOverviewTab(data) {")
+        + "\nfor (const payload of JSON.parse(process.argv[2])) renderOverviewTab(payload);\n"
+        + "process.stdout.write(JSON.stringify(charted));\n"
+    )
+    by_tokens = [{"name": f"tokens-{n}", "tokens": 100 - n, "cost": n} for n in range(6)]
+    by_cost = sorted(by_tokens, key=lambda row: -row["cost"])[:5]
+    payloads = [
+        {"top_models": by_tokens[:5], "combined_models": by_tokens, "top_models_by_cost": by_cost},
+        {"top_models": by_tokens[:5], "combined_models": by_tokens},
+        {"top_models": by_tokens[:5]},
+        {},
+    ]
+    # Served podium first, then the full list, then the token podium, then nothing.
+    expected = [[row["name"] for row in rows] for rows in (by_cost, by_tokens, by_tokens[:5], [])]
+    assert _run_js(tmp_path, "overview_cost_chart", script, payloads) == expected
 
 
 @needs_node
 def test_multi_server_merge_builds_both_podiums_from_the_full_list(tmp_path):
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     function = extract_js_function(source, "function combineUsagePayloads(list) {")
 
     # Six models per server, so each server's own five-entry podium omits one.
@@ -184,7 +225,7 @@ def test_multi_server_merge_builds_both_podiums_from_the_full_list(tmp_path):
 @needs_node
 def test_merge_keeps_models_from_a_server_without_combined_models(tmp_path):
     """Deriving the podiums from a partial full list would drop a server entirely."""
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     function = extract_js_function(source, "function combineUsagePayloads(list) {")
 
     modern = _payload([("shared-model", 5_000, 1.0)])

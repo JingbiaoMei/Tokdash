@@ -6,17 +6,10 @@ labels, reset countdown formatting, and unlimited bucket visibility.
 from __future__ import annotations
 
 import json
-import subprocess
-from pathlib import Path
 
-
-import tokdash
 from tokdash.model_normalization import normalize_model_name
 
-from support.frontend import extract_js_function, needs_node
-
-
-INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
+from support.frontend import extract_js_function, index_source, needs_node, run_node
 
 # Cases that have historically drifted between the hand-maintained JS twin in
 # index.html and the Python normalizer (especially date-suffix spellings and
@@ -64,7 +57,7 @@ def test_frontend_normalize_model_name_matches_backend(tmp_path):
     future drift fails CI instead of silently mismatching frontend/backend
     labels. Skipped when node is absent.
     """
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     js_fn = _extract_js_normalize_model_name(src)
 
     harness = tmp_path / "norm.js"
@@ -76,13 +69,8 @@ def test_frontend_normalize_model_name_matches_backend(tmp_path):
         + "process.stdout.write(JSON.stringify(out));\n",
         encoding="utf-8",
     )
-    result = subprocess.run(
-        ["node", str(harness), json.dumps(SYNC_CASES)],
-        capture_output=True,
-        encoding="utf-8",
-        check=True,
-    )
-    js_out = json.loads(result.stdout)
+    stdout = run_node(harness, json.dumps(SYNC_CASES))
+    js_out = json.loads(stdout)
 
     mismatches = [
         f"{c!r}: python={normalize_model_name(c)!r} js={js_out.get(c)!r}"
@@ -94,7 +82,7 @@ def test_frontend_normalize_model_name_matches_backend(tmp_path):
 
 @needs_node
 def test_quota_plan_label_does_not_call_detected_providers_undetected(tmp_path):
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     js_fn = extract_js_function(
         # Third argument is a card's own plan decision (Claude, whose card can carry several
         # installs). These cases pass none, which is what every other provider does.
@@ -124,14 +112,9 @@ def test_quota_plan_label_does_not_call_detected_providers_undetected(tmp_path):
             },
         ],
     ]
-    result = subprocess.run(
-        ["node", str(harness), json.dumps(cases)],
-        capture_output=True,
-        encoding="utf-8",
-        check=True,
-    )
+    stdout = run_node(harness, json.dumps(cases))
 
-    assert json.loads(result.stdout) == [
+    assert json.loads(stdout) == [
         "",
         "",
         "Intermediate",
@@ -143,7 +126,7 @@ def test_quota_plan_label_does_not_call_detected_providers_undetected(tmp_path):
 
 @needs_node
 def test_minimax_china_region_moves_from_bucket_to_card_title(tmp_path):
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     card_fn = extract_js_function(
         # Third argument is Claude's install view; MiniMax reads its regions off `buckets`.
         src, "function quotaProviderCardLabel(providerKey, provider, claudeView) {"
@@ -195,14 +178,9 @@ def test_minimax_china_region_moves_from_bucket_to_card_title(tmp_path):
         [{"account": "global"}],
         [{"account": "global"}, {"account": "cn"}],
     ]
-    result = subprocess.run(
-        ["node", str(harness), json.dumps(cases)],
-        capture_output=True,
-        encoding="utf-8",
-        check=True,
-    )
+    stdout = run_node(harness, json.dumps(cases))
 
-    assert json.loads(result.stdout) == {
+    assert json.loads(stdout) == {
         "titles": ["MiniMax (China)", "MiniMax", "MiniMax"],
         "oldBucket": "windowFiveHour",
         "weeklyBucket": "windowWeekly",
@@ -214,7 +192,7 @@ def test_minimax_china_region_moves_from_bucket_to_card_title(tmp_path):
 
 @needs_node
 def test_kimi_legacy_plan_bucket_is_labeled_weekly(tmp_path):
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     window_fn = extract_js_function(
         src, "function quotaWindowLabel(provider, bucket) {"
     )
@@ -227,14 +205,9 @@ def test_kimi_legacy_plan_bucket_is_labeled_weekly(tmp_path):
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ["node", str(harness)],
-        capture_output=True,
-        encoding="utf-8",
-        check=True,
-    )
+    stdout = run_node(harness)
 
-    assert result.stdout == "windowWeekly"
+    assert stdout == "windowWeekly"
 
 
 @needs_node
@@ -245,7 +218,7 @@ def test_antigravity_window_label_auto_determined_from_reset_time(tmp_path):
     falls: a 5-hour window can't reset more than 5h out, so a reset beyond the threshold is
     weekly. Reproduces the 3d22h weekly case that previously rendered a stale "5-hour" label.
     """
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     window_fn = extract_js_function(src, "function quotaWindowLabel(provider, bucket) {")
     ag_fn = extract_js_function(src, "function antigravityWindowLabel(bucket) {")
     harness = tmp_path / "antigravity-window-label.js"
@@ -273,14 +246,9 @@ def test_antigravity_window_label_auto_determined_from_reset_time(tmp_path):
         {"bucket": "pool:gemini", "bucket_label": "Gemini Models",
          "captured_at": captured, "resets_at": None},
     ]
-    result = subprocess.run(
-        ["node", str(harness), json.dumps(cases)],
-        capture_output=True,
-        encoding="utf-8",
-        check=True,
-    )
+    stdout = run_node(harness, json.dumps(cases))
 
-    assert json.loads(result.stdout) == [
+    assert json.loads(stdout) == [
         "windowFiveHour",
         "windowWeekly",
         "windowWeekly",
@@ -300,7 +268,7 @@ def test_quota_reset_countdown_uses_companion_single_unit_rule(tmp_path):
     exactly what happened when the web gained a days tier the companions lacked and a
     weekly window read "resets in 3 days" here but "resets in 94 hours" in the flyout.
     """
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     fn = extract_js_function(src, "function formatResetCountdownFromSeconds(remaining) {")
     harness = tmp_path / "reset-countdown.js"
     harness.write_text(
@@ -332,14 +300,9 @@ def test_quota_reset_countdown_uses_companion_single_unit_rule(tmp_path):
         129600,                 # 1.5d floors to the whole unit
         7 * 86400,              # full weekly window
     ]
-    result = subprocess.run(
-        ["node", str(harness), json.dumps(cases)],
-        capture_output=True,
-        encoding="utf-8",
-        check=True,
-    )
+    stdout = run_node(harness, json.dumps(cases))
 
-    assert json.loads(result.stdout) == [
+    assert json.loads(stdout) == [
         "resets in 3 days",
         "resets in 4 hours",
         "resets in 43 minutes",
@@ -358,7 +321,7 @@ def test_quota_reset_countdown_uses_companion_single_unit_rule(tmp_path):
 
 @needs_node
 def test_unlimited_quota_bucket_remains_visible_without_numeric_percent(tmp_path):
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     usage_fn = extract_js_function(
         src, "function isQuotaUsageBucket(bucket) {"
     )
@@ -376,11 +339,6 @@ def test_unlimited_quota_bucket_remains_visible_without_numeric_percent(tmp_path
         {"bucket": "global_general_7d", "used_percent": None, "unlimited": False},
     ]
 
-    result = subprocess.run(
-        ["node", str(harness), json.dumps(cases)],
-        capture_output=True,
-        encoding="utf-8",
-        check=True,
-    )
+    stdout = run_node(harness, json.dumps(cases))
 
-    assert json.loads(result.stdout) == [True, True, False, False]
+    assert json.loads(stdout) == [True, True, False, False]

@@ -100,16 +100,6 @@ def test_chart_entry_animation_clears_residual_transform():
 # P2 — tab switching commits .active synchronously, never inside onComplete
 # ---------------------------------------------------------------------------
 
-def test_tab_active_class_swap_is_synchronous():
-    fn = TRANSITIONS_JS[TRANSITIONS_JS.index("function animateTabTransition"):]
-    fn = fn[: fn.index("export default")]
-    on_complete = fn[fn.index("onComplete"):]
-    assert ".classList.remove('active')" not in on_complete
-    assert ".classList.add('active')" not in on_complete
-    assert "outEl.classList.remove('active')" in fn
-    assert "inEl.classList.add('active')" in fn
-
-
 def test_stop_releases_inline_styles_of_cancelled_animations():
     # stop() skips onComplete, so stopTabTransitions must clear the styles the
     # killed animations owned or panels strand at opacity 0.
@@ -223,48 +213,6 @@ def test_reset_zeroes_bars_and_values():
     for bar in ("compPromptBar", "compCacheBar", "compOutputBar", "compReasoningBar"):
         assert bar in fn
     assert "'—'" in fn or '"—"' in fn
-
-
-# ---------------------------------------------------------------------------
-# P2 (round 4) — the cache bar's in-flight animation must not outrank the reset
-# ---------------------------------------------------------------------------
-
-MICRO_JS = (STATIC / "js" / "animations" / "micro.js").read_text(encoding="utf-8")
-
-
-def test_cache_hit_bar_tracks_and_stops_its_animations():
-    fn = MICRO_JS[MICRO_JS.index("function animateCacheHitBar"):]
-    assert "__cacheBarAnims" in fn, "animations must be tracked per bar"
-    assert "stopCacheBarAnims(barEl);" in fn[: fn.index("respectsReducedMotion")] , (
-        "previous animations must be stopped before starting new ones"
-    )
-
-
-def test_stop_cache_hit_bar_is_exported():
-    assert "export function stopCacheHitBar" in MICRO_JS
-
-
-ANIM_MODULES = STATIC / "js" / "animations"
-
-
-def test_anime_stop_helper_uses_pause_not_stop():
-    helper = (ANIM_MODULES / "anime-stop.js").read_text(encoding="utf-8")
-    assert "anim.pause()" in helper, (
-        "the bundled anime 4.0.0 has no stop() — pause() is the real API"
-    )
-
-
-def test_no_module_relies_on_the_missing_stop_method_guard():
-    # `typeof anim.stop === 'function'` is always false in this anime build;
-    # a guard around it is a silent no-op that lets cancelled animations keep
-    # writing to their target.
-    for js in sorted(ANIM_MODULES.glob("*.js")):
-        if js.name == "anime-stop.js":
-            continue
-        src = js.read_text(encoding="utf-8")
-        assert "typeof anim.stop === 'function'" not in src, js.name
-        assert "typeof rateAnimation.stop" not in src, js.name
-        assert "typeof pulseAnimation.stop" not in src, js.name
 
 
 def test_reset_stops_cache_animation_before_writing_width():

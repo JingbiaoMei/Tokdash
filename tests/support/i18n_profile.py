@@ -323,8 +323,10 @@ function __matchSteps(node, steps, index) {
   return false;
 }
 
+const __parsedSelectors = new Map();
 function __matches(node, selector) {
-  return __selectorGroups(selector).some((steps) => __matchSteps(node, steps, steps.length - 1));
+  if (!__parsedSelectors.has(selector)) __parsedSelectors.set(selector, __selectorGroups(selector));
+  return __parsedSelectors.get(selector).some((steps) => __matchSteps(node, steps, steps.length - 1));
 }
 
 class StubDocument {

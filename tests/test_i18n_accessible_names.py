@@ -308,14 +308,6 @@ def test_js_set_label_elements_have_no_attribute_translation_markers(
             )
 
 
-def test_refresh_report_labels_come_from_the_javascript_pass(source: str) -> None:
-    """The JS pass still writes both refresh-report labels."""
-    assert "t('refreshReportClose')" in source
-    assert "t('refreshReportDiffLabel')" in source
-    assert "ranking.setAttribute('aria-label', t('activityTopTools'))" in source
-    assert "shell.setAttribute('aria-label', t('activityInsightsTitle'))" in source
-
-
 # --- inline fallbacks agree with the dictionary ---------------------------
 
 

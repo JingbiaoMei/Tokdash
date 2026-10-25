@@ -8,7 +8,7 @@ the page. These tests keep:
 
 - one definition of each stack, reachable through `--font-sans` / `--font-mono`;
 - a CJK family in the tail of both, covering each supported platform's own face;
-- the Report and 3D fonts, which resolve the current stylesheet stacks;
+- the 3D view's labels, which name the current stylesheet stack;
 - the locale rules that take translated labels off the mono stack and off tracking;
 - the optional vendored face: its placeholder, its discovery rule, and the fetch
   script's licence handling.
@@ -200,12 +200,14 @@ def test_locale_fonts_precede_chinese_in_sans_and_mono(lang, region):
     assert "noto sans mono cjk sc" not in mono
 
 
-def test_report_and_3d_fonts_use_stylesheet_stacks():
-    source = _source()
-    assert "getPropertyValue(mono ? '--font-mono' : '--font-sans')" in source
-    assert "${usageReportFontFamily(mono)}" in source
-    assert "labelsContainer.style.fontFamily = 'var(--font-sans)'" in source
-    assert "const USAGE_REPORT_SANS" not in source
+def test_3d_view_labels_use_the_stylesheet_stack():
+    """The 3D calendar's DOM labels name the token, not a font of their own.
+
+    The Report cards resolve the same stacks at paint time, and
+    test_usage_report_frontend.py::test_share_card_fonts_follow_language_style_changes
+    runs that; nothing runs the 3D view, so its one line is pinned here.
+    """
+    assert "labelsContainer.style.fontFamily = 'var(--font-sans)'" in _source()
 
 
 @pytest.mark.parametrize("lang", ("zh-CN", "ja", "ko"))

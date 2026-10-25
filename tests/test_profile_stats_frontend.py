@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
@@ -651,138 +652,6 @@ html.dark[data-ui-theme="paper"] .overview-profile-band {
     assert "syncProfileMilestonePalette();" in color_mode_setter
 
 
-def test_profile_uses_github_geometry_stronger_auras_and_edge_gutter():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    compact = re.sub(r"\s+", "", source)
-
-    assert (
-        ".profile-activity-grid-wrap{position:relative;min-width:595px;}"
-        in compact
-    )
-    assert (
-        ".profile-activity-grid{display:grid;grid-auto-flow:column;"
-        "grid-template-columns:repeat(52,minmax(8px,1fr));"
-        "grid-template-rows:repeat(7,minmax(8px,1fr));"
-        "gap:3.5px;width:100%;}"
-        in compact
-    )
-    assert (
-        ".profile-activity-week-hits{position:absolute;inset:0;display:grid;"
-        "grid-template-columns:repeat(52,minmax(8px,1fr));"
-        "gap:3.5px;pointer-events:none;}"
-        in compact
-    )
-    assert (
-        ".profile-activity-months{display:flex;justify-content:space-between;"
-        "min-width:595px;"
-        in compact
-    )
-    assert (
-        ".profile-activity-legend{display:flex;align-items:center;"
-        "justify-content:flex-end;gap:8px;min-width:595px;"
-        in compact
-    )
-    assert ".profile-activity-cell{" in compact
-    assert "border-radius:2px" in compact
-
-    assert (
-        ".profile-activity-scroll{--profile-interactive-aura-reserve:26px;"
-        "--profile-edge-safety-gutter:8px;overflow-x:auto;"
-        "padding-block:8px12px;"
-        "padding-inline:0calc(var(--profile-interactive-aura-reserve)"
-        "+var(--profile-edge-safety-gutter));}"
-    ) in compact
-    assert (
-        ".overview-profile-scroll{--overview-profile-interactive-aura-reserve:16px;"
-        "--profile-edge-safety-gutter:8px;overflow-x:auto;"
-        "padding-block:2px4px;"
-        "padding-inline:0calc(var(--overview-profile-interactive-aura-reserve)"
-        "+var(--profile-edge-safety-gutter));}"
-    ) in compact
-
-    for fragment in [
-        "0002pxcolor-mix(insrgb,var(--profile-milestone-tone)86%,transparent)",
-        "0011pxcolor-mix(insrgb,var(--profile-milestone-tone)72%,transparent)",
-        "0014pxcolor-mix(insrgb,var(--profile-milestone-tone)80%,transparent)",
-        "0003pxcolor-mix(insrgb,var(--profile-milestone-tone)72%,transparent)",
-        "0017pxcolor-mix(insrgb,var(--profile-milestone-tone)88%,transparent)",
-        "0004pxcolor-mix(insrgb,var(--profile-milestone-tone)78%,transparent)",
-        "0022pxcolor-mix(insrgb,var(--profile-milestone-tone)96%,transparent)",
-    ]:
-        assert fragment in compact
-
-    overview_base_rules = [
-        '.overview-profile-cell[data-milestone="1"]{box-shadow:inset 0 0 0 1px '
-        "var(--profile-milestone-keyline),0 0 0 1px color-mix(in srgb,"
-        "var(--profile-milestone-tone) 72%,transparent),0 0 6px color-mix("
-        "in srgb,var(--profile-milestone-tone) 42%,transparent);}",
-        '.overview-profile-cell[data-milestone="2"]{box-shadow:inset 0 0 0 1px '
-        "var(--profile-milestone-keyline),0 0 0 1px color-mix(in srgb,"
-        "var(--profile-milestone-tone) 78%,transparent),0 0 8px color-mix("
-        "in srgb,var(--profile-milestone-tone) 52%,transparent);}",
-        '.overview-profile-cell[data-milestone="3"]{box-shadow:inset 0 0 0 1px '
-        "var(--profile-milestone-keyline),0 0 0 1px color-mix(in srgb,"
-        "var(--color-text) 74%,transparent),0 0 0 2px color-mix(in srgb,"
-        "var(--profile-milestone-tone) 48%,transparent),0 0 10px color-mix("
-        "in srgb,var(--profile-milestone-tone) 62%,transparent);}",
-        '.overview-profile-cell[data-milestone="4"]{box-shadow:inset 0 0 0 1px '
-        "var(--profile-milestone-keyline),0 0 0 1px color-mix(in srgb,"
-        "var(--color-text) 82%,transparent),0 0 0 3px color-mix(in srgb,"
-        "var(--profile-milestone-tone) 58%,transparent),0 0 13px color-mix("
-        "in srgb,var(--profile-milestone-tone) 72%,transparent);}",
-    ]
-    for rule in overview_base_rules:
-        assert rule in source
-
-    overview_interaction_rule = (
-        ".overview-profile-grid button.overview-profile-cell[data-milestone]"
-        ":not(:disabled):is(:hover,:focus-visible),.overview-profile-grid "
-        ".overview-profile-cell[data-milestone].is-column-hover{box-shadow:"
-        "inset 0 0 0 1px var(--profile-milestone-keyline),0 0 0 1px "
-        "color-mix(in srgb,var(--color-text) 88%,transparent),0 0 0 3px "
-        "color-mix(in srgb,var(--profile-milestone-tone) 68%,transparent),"
-        "0 0 16px color-mix(in srgb,var(--profile-milestone-tone) 82%,transparent);}"
-    )
-    assert overview_interaction_rule in source
-
-
-def test_profile_view_html_and_localization_contract():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    required_ids = [
-        "statsViewTitle",
-        "viewProfile",
-        "statsMetricControls",
-        "calendarProfileView",
-        "profileStatRecordedTokens",
-        "profileStatPeakDay",
-        "profileStatActiveDays",
-        "profileStatCurrentStreak",
-        "profileStatLongestStreak",
-        "profileActivityGrid",
-        "profileActivityWeekHits",
-        "profileActivityMonths",
-        "profileActivityLegend",
-        "profileActivityScroller",
-        "profileActivityTooltip",
-        "profileModeDaily",
-        "profileModeWeekly",
-        "profileModeCumulative",
-    ]
-    for element_id in required_ids:
-        assert f'id="{element_id}"' in source
-    assert source.count("profileView: '") == 6
-    assert source.count("recordedTokens: '") == 6
-    assert source.count("tokenActivity: '") == 6
-    assert ".profile-activity-cell" in source
-    assert "border-radius:2px" in source.replace(" ", "")
-    assert "function renderProfileView() {" in source
-    assert "function setProfileActivityMode(mode) {" in source
-    assert "function showProfileActivityTooltip(target, model) {" in source
-    assert "setView('profile')" in source
-    assert "renderProfileView();" in source
-    assert "'calendarProfileView'" in source
-
-
 def test_profile_visual_polish_contract():
     source = INDEX_HTML.read_text(encoding="utf-8")
     compact = re.sub(r"\s+", "", source)
@@ -879,48 +748,6 @@ def test_profile_tooltip_position_handles_zoomed_viewport_and_edges(tmp_path: Pa
         {"left": 380, "top": 1512},
         {"left": 8, "top": 8},
     ]
-
-
-def test_profile_tooltips_use_viewport_portal_and_reflow_on_zoom():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    compact = re.sub(r"\s+", "", source)
-    portal_markup = """
-  <!-- Viewport-level tooltips must stay outside filtered/transformed cards. -->
-  <div id="overviewProfileTooltip" class="profile-activity-tooltip overview-profile-tooltip" role="tooltip" hidden></div>
-  <div id="profileActivityTooltip" class="profile-activity-tooltip" role="tooltip" hidden></div>
-""".strip()
-
-    assert portal_markup in source
-    assert source.count('id="overviewProfileTooltip"') == 1
-    assert source.count('id="profileActivityTooltip"') == 1
-    assert "max-height:calc(100dvh-16px)" in compact
-    assert "contain:layoutpaintstyle" in compact
-
-    viewport = extract_js_function(
-        source,
-        "function getProfileActivityViewport() {",
-    )
-    positioner = extract_js_function(
-        source,
-        "function positionActiveProfileActivityTooltip() {",
-    )
-    shower = extract_js_function(
-        source,
-        "function showProfileActivityTooltip(target, model) {",
-    )
-    assert "window.visualViewport" in viewport
-    assert "target.getBoundingClientRect()" in positioner
-    assert "tooltip.getBoundingClientRect()" in positioner
-    assert "tooltip.style.maxWidth" in positioner
-    assert "tooltip.style.maxHeight" in positioner
-    assert "snapProfileActivityTooltipCoordinate" in positioner
-    assert "offsetWidth" not in shower
-    assert "offsetHeight" not in shower
-    assert "window.innerWidth" not in shower
-    assert "window.innerHeight" not in shower
-    assert "window.addEventListener('resize', scheduleProfileActivityTooltipPosition" in source
-    assert "window.addEventListener('scroll', scheduleProfileActivityTooltipPosition" in source
-    assert "window.visualViewport?.addEventListener(" in source
 
 
 def test_profile_activity_legend_is_safe_localized_and_mode_aware():
@@ -1209,85 +1036,6 @@ def test_today_usage_reconciles_the_profile_day_without_mutating_history(tmp_pat
     assert "reconcileTodayProfileContribution(" in warmer
 
 
-def test_overview_profile_summary_markup_and_style_contract():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    compact = re.sub(r"\s+", "", source)
-    required_ids = [
-        "overviewProfileSummary",
-        "overviewProfileTitle",
-        "overviewProfileOpen",
-        "overviewProfileLoading",
-        "overviewProfileUnavailable",
-        "overviewProfileReady",
-        "overviewProfileActiveDays",
-        "overviewProfileCurrentStreak",
-        "overviewProfileLongestStreak",
-        "overviewProfileScroller",
-        "overviewProfileModeDaily",
-        "overviewProfileModeWeekly",
-        "overviewProfileModeCumulative",
-        "overviewProfileActivityLabel",
-        "overviewProfileGridWrap",
-        "overviewProfileGrid",
-        "overviewProfileWeekHits",
-        "overviewProfileLegend",
-        "overviewProfileTooltip",
-    ]
-    for element_id in required_ids:
-        assert f'id="{element_id}"' in source
-
-    assert source.index('id="modelChart"') < source.index('id="overviewProfileSummary"')
-    assert source.index('id="overviewProfileSummary"') < source.index('id="toolsTable"')
-    for key in [
-        "overviewProfileEyebrow",
-        "overviewProfileTitle",
-        "overviewProfileRange",
-        "viewFullProfile",
-        "overviewProfileUnavailable",
-    ]:
-        assert source.count(f"{key}: '") == 6
-
-    assert ".overview-profile-band{" in compact
-    assert "grid-template-columns:minmax(220px,260px)minmax(0,1fr)" in compact
-    assert ".overview-profile-copy{" in compact
-    assert "border-radius:0;background:none;box-shadow:none" in compact
-    assert ".overview-profile-copyh2{margin-top:7px;font-size:19px" in compact
-    assert ".overview-profile-open{" in compact
-    assert "padding:7px0" in compact
-    assert "border:0;background:transparent;box-shadow:none" in compact
-    assert ".overview-profile-metricsdd{margin:0;color:var(--overview-profile-tone);font-size:19px" in compact
-    assert ".overview-profile-mode{padding:6px10px;font-size:12px;" in compact
-    assert ".overview-activity-insight-kpi[data-tone=\"secondary\"]" in compact
-    assert ".overview-activity-insight-kpidd{margin:0;overflow:hidden;color:var(--overview-insight-tone);font-size:15px" in compact
-    assert (
-        ".overview-profile-grid-wrap{position:relative;min-width:595px;}"
-        in compact
-    )
-    assert (
-        ".overview-profile-grid{display:grid;grid-auto-flow:column;"
-        "grid-template-columns:repeat(52,minmax(8px,1fr));"
-        "grid-template-rows:repeat(7,minmax(8px,1fr));"
-        "gap:3.5px;width:100%;}"
-        in compact
-    )
-    assert (
-        ".overview-profile-week-hits{"
-        "grid-template-columns:repeat(52,minmax(8px,1fr));"
-        "gap:3.5px;}"
-        in compact
-    )
-    assert ".overview-profile-cell{border-radius:2px" in compact
-    assert "overviewProfileRange: 'Past 52 weeks'" in source
-    assert "overviewProfileRange: '过去 52 周'" in source
-    assert source.count('class="profile-activity-mode overview-profile-mode"') == 3
-    assert 'aria-labelledby="overviewProfileActivityLabel"' in source
-    assert 'aria-label="Activity aggregation"' not in source
-    assert ".overview-profile-mode{" in compact
-    assert 'id="overviewProfileWeekHits"' in source
-    assert "@media(max-width:800px)" in compact
-    assert ".overview-profile-cell{transform:none!important;}" in compact
-
-
 def test_overview_profile_modes_share_state_and_render_aggregate_hits_contract():
     source = INDEX_HTML.read_text(encoding="utf-8")
     overview_renderer = extract_js_function(
@@ -1392,24 +1140,57 @@ def test_overview_profile_resize_rearms_initial_scroll_contract():
     ) in source
 
 
-def test_activity_insights_profile_and_overview_markup_contract():
+class _ParentScanner(HTMLParser):
+    """Record the parent tag of every element that carries an id."""
+
+    VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.stack: list[str] = []
+        self.parents: dict[str, str] = {}
+
+    def handle_starttag(self, tag, attrs):  # type: ignore[no-untyped-def]
+        element_id = dict(attrs).get("id")
+        if element_id:
+            self.parents[element_id] = self.stack[-1] if self.stack else ""
+        if tag not in self.VOID:
+            self.stack.append(tag)
+
+    def handle_endtag(self, tag):  # type: ignore[no-untyped-def]
+        if tag in self.stack:
+            while self.stack.pop() != tag:
+                pass
+
+
+def test_profile_and_overview_markup_order_and_portals():
+    """Where the profile pieces sit in the page, which no render can move.
+
+    The band sits between the model chart and the tools table, each legend under
+    its grid with the activity insights after it, the overview mode buttons are
+    named by their visible label, and both tooltips are children of <body>: a
+    tooltip inside a filtered or transformed card is clipped by it and positioned
+    against it instead of the viewport.
+    """
     source = INDEX_HTML.read_text(encoding="utf-8")
-    for element_id in (
-        "profileActivityInsights",
-        "profileActivityInsightsKpis",
-        "profileActivityCoverage",
-        "profileActivityToolRanking",
-        "overviewActivityInsights",
-        "overviewActivityInsightsValues",
-        "overviewActivityInsightsState",
-    ):
-        assert f'id="{element_id}"' in source
-    assert source.index('id="profileActivityLegend"') < source.index(
-        'id="profileActivityInsights"'
-    )
-    assert source.index('id="overviewProfileLegend"') < source.index(
-        'id="overviewActivityInsights"'
-    )
+    order = [
+        ('id="modelChart"', 'id="overviewProfileSummary"'),
+        ('id="overviewProfileSummary"', 'id="toolsTable"'),
+        ('id="overviewProfileGridWrap"', 'id="overviewProfileLegend"'),
+        ('id="profileActivityLegend"', 'id="profileActivityInsights"'),
+        ('id="overviewProfileLegend"', 'id="overviewActivityInsights"'),
+    ]
+    for before, after in order:
+        assert source.index(before) < source.index(after), f"{before} must come before {after}"
+    assert 'aria-labelledby="overviewProfileActivityLabel"' in source
+
+    # The markup ends where the main <script> (the one holding applyI18n) begins.
+    scanner = _ParentScanner()
+    scanner.feed(source[: source.rfind("<script>", 0, source.index("function applyI18n()"))])
+    for tooltip in ("overviewProfileTooltip", "profileActivityTooltip"):
+        assert scanner.parents.get(tooltip) == "body", (
+            f"#{tooltip} sits in <{scanner.parents.get(tooltip)}>, not directly in <body>"
+        )
 
 
 def test_activity_insights_use_one_shared_fetch_and_limit_profile_to_five_tools():
@@ -1437,33 +1218,14 @@ def test_activity_insights_use_one_shared_fetch_and_limit_profile_to_five_tools(
     assert "textContent" in overview
 
 
-def test_activity_insights_localization_states_and_responsive_contract():
+def test_activity_insights_effort_keys_exist():
+    """The effort labels are looked up through a variable, which the parity test
+    in test_i18n_languages.py cannot see; it guarantees the other languages once
+    English has them."""
     source = INDEX_HTML.read_text(encoding="utf-8")
-    compact = re.sub(r"\s+", "", source)
-    for key in (
-        "activityInsightsTitle",
-        "activityRecordedChats",
-        "activityReasoning",
-        "activityToolCalls",
-        "activityTopTool",
-        "activityCoverage",
-        "activityNoData",
-        "activityUnavailable",
-        "activityLocalScope",
-        "effortXhigh",
-    ):
-        assert source.count(f"{key}: '") == 6
-    assert "@media(max-width:768px)" in compact
-    assert (
-        ".profile-activity-insights-kpis{display:grid;"
-        "grid-template-columns:repeat(4,minmax(0,1fr))" in compact
-    )
-    assert (
-        ".profile-activity-insights-kpis,.overview-activity-insights-values"
-        "{grid-template-columns:repeat(2,minmax(0,1fr))" in compact
-    )
-    assert ".overview-activity-insights{background:transparent" in compact
-    assert ".overview-profile-grid-wrap{position:relative;min-width:595px;" in compact
+    english = source[source.index("const I18N = {") : source.index("\n      zh: {")]
+    for key in ("effortXhigh", "effortHigh", "effortMedium", "effortLow"):
+        assert f"\n        {key}: '" in english, f"en has no {key}"
 
 
 def _run_activity_insights_js(

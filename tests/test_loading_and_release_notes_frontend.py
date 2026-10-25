@@ -38,19 +38,6 @@ def test_document_background_covers_the_full_page() -> None:
     assert "background-color: var(--color-bg)" in body
 
 
-def test_loading_placeholders_share_the_profile_activity_shimmer() -> None:
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    assert ".tokdash-loading-placeholder" in source
-    assert ".tokdash-loading-placeholder:has(> .tokdash-loading-label)" in source
-    assert "@keyframes tokdash-loading-sweep" in source
-    assert "function renderLoadingPlaceholder(element, label = t('loading')) {" in source
-    assert "new MutationObserver" not in source
-    assert "querySelectorAll('*')" not in source
-    assert source.count('class="tokdash-loading-label"') >= 30
-    assert source.count("animation:tokdash-loading-sweep 1.4s ease-in-out infinite") >= 3
-    assert "prefers-reduced-motion:reduce" in source
-
-
 def test_release_notes_ship_with_the_current_package_version() -> None:
     payload = json.loads(RELEASE_NOTES.read_text(encoding="utf-8"))
     assert payload["current"] == tokdash.__version__

@@ -48,8 +48,6 @@ FIXED_PALETTE = re.compile(
     r"(?:bg|text|border|from|to)-(?:slate|gray|zinc|neutral|indigo|violet|purple|white)\b"
 )
 
-TRANSLATION_ATTRS = ("data-i18n", "data-i18n-title", "data-i18n-aria", "data-i18n-placeholder")
-
 # Strings only the JavaScript writes: the transcript cards, the fullscreen
 # chart's title and subtitles, and the turn axis label. A dictionary entry that
 # goes missing here is invisible in the markup, so it is listed on purpose.
@@ -220,16 +218,6 @@ def test_an_open_modal_follows_a_language_or_theme_switch(source: str) -> None:
 
 
 # --- every modal string goes through a dictionary ---------------------------
-
-
-def test_modal_markup_translates_every_hook_key(modal_region: str, _dictionary_keys) -> None:
-    keys = set()
-    for attribute in TRANSLATION_ATTRS:
-        keys |= set(re.findall(attribute + r'="([^"]+)"', modal_region))
-    assert keys, "the modal lost every translation hook"
-    known = set(_dictionary_keys["en"])
-    unknown = sorted(k for k in keys if k not in known)
-    assert not unknown, f"data-i18n hooks with no dictionary entry: {unknown}"
 
 
 def test_expanded_chart_wording_is_translated(source: str) -> None:

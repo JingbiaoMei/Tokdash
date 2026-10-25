@@ -4,9 +4,10 @@ Adding a theme means touching five places at once: the `validStyleThemes`
 list in static/theme-config.js, the three per-theme maps in the same file
 (`heatColorsMap`, `chartPaletteMap`, `themeMetaColors`), a theme section in
 static/themes.css, an `<option>` in the settings picker, and a `styleXxx`
-label in all six i18n dictionaries. The runtime falls back to `elevated` for
-missing map entries, so a forgotten map fails silently — these tests make the
-whole checklist fail loudly instead.
+label in all six i18n dictionaries (the picker test pins the option's key, and
+test_i18n_languages.py's parity test requires it in every language). The runtime
+falls back to `elevated` for missing map entries, so a forgotten map fails
+silently — these tests make the whole checklist fail loudly instead.
 """
 
 from __future__ import annotations
@@ -23,7 +24,6 @@ THEME_CONFIG_JS = STATIC / "theme-config.js"
 THEMES_CSS = STATIC / "themes.css"
 INDEX_HTML = STATIC / "index.html"
 
-EXPECTED_LANGUAGES = ("en", "zh", "ja", "ko", "es", "pt")
 
 
 def _valid_style_themes() -> list[str]:
@@ -121,25 +121,6 @@ def test_picker_lists_every_theme_in_order() -> None:
         expected_key = "style" + value[:1].upper() + value[1:]
         assert i18n_key == expected_key, (
             f"picker option {value!r} uses {i18n_key!r}, expected {expected_key!r}"
-        )
-
-
-@pytest.mark.parametrize("theme", VALID_STYLE_THEMES)
-def test_theme_label_in_every_language(theme: str) -> None:
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    key = "style" + theme[:1].upper() + theme[1:]
-    start = source.find("const I18N = {")
-    assert start != -1, "const I18N = { not found in index.html"
-    end = source.find("\n    };", start)
-    assert end != -1, "unterminated I18N object in index.html"
-    literal = source[start : end + 6]
-    blocks = dict(
-        re.findall(r"^      ([a-z]+): \{\n(.*?)^      \},?$", literal, re.M | re.S)
-    )
-    assert tuple(blocks) == EXPECTED_LANGUAGES
-    for lang, block in blocks.items():
-        assert re.search(rf"^        {key}: ", block, re.M), (
-            f"i18n dictionary {lang!r} is missing {key!r}"
         )
 
 

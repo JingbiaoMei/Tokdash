@@ -766,20 +766,13 @@ def test_every_column_of_every_ranking_table_is_a_sort_control() -> None:
     get nothing from, and a header that carries two labels is the old "cost, and
     by the way this is list price" column again. Both look fine until the page is
     up, so the markup is pinned here: one sortable cell, one sort field, one
-    translatable label, per column.
+    translatable label, per column. What a click does is run under node below.
     """
     source = _source()
     tables = re.findall(r'data-report-table="(\w+)"', source)
     assert tables == ["agents", "models", "projects"], tables
 
-    state_start = source.index("const usageReportTableSort = {")
-    state = source[state_start : source.index("};", state_start)]
-    for key, table_id in zip(tables, (
-        "usageReportAgentsTable",
-        "usageReportModelsTable",
-        "usageReportProjectsTable",
-    )):
-        assert f"{key}: {{ field:" in state, f"{key} has no sort slot to remember a click"
+    for table_id in ("usageReportAgentsTable", "usageReportModelsTable", "usageReportProjectsTable"):
         headers = _report_table_headers(source, table_id)
         assert headers, table_id
         fields = []
@@ -791,14 +784,6 @@ def test_every_column_of_every_ranking_table_is_a_sort_control() -> None:
             fields.append(match.group(1))
             assert th.count("data-i18n=") == 1, (table_id, th)
         assert len(fields) == len(set(fields)), (table_id, fields)
-
-    # The click path: wired once, and a click repaints all three tables so the
-    # arrow on the header a reader just used is the arrow on the rows below it.
-    block = _report_block(source)
-    wire = extract_js_function(block, "function usageReportWireTableSort() {")
-    assert "th[data-report-sort]" in wire
-    assert "usageReportRenderTables(usageReportState.model)" in wire
-    assert "usageReportWireTableSort();" in extract_js_function(block, "function usageReportWire() {")
 
 
 def test_the_report_tables_speak_the_overview_vocabulary() -> None:
@@ -1738,51 +1723,6 @@ def test_a_deferred_summary_cannot_answer_for_a_window_that_moved(tmp_path: Path
     assert out["afterStalePair"]["summaryLoading"] is False, out
 
 
-def test_the_version_stamp_waits_for_the_full_paint() -> None:
-    """/api/version is fired first and answers instantly, so it can land between
-    the two paints. Stamping the partial model would render the footer and the
-    share cards off a half-empty report -- the one thing the partial paint is
-    careful not to do."""
-    block = _report_block(_source())
-    version = extract_js_function(block, "function usageReportLoadVersion() {")
-    # The whole statement, not the condition and the ordering: asserting those two
-    # separately passes for `if (...notices.pending) { }`, which guards nothing.
-    assert "if (usageReportState.model.notices.pending) return;" in version
-    assert version.index("notices.pending") < version.index("usageReportRenderShare")
-
-
-def test_the_first_paint_renders_only_what_usage_answers() -> None:
-    """Anything else would print an em dash it has to take back a moment later.
-
-    The sections the other two requests feed keep the placeholder
-    usageReportRenderLoading() left on them, so the page fills in instead.
-    """
-    block = _report_block(_source())
-    partial = extract_js_function(block, "function usageReportRenderPartial(model) {")
-    full = extract_js_function(block, "function usageReportRender() {")
-    hero = extract_js_function(block, "function usageReportRenderHero(model) {")
-    assert "usageReportRenderHeroTotals(model)" in partial
-    # The activity half is reached through the whole-hero wrapper, which only the
-    # full paint calls.
-    assert "usageReportRenderHeroActivity(model)" not in partial
-    assert "usageReportRenderHeroActivity(model)" in hero
-    assert "usageReportRenderHero(model)" in full
-    for absent in (
-        "usageReportRenderHeat",
-        "usageReportRenderPodium",
-        "usageReportRenderWhen",
-        "usageReportRenderAgents",
-        "usageReportRenderFooter",
-        "usageReportRenderShare",  # would export a half-empty card
-    ):
-        assert absent not in partial, f"{absent} has no data on the first paint"
-        assert absent in full, f"{absent} must still run once everything has landed"
-    # Both paints take the window lines from one place, so the partial one cannot
-    # print a different range or title from the full one that replaces it.
-    assert "usageReportRenderHead(model)" in partial
-    assert "usageReportRenderHead(model)" in full
-
-
 # --- delta honesty ----------------------------------------------------------
 
 
@@ -2432,6 +2372,378 @@ process.stdout.write(JSON.stringify(out));
     assert "identity:codex" in out["narrow"]["tiles"][0]
 
 
+# --- what paints when, and what a click does, with the renderers stubbed ------
+
+
+PAINT_ORDER_SCENARIO = """
+const painted = [];
+function usageReportRenderControls() { painted.push('controls'); }
+function usageReportRenderState() { painted.push('state'); }
+function usageReportRenderHead() { painted.push('head'); }
+function usageReportRenderBanner() { painted.push('banner'); }
+function usageReportRenderHeroTotals() { painted.push('heroTotals'); }
+function usageReportRenderHeroActivity() { painted.push('heroActivity'); }
+function usageReportRenderHeat() { painted.push('heat'); }
+function usageReportRenderPodium() { painted.push('podium'); }
+function usageReportRenderWhen() { painted.push('when'); }
+function usageReportRenderAgents() { painted.push('agents'); }
+function usageReportRenderModels() { painted.push('models'); }
+function usageReportRenderProjects() { painted.push('projects'); }
+function usageReportRenderTableSortHeaders() { painted.push('sortHeaders'); }
+function usageReportShareHint() { painted.push('shareHint'); }
+function usageReportSyncShareInputs() { painted.push('syncShareInputs'); }
+function usageReportRenderFooter() { painted.push('footer'); }
+function usageReportRenderShare() { painted.push('share'); return Promise.resolve(); }
+const paint = (run) => { painted.length = 0; run(); return painted.slice(); };
+const model = { notices: {} };
+const out = {
+  partial: paint(() => usageReportRenderPartial(model)),
+  partialNoModel: paint(() => usageReportRenderPartial(null)),
+};
+usageReportState.model = model;
+out.full = paint(() => usageReportRender());
+usageReportState.model = null;
+out.fullNoModel = paint(() => usageReportRender());
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@needs_node
+def test_the_first_paint_renders_only_what_usage_answers(tmp_path: Path) -> None:
+    """Anything else would print an em dash it has to take back a moment later.
+
+    The first paint draws the controls, the window lines, the banner and the
+    token half of the hero; the sections the two slow requests feed keep the
+    placeholder usageReportRenderLoading() left on them, so the page fills in
+    instead. The full paint draws every section in the spec's order, the share
+    cards last, and on a landing load only re-points the nickname hint: writing
+    the field itself would wipe a nickname someone is still typing.
+    """
+    program = _report_dom(
+        PAINT_ORDER_SCENARIO,
+        "function usageReportRenderHero(model) {",
+        "function usageReportRenderPartial(model) {",
+        "function usageReportRender() {",
+    )
+    out = json.loads(_run_node(tmp_path, "usage-report-paint-order.js", program))
+
+    first = ["controls", "state", "head", "banner", "heroTotals"]
+    assert out["partial"] == first
+    assert out["full"] == first + [
+        "heroActivity", "heat", "podium", "when", "agents", "models", "projects",
+        "sortHeaders", "shareHint", "footer", "share",
+    ]
+    assert out["partialNoModel"] == out["fullNoModel"] == ["controls", "state"]
+
+
+VERSION_SCENARIO = """
+const painted = [];
+function usageReportRenderFooter(model) { painted.push(`footer:${model.name}`); }
+function usageReportRenderShare(model) { painted.push(`share:${model.name}`); return Promise.resolve(); }
+// The page's own build, which says nothing about a remote server's.
+function getRuntimeVersion() { throw new Error('the report asked the local build for its version'); }
+const asked = [];
+const answers = [];
+function fetchJsonWithRetry(server, path) {
+  asked.push([server.id, path]);
+  return new Promise((resolve, reject) => answers.push({ resolve, reject }));
+}
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+const read = () => ({
+  painted: painted.splice(0), version: usageReportState.version, asked: asked.length,
+});
+(async () => {
+  const out = {};
+  SERVERS = [{ id: 'local', label: 'Local' }, { id: 'mac', label: 'mac-studio' }];
+  // /api/version is fired first and answers at once, before the slow two.
+  usageReportState.model = { name: 'first', notices: { pending: true } };
+  usageReportLoadVersion();
+  answers[0].resolve({ runtime_version: '2.6.0' });
+  await settle();
+  out.betweenPaints = read();
+  // The full paint for the same server does not ask again.
+  usageReportState.model = { name: 'full', notices: {} };
+  usageReportLoadVersion();
+  out.sameServer = read();
+  // Another server: its own question, and the answer stamps the footer and cards.
+  usageReportState.serverId = 'mac';
+  usageReportLoadVersion();
+  out.whileAsking = read();
+  answers[1].resolve({ runtime_version: '2.7.0' });
+  await settle();
+  out.remote = read();
+  // Back to local and straight to mac again: local's late answer is dropped.
+  usageReportState.serverId = 'local';
+  usageReportLoadVersion();
+  usageReportState.serverId = 'mac';
+  usageReportLoadVersion();
+  answers[2].resolve({ runtime_version: '9.9.9' });
+  await settle();
+  out.overtaken = read();
+  answers[3].resolve({ runtime_version: '2.7.1' });
+  await settle();
+  out.current = read();
+  // A server that did not answer is asked again by the next load.
+  usageReportState.serverId = 'local';
+  usageReportLoadVersion();
+  answers[4].reject(new Error('connection refused'));
+  await settle();
+  usageReportLoadVersion();
+  out.afterFailure = read();
+  out.paths = asked;
+  process.stdout.write(JSON.stringify(out));
+})();
+"""
+
+
+@needs_node
+def test_the_version_stamp_waits_for_the_full_paint(tmp_path: Path) -> None:
+    """The footer names the build of the server the report was read from.
+
+    `getRuntimeVersion()` is the local build, cached for the session, so a
+    remote report stamped from it named the wrong box; the stamp is asked of the
+    selected server and keyed to it, and an answer a server switch overtook is
+    dropped. /api/version is fired first and answers at once, so it can land
+    between the two paints: stamping the partial model would render the footer
+    and the share cards off a half-empty report. A later answer repaints both.
+    """
+    program = _report_dom(VERSION_SCENARIO, "function usageReportLoadVersion() {")
+    out = json.loads(_run_node(tmp_path, "usage-report-version.js", program))
+
+    assert out["betweenPaints"] == {"painted": [], "version": "2.6.0", "asked": 1}
+    assert out["sameServer"] == {"painted": [], "version": "2.6.0", "asked": 1}
+    assert out["whileAsking"] == {"painted": [], "version": None, "asked": 2}
+    assert out["remote"] == {"painted": ["footer:full", "share:full"], "version": "2.7.0", "asked": 2}
+    assert out["overtaken"] == {"painted": [], "version": None, "asked": 4}
+    assert out["current"] == {"painted": ["footer:full", "share:full"], "version": "2.7.1", "asked": 4}
+    assert out["afterFailure"]["asked"] == 6, "a failed answer pinned the version to nothing"
+    assert out["paths"] == [
+        ["local", "/api/version"], ["mac", "/api/version"], ["local", "/api/version"],
+        ["mac", "/api/version"], ["local", "/api/version"], ["local", "/api/version"],
+    ]
+
+
+WIRE_SCENARIO = """
+const log = [];
+function usageReportReadPrefs() { log.push('readPrefs'); }
+function usageReportWireTableSort() { log.push('wireTableSort'); }
+function usageReportWireShare() { log.push('wireShare'); }
+function usageReportWritePrefs() { log.push('writePrefs'); }
+function usageReportResumePending() { log.push('resume'); }
+function loadUsageReport(options) { log.push(options === undefined ? 'load' : `load:${JSON.stringify(options)}`); }
+const buttons = USAGE_REPORT_PERIODS.map((name) => {
+  const button = makeNode('button');
+  button.dataset.period = name;
+  return button;
+});
+const pageListeners = {};
+document.addEventListener = (type, fn) => { (pageListeners[type] = pageListeners[type] || []).push(fn); };
+document.querySelectorAll = (selector) => (selector === '#usageReportPeriod button' ? buttons : []);
+const select = document.getElementById('usageReportServer');
+const retry = document.getElementById('usageReportRetry');
+const period = (name) => buttons.find((button) => button.dataset.period === name);
+const read = () => ({
+  period: usageReportState.period, back: usageReportState.back, serverId: usageReportState.serverId,
+  pending: [usageReportState.pendingPeriod, usageReportState.pendingBack, usageReportState.pendingServerId],
+  select: select.value, log: log.splice(0),
+});
+const out = {};
+usageReportWire();
+usageReportWire();
+out.wired = {
+  log: log.splice(0),
+  visibility: (pageListeners.visibilitychange || []).length,
+  periodClicks: buttons.map((button) => (button.listeners.click || []).length),
+};
+
+// Mid-load, a period and a server are both held, and the box snaps back to the
+// server the report on screen came from.
+usageReportState.back = 1;
+usageReportState.loading = true;
+period('week').click();
+select.value = 'mac';
+select.fire('change');
+out.midLoad = read();
+// The load lands and settles the queue.
+usageReportState.loading = false;
+usageReportApplyPendingChoice();
+out.applied = read();
+usageReportApplyPendingChoice();
+out.nothingQueued = read();
+usageReportState.pendingBack = 2;
+usageReportApplyPendingChoice();
+out.queuedBack = read();
+usageReportState.pendingPeriod = 'week';
+usageReportState.pendingBack = 2;
+usageReportApplyPendingChoice();
+out.queuedNoChange = read();
+
+// At rest a click loads straight away, and the period on screen is no change.
+period('month').click();
+out.periodAtRest = read();
+period('month').click();
+out.samePeriod = read();
+select.value = 'local';
+select.fire('change');
+out.serverAtRest = read();
+retry.click();
+out.retry = log.splice(0);
+document.hidden = true;
+pageListeners.visibilitychange.forEach((fn) => fn());
+out.hidden = log.splice(0);
+document.hidden = false;
+pageListeners.visibilitychange.forEach((fn) => fn());
+out.visible = log.splice(0);
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@needs_node
+def test_a_control_changed_mid_flight_is_applied_late_not_dropped(tmp_path: Path) -> None:
+    """The report on screen belongs to the period and server it was fetched for,
+    so a click during a load cannot be shown yet. It used to vanish without a
+    trace; now the control snaps back and the choice runs when the load lands.
+
+    The queued choice is a period or server the reader has not seen yet, so it
+    is a plain load that wants the cache like any first read; forcing a
+    recompute made clicking during a load the slowest path in the tab. Only the
+    retry button forces one. That every exit of the loader settles the queue,
+    once, is checked on the loader itself above.
+    """
+    program = _report_dom(
+        WIRE_SCENARIO,
+        "function usageReportApplyPendingChoice() {",
+        "function usageReportWire() {",
+    )
+    out = json.loads(_run_node(tmp_path, "usage-report-wire.js", program))
+
+    assert out["wired"] == {
+        "log": ["readPrefs", "wireTableSort", "wireShare"], "visibility": 1, "periodClicks": [1, 1, 1, 1],
+    }
+    assert out["midLoad"] == {
+        "period": "month", "back": 1, "serverId": "local",
+        "pending": ["week", None, "mac"], "select": "local", "log": [],
+    }
+    settled = [None, None, None]
+    # A new period starts on its current window.
+    assert out["applied"] == {
+        "period": "week", "back": 0, "serverId": "mac", "pending": settled, "select": "local",
+        "log": ["writePrefs", "load"],
+    }
+    assert out["nothingQueued"]["log"] == []
+    assert (out["queuedBack"]["back"], out["queuedBack"]["log"]) == (2, ["writePrefs", "load"])
+    assert out["queuedNoChange"]["log"] == [] and out["queuedNoChange"]["pending"] == settled
+
+    assert out["periodAtRest"] == {
+        "period": "month", "back": 0, "serverId": "mac", "pending": settled, "select": "local",
+        "log": ["writePrefs", "load"],
+    }
+    assert out["samePeriod"]["log"] == []
+    assert (out["serverAtRest"]["serverId"], out["serverAtRest"]["log"]) == ("local", ["writePrefs", "load"])
+    assert out["retry"] == ['load:{"refresh":true}']
+    assert out["hidden"] == [] and out["visible"] == ["resume"]
+
+
+def _report_sort_tables(source: str) -> dict[str, list[str]]:
+    """Each ranking table's key and the sort field of every header, from the markup."""
+    tables = {}
+    for match in re.finditer(r'<table\b[^>]*\bid="(\w+)"[^>]*\bdata-report-table="(\w+)"', source):
+        fields = []
+        for th in _report_table_headers(source, match.group(1)):
+            sort = re.search(r'data-report-sort="([^"]+)"', th)
+            fields.append(sort.group(1) if sort else None)
+        tables[match.group(2)] = fields
+    return tables
+
+
+TABLE_SORT_SCENARIO = """
+const TABLES = __TABLES__;
+const repainted = [];
+function usageReportRenderAgents() { repainted.push('agents'); }
+function usageReportRenderModels() { repainted.push('models'); }
+function usageReportRenderProjects() { repainted.push('projects'); }
+function usageReportReadPrefs() {}
+function usageReportWireShare() {}
+const tables = Object.entries(TABLES).map(([key, fields]) => {
+  const table = makeNode('table');
+  table.dataset.reportTable = key;
+  table.headers = fields.map((field) => {
+    const th = makeNode('th');
+    th.dataset.reportSort = field;
+    th.setAttribute('aria-sort', 'none');
+    return th;
+  });
+  table.querySelectorAll = (selector) => {
+    if (selector !== 'th[data-report-sort]') throw new Error(`unexpected selector ${selector}`);
+    return table.headers;
+  };
+  return table;
+});
+document.querySelectorAll = (selector) => (selector === 'table[data-report-table]' ? tables : []);
+const tableOf = (key) => tables.find((table) => table.dataset.reportTable === key);
+const ariaOf = (key) => Object.fromEntries(tableOf(key).headers.map((th) => [th.dataset.reportSort, th.getAttribute('aria-sort')]));
+const click = (key, field) => {
+  repainted.length = 0;
+  tableOf(key).headers.find((th) => th.dataset.reportSort === field).click();
+  return { sort: { ...usageReportTableSort[key] }, repainted: repainted.slice(), aria: ariaOf(key) };
+};
+// Wired from the page's own wiring, and only once however often it runs.
+usageReportWire();
+usageReportWire();
+usageReportWireTableSort();
+usageReportState.model = { notices: {} };
+const out = { clicks: {} };
+for (const [key, fields] of Object.entries(TABLES)) {
+  out.clicks[key] = fields.map((field) => ({ field, first: click(key, field), second: click(key, field) }));
+}
+// Before the first load lands there are only headers to mark.
+usageReportState.model = null;
+out.noModel = click('models', 'cost');
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@needs_node
+def test_a_header_click_resorts_all_three_tables_and_marks_its_column(tmp_path: Path) -> None:
+    """Every column of every ranking table is a sort control, wired once.
+
+    A click on a new column opens it biggest-first, or A-to-Z for a name column;
+    a second click on the same column flips it. The header a reader used carries
+    the matching aria-sort and every other header says none, and all three
+    tables repaint, so the arrow on a header is the order of the rows below it.
+    """
+    source = _source()
+    tables = _report_sort_tables(source)
+    assert list(tables) == ["agents", "models", "projects"], tables
+    program = _report_dom(
+        _const_line(source, "USAGE_REPORT_NAME_FIELDS")
+        + TABLE_SORT_SCENARIO.replace("__TABLES__", json.dumps(tables)),
+        "const usageReportTableSort = {",
+        "function usageReportRenderTableSortHeaders() {",
+        "function usageReportRenderTables(model) {",
+        "function usageReportWireTableSort() {",
+        "function usageReportWire() {",
+    )
+    out = json.loads(_run_node(tmp_path, "usage-report-table-sort.js", program))
+
+    aria = {"asc": "ascending", "desc": "descending"}
+    for key, fields in tables.items():
+        rows = out["clicks"][key]
+        assert [row["field"] for row in rows] == fields, key
+        for row in rows:
+            field = row["field"]
+            opening = "asc" if field in {"tool", "model", "project"} else "desc"
+            flipped = "desc" if opening == "asc" else "asc"
+            for click, direction in ((row["first"], opening), (row["second"], flipped)):
+                assert click["sort"] == {"field": field, "direction": direction}, (key, field, click)
+                assert click["repainted"] == ["agents", "models", "projects"], (key, field)
+                assert click["aria"] == {
+                    other: aria[direction] if other == field else "none" for other in fields
+                }, (key, field)
+    assert out["noModel"]["repainted"] == []
+    assert out["noModel"]["aria"]["cost"] == "descending"
+
+
 # --- copy deck --------------------------------------------------------------
 
 
@@ -2461,35 +2773,7 @@ def test_the_machine_placeholder_does_not_split_a_cjk_phrase() -> None:
             assert not re.search(rf"{CJK} \{{machine\}}", value), f"{lang}.{key}: {value}"
 
 
-def test_the_version_stamp_is_read_from_the_server_the_report_reads() -> None:
-    """`getRuntimeVersion()` is local-only and cached for the whole session, so
-    a remote report stamped from it printed the local build in its footer line.
-    The stamp no longer rides the exported PNG (cosyncing review item 8), but
-    the footer still names the build the report was read from."""
-    version = extract_js_function(_source(), "function usageReportLoadVersion() {")
-    assert "getRuntimeVersion" not in version
-    assert "fetchJsonWithRetry(server, '/api/version')" in version
-    assert "usageReportState.versionServerId" in version, "the answer is keyed to its server"
-    assert "usageReportRenderShare(usageReportState.model)" in version
-
-
 # --- PR-B: podium, rhythm, agent table, caveats ------------------------------
-
-
-def test_the_new_sections_render_after_the_day_map() -> None:
-    block = _report_block(_source())
-    render = extract_js_function(block, "function usageReportRender() {")
-    order = [
-        "usageReportRenderHeat(model)",
-        "usageReportRenderPodium(model)",
-        "usageReportRenderWhen(model)",
-        "usageReportRenderAgents(model)",
-        "usageReportRenderModels(model)",
-        "usageReportRenderProjects(model)",
-        "usageReportRenderFooter(model)",
-    ]
-    positions = [render.index(call) for call in order]
-    assert positions == sorted(positions), "the sections fell out of the spec's order"
 
 
 @needs_node
@@ -3174,32 +3458,5 @@ def test_share_prefs_carry_the_nickname_and_the_cost_choice() -> None:
     # clicks write prefs too, so an unstamped includeCost:false is incidental.
     assert "prefsV === 2" in read, "only a stamped pref may turn cost off"
     assert "prefsV: 2" in write, "new writes must stamp the blob"
-
-
-def test_a_control_changed_mid_flight_is_applied_late_not_dropped() -> None:
-    """The report on screen belongs to the period and server it was fetched for,
-    so a click during a load cannot be shown yet. It used to vanish without a
-    trace; now the control snaps back and the choice runs when the load lands.
-    """
-    block = _report_block(_source())
-    loader = extract_js_function(block, "async function loadUsageReport(options = {}) {")
-    wire = extract_js_function(block, "function usageReportWire() {")
-    # One exit, not two. The load used to return early on a total failure and had to
-    # remember to settle the queue on both paths; the try/finally collapsed them, so
-    # "every exit settles the queue" is now structurally true rather than duplicated.
-    assert loader.count("usageReportApplyPendingChoice()") == 1
-    assert loader.count("return;") == 1, "only the re-entrancy guard at the top may return early"
-    assert "usageReportState.pendingPeriod = button.dataset.period" in wire
-    assert "usageReportState.pendingServerId = select.value" in wire
-    assert "select.value = usageReportState.serverId" in wire, "the box names the server actually on screen"
-    applied = extract_js_function(block, "function usageReportApplyPendingChoice() {")
-    # A plain load, not a forced one. The queued choice is a period or server the
-    # reader has not seen yet, so it wants the cache like any other first load;
-    # forcing a recompute made clicking during a load the slowest path in the tab.
-    assert "loadUsageReport()" in applied
-    assert "loadUsageReport({ refresh: true })" not in applied, (
-        "a queued choice is a first read, not a refresh"
-    )
-    assert "usageReportWritePrefs()" in applied, "a queued choice that lands is the stored choice"
 
 

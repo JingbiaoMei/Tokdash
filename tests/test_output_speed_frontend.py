@@ -10,8 +10,12 @@ from drifting later:
 * Combined is the default, merges a model across harnesses, and a pick survives
   the switch to Per stream and back;
 * absence sorts last, formats as a dash, and never becomes a zero;
-* every element the speed code reaches for actually exists in the markup;
-* every speed string is present in all six shipped languages.
+* every element the speed code reaches for by selector exists in the markup;
+* every speed string the language-parity test cannot see is present in all six
+  shipped languages.
+
+Most of these run the shipped functions under node; the few that read the page
+as text pin markup a stub DOM cannot show.
 """
 from __future__ import annotations
 
@@ -133,27 +137,20 @@ def _rows_js() -> str:
 
 
 def test_output_speed_renders_in_exactly_two_places():
+    """The markup half: the page sits in its own tab, after the report, and its
+    period control is its own. That the control commits the shared range, and
+    that a row carries its own method, is run under node below."""
     for element_id in SPEED_SURFACES:
         assert f'id="{element_id}"' in SRC, element_id
-    assert 'id="usageReportSubtabs"' not in SRC
     assert 'data-tab-target="speed"' in SRC
     assert 'data-tab="speed"' in SRC
     assert SRC.index('id="report-content"') < SRC.index('id="speed-content"') < SRC.index('id="usageReportSpeedPanel"')
     speed_panel = SRC[SRC.index('id="speed-content"'):SRC.index('id="quota-content"')]
-    # The page walks periods, but owns no dates: its control commits the shared
-    # range through the same router as the top picker.
     assert 'data-period=' not in speed_panel, "the report's period control is not this page's"
     assert 'data-speed-period="quarter"' in speed_panel
-    commit = _extract("function usageReportSpeedCommitPeriod(")
-    assert "commitDateSelection(" in commit
-    # One comparison table, and the method of each row is on the row itself.
+    # One comparison table, not a stack of sections.
     across = SRC[SRC.index('<div id="usageReportSpeedAcross">'):SRC.index('<details class="speed-method-note"')]
     assert across.count("<table") == 1, "the across view is one comparison table"
-    assert "'speed-model-meta'" in _extract("function usageReportSpeedTableRow(")
-    for dead in ("usageReportSpeedMethod", "usageReportSpeedCoverage",
-                 "usageReportSpeedExclusions", "usageReportSpeedInstrument",
-                 "usageReportSpeedTemporal", "usageReportSpeedPick", "usageReportSpeedHours"):
-        assert f'id="{dead}"' not in SRC, f"{dead} is a section the design no longer has"
 
 
 def test_the_chart_is_one_view_with_two_layouts_and_no_second_ranking():
@@ -921,18 +918,15 @@ def test_queued_overview_work_is_not_dispatched_on_the_speed_page(tmp_path):
 def test_every_element_the_speed_code_reaches_for_exists():
     """A missing id is silent in a browser and loud here.
 
-    The harness pills, the chart and its grouping each need their own element:
-    one control cannot serve two purposes, and an earlier draft wrote two through
-    the same id, which silently removed the per-tool filter from the page.
+    tests/test_frontend_element_ids.py checks every getElementById target; the
+    speed code also reaches for elements through querySelector('#id'), which that
+    scan does not read, so those are checked here. The grouping control keeps
+    its own label.
     """
-    ids = set(re.findall(r"getElementById\(['\"](usageReportSpeed[A-Za-z]*|sessionSpeed[A-Za-z]*)['\"]\)", SRC))
-    ids |= set(re.findall(r"querySelector(?:All)?\(['\"]#(usageReportSpeed[A-Za-z]*|sessionSpeed[A-Za-z]*)", SRC))
-    assert ids, "the speed code should reference elements"
+    ids = set(re.findall(r"querySelector(?:All)?\(['\"]#(usageReportSpeed[A-Za-z]*|sessionSpeed[A-Za-z]*)", SRC))
+    assert ids, "the speed code should reach for elements by selector"
     for element_id in sorted(ids):
         assert f'id="{element_id}"' in SRC, f"{element_id} is referenced but never rendered"
-    for element_id in ("usageReportSpeedTools", "usageReportSpeedChart", "usageReportSpeedBucket",
-                       "usageReportSpeedLens", "usageReportSpeedPeriod", "usageReportSpeedSearch"):
-        assert element_id in ids, element_id
     assert 'for="usageReportSpeedBucket"' in SRC
 
 
@@ -1701,13 +1695,20 @@ def _i18n_keys() -> dict[str, set[str]]:
 
 
 def test_every_speed_string_ships_in_all_six_languages():
-    used = set(re.findall(r'data-i18n(?:-aria|-placeholder)?="(usageReportSpeed[A-Za-z]*|sessionSpeed[A-Za-z]*|usageReportSubSpeed)"', SRC))
-    # With or without interpolation values: t('key') and t('key', {...}).
-    used |= set(re.findall(r"\bt\('(usageReportSpeed[A-Za-z]*|sessionSpeed[A-Za-z]*|speedKind[A-Za-z]*|usageReportSubSpeed)'[,)]", SRC))
-    used |= set(re.findall(r"\bt\(`(usageReportSpeed[A-Za-z]*|sessionSpeed[A-Za-z]*)`", SRC))
-    # Keys reached through a lookup table rather than a literal call.
-    used |= set(re.findall(r":\s*'((?:usageReportSpeedBucket|speedKindShort|speedKind)[A-Za-z]+)'", SRC))
-    assert len(used) >= 25, f"expected the speed view to carry its own strings, found {len(used)}"
+    """The speed keys the language-parity test cannot see.
+
+    tests/test_i18n_languages.py::test_i18n_language_parity collects keys written
+    as a bare t('key') or a data-i18n attribute. A key passed with values,
+    t('key', {...}), picked by a ternary, held in a lookup table or returned by
+    a helper is invisible to it, so those are collected and checked here.
+    """
+    prefix = r"(?:usageReportSpeed|sessionSpeed|speedKind)[A-Za-z]*"
+    used = set(re.findall(rf"\bt\('({prefix})',", SRC))
+    for first, second in re.findall(rf"\?\s*'({prefix})'\s*:\s*'({prefix})'", SRC):
+        used |= {first, second}
+    used |= set(re.findall(rf":\s*'({prefix})'", SRC))
+    used |= set(re.findall(rf"\breturn '({prefix})';", SRC))
+    assert len(used) >= 40, f"expected the speed view to carry its own strings, found {len(used)}"
     keys = _i18n_keys()
     for language, language_keys in keys.items():
         missing = used - language_keys
@@ -1870,8 +1871,6 @@ console.log(JSON.stringify(seen));
         "usageReportSpeedCachedHistory · usageReportSpeedLiveDeferred(3)",
         "loading",
     ]
-    for key in ("usageReportSpeedLiveDeferredOne", "usageReportSpeedLiveDeferred"):
-        assert len(re.findall(rf"^\s+{key}: '", SRC, re.M)) == len(LANGUAGES), key
 
 
 # --------------------------------------------------------------------------

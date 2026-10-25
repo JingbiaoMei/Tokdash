@@ -1,6 +1,35 @@
 {
-  "current": "2.7.0",
+  "current": "2.7.1",
   "releases": [
+    {
+      "version": "2.7.1",
+      "date": "2026-10-25",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "Overview has a Project Details table: what each project you worked in used, and its share of the range. Usage with no recorded project is stated in a line under the table rather than left out silently.",
+            "The Overview tools table now shows sessions, active time and messages next to tokens and cost, added up across every server you selected instead of whichever one answered last. A tool that does not report a figure shows a dash, not a zero.",
+            "The usage report breaks the period down by model and by project, not only by agent, and every column header sorts. A tool with no figure for a column lands at the bottom of that ranking instead of at the top.",
+            "In the terminal dashboard, the Overview pane gained a Tools&Models view. Each tool heads the models it used, so you can see what one tool spent on one model; press Enter on a model to see which tool the figures belong to."
+          ]
+        },
+        {
+          "type": "changed",
+          "items": [
+            "Active time in the usage report is the agent total on its own now. The wall-clock span beside it only said the window was open, and the estimate label went with it."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "A pane in the terminal no longer loses a row when the text above it changes height; the bottom of the Report pane could end up under the status bar and stay there.",
+            "Opening a session keeps the last turn on screen even when the session's timing arrives after the first scroll.",
+            "Closing the terminal dashboard no longer trips an error from the status strip ticking once the page is already gone."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.7.0",
       "date": "2026-10-23",

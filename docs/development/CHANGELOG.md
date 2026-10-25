@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.7.1 - 2026-10-25
+
+### Added
+
+- Overview grew a Project Details table: one row per project the facet scan attributed usage to, with its share of the range, its cost and its messages, and a line under the table naming the percentage of the range's tokens that carry no project path at all. Without that line the table reads as the whole range while quietly summing to less than the KPI cards above it. Project Details and the message column of the tools table ride one `/api/insights` facet request, because the scan is the expensive part and it is the same scan for both, and neither is put in front of the cards; the request is keyed on the range and server selection it was read for, so a range change cannot leave another window's rows on screen. (#261)
+- The Overview tools table has sessions, active time and messages beside its tokens. It went from four columns to seven (`Total`, `Hit %`, `Sessions`, `Active`, `Cost`, `Msgs`), `Tokens` being renamed `Total` now that two more token-ish columns sit near it, and the per-tool session and runtime figures are summed across every selected server rather than read off whichever answered last. Sessions and runtime come from `/api/active-time` and the message count from the tools facet, both of which land after `/api/usage` does, so the table is painted twice and an absent figure is an em dash, which is a different fact from a zero. (#261)
+- The usage report breaks the period down by model and by project as well as by agent. Each of the three tables is sortable by its column headers: a rank opens biggest-first and a name column opens A-to-Z, the arrow is painted by CSS off `aria-sort` so the translation pass that rewrites header text cannot strip it, and an absent figure sorts to the bottom of a ranking instead of the top, which is where a plain numeric sort put its zero. The by-project table ends with the usage that found no project, because a table that sums to less than the hero above it owes the reader the difference. (#261)
+- `tokdash tui` Overview has a `Tools&Models` sub-view beside `Tools` and `Models`: a heading per tool carrying that tool's own badge and totals, with the models that tool recorded under it. The pane could already answer what a tool spent and what a model spent across every tool, but not what one tool spent on one model, which is the dashboard's Apps & Models Breakdown question. A model two tools used is two rows here -- the merged figure is what the Models view is for -- a model's share divides by its tool, the only denominator a per-tool table owns, `Enter` on a model opens a caption naming the tool the figures belong to, and `Enter` on a heading opens that tool in the Tools view. The pane's sort and filter carry over, and the table bounds itself so the caption stays on screen at 80x24. (#260)
+
+### Changed
+
+- Active time in the usage report is one figure. The card printed a wall-clock span of the window and, under it, the agent total that was the actual figure; the span said the window was open, which the range line above already says, so the agent total is the number now and the `est.` pill on the label went with it. (#261)
+- CI runs the suite in about five minutes a leg instead of 14 on Ubuntu and 21 on Windows, by spreading it over every core with `pytest-xdist` and letting the Textual pilots return when the app is idle instead of paying a fixed 0.25 s pause per step. The packaging tests build from the repo root and stage inside it, so they share one worker (`xdist_group` with `--dist loadgroup`), pip downloads are cached, a new push to a pull request cancels the run on its old head, and the serve tests no longer leave a real quota poll running behind them. (#259)
+
+### Fixed
+
+- The terminal dashboard keeps its rows when a strip above them changes height. `_fit_panes` compared its target with the height laid out only, so a strip that wrapped to two rows and back before the next layout -- a load's "computing…" line, then its answer -- left a request for the shorter pane behind, the second pass read "already right", and the Report's Sunday row sat under the footer for good. The height asked for now counts as well as the one laid out. (#259)
+- A session's last turn stays on screen when its timing lands late. Opening a session scrolls every turn into view, but the timing is a second fetch: when it arrived after that scroll it grew the summary above the turns by a line and pushed the last turn under the footer at 100x30 and 80x24. The pane scrolls again once the timing, or the note saying it failed, is painted. (#259)
+- The status strip stops when the app does. Textual tears the screens down before it stops the app's timers, and a tick in that window asked for a status strip that was already gone. (#259)
+
 ## 2.7.0 - 2026-10-23
 
 ### Added

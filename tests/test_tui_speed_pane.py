@@ -28,6 +28,7 @@ from support.tui import (  # noqa: E402
     headers_of,
     month_of_buckets,
     _open,
+    paint_with_refits_flushed_early,
     press,
     rows_of,
     run,
@@ -126,6 +127,37 @@ def test_hour_of_day_asks_for_one_exact_key_never_a_keyless_request(api):
         detail = visible(app, "#sp-detail")
         assert "days with measurements: 6" in detail, detail
         assert "an hour that measured nothing is a gap" in detail, detail
+
+    run(api, body)
+
+
+def test_the_hour_detail_is_measured_again_once_the_strip_above_has_grown(api):
+    """A refit run before its paint's layout still gets the frame on screen.
+
+    The strip above the series and the series itself are painted in one step, so
+    the series box is divided against the strip's OLD height. Windows CI ran the
+    refit queued behind that paint before the strip was laid out: it measured the
+    same stale frame, found its own stamp, and the box kept the row the strip had
+    taken -- which pushed the detail's last row, "days with measurements", under
+    the footer. Here a build note grows the strip by a row, and the refit is run
+    early on purpose.
+    """
+    async def body(app, pilot):
+        app.action_show_pane("speed")
+        await settle(pilot, 4)
+        press(app, "sp-mode-hour")
+        await settle(pilot, 4)
+        assert "days with measurements: 6" in visible(app, "#sp-detail")
+        box = app.query_one("#sp-series")
+        top = box.region.y
+        app._sp_job_note = "build finished \u00b7 re-reading snapshot"
+        paint_with_refits_flushed_early(app, app._paint_speed)
+        await settle(pilot, 4)
+        assert box.region.y > top, (box.region.y, top)  # the strip really grew
+        assert app._sp_series_painted == app._speed_series_stamp(), (
+            "the series is still divided for the frame it was painted in")
+        detail = visible(app, "#sp-detail")
+        assert "days with measurements: 6" in detail, detail
 
     run(api, body)
 

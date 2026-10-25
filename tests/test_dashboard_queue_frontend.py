@@ -62,7 +62,7 @@ function isServersActive() { return false; }
 function renderServersTab() {}
 
 
-const log = { rendered: [], errors: [], alerts: [], refreshStates: [], refreshReports: [], activeCards: [], activeLoads: [], stale: [] };
+const log = { rendered: [], errors: [], alerts: [], refreshStates: [], refreshReports: [], activeCards: [], activeLoads: [], facetLoads: [], stale: [] };
 const fetches = [];
 
 function deferred() {
@@ -99,6 +99,12 @@ function scheduleStatsWarm() {}
 function loadActivityInsights() { return Promise.resolve(); }
 function loadOverviewActiveTime(customDays, dateFrom, dateTo) {
   log.activeLoads.push(dateFrom);
+  return Promise.resolve();
+}
+// Project Details rides the same deferred tail as the active-time card, so it is
+// recorded alongside it: a range the user has left must queue neither.
+function loadOverviewFacets(customDays, dateFrom, dateTo) {
+  log.facetLoads.push(dateFrom);
   return Promise.resolve();
 }
 function renderOverviewActiveTime() {
@@ -311,6 +317,7 @@ async function main() {
     resolveRange('Z');
     await settle(); await settle();
     out.activeLoads = log.activeLoads;
+    out.facetLoads = log.facetLoads;
     out.updateInFlight = updateInFlight;
   }
 
@@ -321,9 +328,9 @@ main();
 """
 
 
-def _run(tmp_path: Path, scenario: str) -> dict:
+def _dashboard_functions() -> str:
     source = INDEX_HTML.read_text(encoding="utf-8")
-    functions = "\n".join(
+    return "\n".join(
         _extract_js_function(source, signature)
         for signature in (
             "function windowKeyFor(customDays, dateFrom, dateTo) {",
@@ -337,6 +344,10 @@ def _run(tmp_path: Path, scenario: str) -> dict:
             "async function updateDashboard(customDays = null, dateFrom = null, dateTo = null, options = {}) {",
         )
     )
+
+
+def _run(tmp_path: Path, scenario: str) -> dict:
+    functions = _dashboard_functions()
     harness = tmp_path / f"{scenario}.js"
     harness.write_text(HARNESS.replace("__FUNCTIONS__", functions), encoding="utf-8")
     result = subprocess.run(
@@ -346,6 +357,74 @@ def _run(tmp_path: Path, scenario: str) -> dict:
         encoding="utf-8",
     )
     return json.loads(result.stdout)
+
+
+def test_a_server_switch_invalidates_facets_before_usage_arrives(tmp_path: Path) -> None:
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    functions = _dashboard_functions() + "\n" + "\n".join(
+        _extract_js_function(source, signature)
+        for signature in (
+            "function clearOverviewBreakdowns() {",
+            "function clearOverviewFacets() {",
+            "function combineOverviewFacets(payloads) {",
+            "async function loadOverviewFacets(customDays, dateFrom, dateTo, options = {}) {",
+            "function paintToolsTableIfLoaded() {",
+        )
+    )
+    body = HARNESS.split("// --- driving")[0].replace("__FUNCTIONS__", functions)
+    body += """
+const document = { getElementById: () => null };
+let overviewRenderToken = 0;
+let lastByTool = { codex: { tokens: 100 } };
+const overviewFacetsState = {
+  key: 'X_X|local', requestId: 0, rows: [], toolMessages: { codex: 10 }, status: 'ready',
+};
+const painted = [];
+function updateProjectDetailsTable() {}
+function updateToolsTable(data) {
+  painted.push({ tokens: data.codex.tokens, messages: overviewFacetsState.toolMessages?.codex ?? null });
+}
+function renderOverviewTab(data) { lastByTool = data.by_tool; updateToolsTable(lastByTool); }
+const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+const facets = (serverId, messages) => [{ server: { id: serverId }, payload: {
+  totals: { tokens: 100 },
+  tools: { ranked: [{ tool: 'codex', messages }] },
+  projects: { projects: [{ project: `${serverId}-project`, tokens: 100 }] },
+} }];
+(async () => {
+  lastWindowKey = overviewBreakdownWindowKey = 'X_X';
+  lastUsageServerKey = 'local';
+  lastUsageResponse = { range: 'X', total_tokens: 100, by_tool: lastByTool };
+  const oldFacets = loadOverviewFacets(null, 'X', 'X');
+  selected = [{ id: 'remote', label: 'Remote' }];
+  const dashboard = updateDashboard(null, 'X', 'X', { forceRefresh: true });
+  const afterSwitch = { messages: overviewFacetsState.toolMessages, status: overviewFacetsState.status };
+  fetches[0].resolve(facets('local', 10));
+  await oldFacets;
+  const obsoleteReplyProjects = overviewFacetsState.rows.map(row => row.project);
+  fetches.find(fetch => fetch.url.startsWith('/api/usage')).resolve([{ server: selected[0], payload: {
+    range: 'X', total_tokens: 900, total_messages: 90, by_tool: { codex: { tokens: 900 } },
+  } }]);
+  await dashboard;
+  await tick();
+  fetches.filter(fetch => fetch.url.startsWith('/api/insights')).at(-1).resolve(facets('remote', 90));
+  await tick();
+  process.stdout.write(JSON.stringify({ afterSwitch, obsoleteReplyProjects, painted, projects: overviewFacetsState.rows }));
+})();
+"""
+    harness = tmp_path / "server-switch-facets.js"
+    harness.write_text(body, encoding="utf-8")
+    out = json.loads(subprocess.run(
+        ["node", str(harness)], check=True, capture_output=True, encoding="utf-8",
+    ).stdout)
+
+    assert out["afterSwitch"] == {"messages": None, "status": "loading"}
+    assert out["obsoleteReplyProjects"] == []
+    remote_paints = [row for row in out["painted"] if row["tokens"] == 900]
+    assert remote_paints[0]["messages"] is None
+    assert remote_paints[-1]["messages"] == 90
+    assert all(row["messages"] != 10 for row in remote_paints)
+    assert out["projects"][0]["project"] == "remote-project"
 
 
 def test_returning_to_the_in_flight_range_cancels_the_queue(tmp_path):
@@ -394,6 +473,7 @@ def test_a_superseded_failure_is_not_shown(tmp_path):
 def test_overview_completion_does_not_queue_unviewed_work_on_speed(tmp_path):
     out = _run(tmp_path, 'leave-for-speed-before-overview-lands')
     assert out['activeLoads'] == [], 'the obsolete Overview load queued an active-time merge on Speed'
+    assert out['facetLoads'] == [], 'the obsolete Overview load queued the facet merge on Speed'
     assert out['updateInFlight'] is False
 
 

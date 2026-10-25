@@ -521,7 +521,19 @@ const INSIGHTS = {
   streaks: { active_days: 2, current_streak: 2, longest_streak: 9 },
   firsts: { busiest_day: '2026-09-01', busiest_day_tokens: 300 },
   tools: { ranked: [{ tool: 'codex', tokens: 600, cost: 6 }, { tool: 'claude', tokens: 300, cost: 3 }] },
-  models: { ranked: [] },
+  models: { ranked: [
+    { model: 'alpha', tokens: 600, messages: 60, cost: 6 },
+    { model: 'beta', tokens: 300, messages: 30, cost: 0 },
+    { model: 'idle', tokens: 0, messages: 0, cost: 0 },
+  ] },
+  projects: {
+    projects: [
+      { project: 'one', tokens: 500, messages: 50, cost: 5 },
+      { project: 'two', tokens: 300, messages: 30, cost: 3 },
+    ],
+    unattributed: { tokens: 90 },
+    attributed_project_count: 2,
+  },
 };
 const USAGE = { total_tokens: 1000, total_messages: 100, total_cost: 10, by_tool: {}, apps: {} };
 const ACTIVE = {
@@ -540,6 +552,10 @@ const shape = (model) => ({
   activeMs: model.activeMs,
   agents: model.agentRows.map((row) => row.tool),
   agentSessions: model.agentRows.map((row) => row.sessions),
+  modelNames: model.modelRows.map((row) => row.model),
+  modelShares: model.modelRows.map((row) => row.share),
+  projectNames: model.projectRows.map((row) => row.project),
+  projectShares: model.projectRows.map((row) => row.share),
   hasStreaks: !!model.streaks,
   notices: model.notices,
 });
@@ -607,9 +623,24 @@ def test_the_first_paint_builds_a_model_over_two_absent_sources(tmp_path: Path) 
 
 
 AGENTS_TABLE_SIGNATURES = (
+    "function usageReportSortedRows(rows, sort) {",
     "function usageReportAgentRow(row) {",
     "function usageReportRenderAgents(model) {",
 )
+
+# The sort state and the set of name columns are page-level constants the
+# renderers read. The harness ships the real declarations rather than copies, so
+# a changed default is a changed test result and not a silent disagreement with
+# the fixture.
+def _table_sort_state(source: str) -> str:
+    start = source.index("const usageReportTableSort = {")
+    end = source.index("};", start) + 2
+    names = next(
+        line
+        for line in source.splitlines()
+        if line.strip().startswith("const USAGE_REPORT_NAME_FIELDS")
+    )
+    return f"{source[start:end]}\n{names.strip()}\n"
 
 # A tbody is a tbody: the harness counts emitted rows rather than reading for a
 # literal `slice(0, 10)`, which a cap renamed to `slice(0, 12)` would walk past.
@@ -655,11 +686,25 @@ const rows = Array.from({ length: 14 }, (_, index) => ({
   tokensCache: index,
   sessions: index === 13 ? null : index,
   activeMs: index === 13 ? null : index * 1000,
+  messages: index === 13 ? null : index * 2,
 }));
-usageReportRenderAgents({
+const REPORT = {
   tools: rows, agentRows: rows, tokens: 1000, facetTotal: 1000, projectsAvailable: true,
-});
+};
+usageReportRenderAgents(REPORT);
 const emitted = body.children[0].children;
+// Sorted by the name column this time, and ascending: the column a reader
+// chose is the order they get, whatever the facet's own ranking was.
+usageReportTableSort.agents = { field: 'tool', direction: 'asc' };
+usageReportRenderAgents(REPORT);
+const byName = body.children[0].children.map(
+  (tr) => tr.children[0].children[0].tag,
+);
+usageReportTableSort.agents = { field: 'cost', direction: 'desc' };
+usageReportRenderAgents(REPORT);
+const costOrder = body.children[0].children.map(
+  (tr) => tr.children[0].children[0].tag,
+);
 // The no-session tool is looked up by name, not by index. If a cap comes back
 // the row-count assertion gets to report it, rather than this harness crashing
 // on a fourteenth row that was never printed.
@@ -673,6 +718,12 @@ process.stdout.write(JSON.stringify({
   emptyCells: noSessionRow
     ? noSessionRow.children.slice(1).map((td) => td.textContent)
     : null,
+  // Column order, printed: the overview's token split, then its total, then the
+  // activity the report alone serves, then cost and messages.
+  topCells: emitted[0].children.slice(1).map((td) => td.textContent),
+  rowCells: emitted[1].children.slice(1).map((td) => td.textContent),
+  byName,
+  costOrder,
 }));
 """
 
@@ -690,16 +741,33 @@ def test_the_agent_table_prints_every_tool_it_was_given(tmp_path: Path) -> None:
     source = _source()
     block = _report_block(source)
     body = "\n".join(_extract_js_function(block, sig) for sig in AGENTS_TABLE_SIGNATURES)
+    body += _table_sort_state(source)
     body += AGENTS_TABLE_FIXTURE
     table = json.loads(_run_node(tmp_path, "usage-report-agents.js", body))
 
     assert table["rowCount"] == 14, "one row per ranked tool, with nothing folded away"
+    assert len(table["topCells"]) == 8, "nine columns, one cell each after the name"
     assert table["tags"] == [f"identity:tool-{index}" for index in range(14)], "rank order holds"
+    # The default sort is the facet's own: biggest token count first.
+    assert table["costOrder"][0] == "identity:tool-13", "cost descending ranks the dear tool first"
+    assert table["costOrder"][-1] == "identity:tool-0"
+    # Plain code-unit order, not a locale collation with numeric awareness: the
+    # page compares names with localeCompare's default options, and so does this.
+    expected_names = sorted(f"identity:tool-{index}" for index in range(14))
+    assert table["byName"] == expected_names, (
+        "clicking the name column re-ranks the same fourteen rows by name"
+    )
     assert table["buttonRows"] == 0, "the disclosure button is gone, not merely closed"
     # The last tool has no recorded session, so the two columns that come from
     # activity go blank -- which is not the same fact as a zero, and is exactly
     # why the fold used to hide such rows. Its tokens and cost still print.
-    assert table["emptyCells"] == ["\u2014", "t987", "t13", "t13", "t13", "$13", "\u2014"], table["emptyCells"]
+    assert table["topCells"] == ["t0", "t0", "t0", "t1000", "n0", "d0", "\u2014", "n0"], table["topCells"]
+    assert table["rowCells"] == ["t1", "t1", "t1", "t999", "n1", "d1000", "$1", "n2"], table["rowCells"]
+    # The last tool recorded no session, so its activity and message columns are
+    # blank rather than zero -- and nothing was priced for it, so cost is blank too.
+    assert table["emptyCells"] == [
+        "t13", "t13", "t13", "t987", "\u2014", "\u2014", "$13", "\u2014",
+    ], table["emptyCells"]
 
     for leftover in (
         "agentPrimary",
@@ -709,6 +777,272 @@ def test_the_agent_table_prints_every_tool_it_was_given(tmp_path: Path) -> None:
         "usageReportToolCount",
     ):
         assert leftover not in source, f"{leftover} outlived the fold"
+
+
+# --- the three ranking tables, sorted by whatever column the reader picks ----
+
+
+def _report_table_headers(source: str, table_id: str) -> list[str]:
+    """The ``<th>`` cells of one report table, markup and all."""
+    start = source.index(f'id="{table_id}"')
+    thead = source[source.index("<thead>", start) : source.index("</thead>", start)]
+    return re.findall(r"<th\b.*?</th>", thead, re.S)
+
+
+def test_every_column_of_every_ranking_table_is_a_sort_control() -> None:
+    """Three ranking tables, and every column of each one is clickable.
+
+    A header without a ``data-report-sort`` is a column a reader can click and
+    get nothing from, and a header that carries two labels is the old "cost, and
+    by the way this is list price" column again. Both look fine until the page is
+    up, so the markup is pinned here: one sortable cell, one sort field, one
+    translatable label, per column.
+    """
+    source = _source()
+    tables = re.findall(r'data-report-table="(\w+)"', source)
+    assert tables == ["agents", "models", "projects"], tables
+
+    state_start = source.index("const usageReportTableSort = {")
+    state = source[state_start : source.index("};", state_start)]
+    for key, table_id in zip(tables, (
+        "usageReportAgentsTable",
+        "usageReportModelsTable",
+        "usageReportProjectsTable",
+    )):
+        assert f"{key}: {{ field:" in state, f"{key} has no sort slot to remember a click"
+        headers = _report_table_headers(source, table_id)
+        assert headers, table_id
+        fields = []
+        for th in headers:
+            assert 'class="is-sortable"' in th, (table_id, th)
+            assert 'aria-sort="none"' in th, (table_id, th)
+            match = re.search(r'data-report-sort="([^"]+)"', th)
+            assert match, (table_id, th)
+            fields.append(match.group(1))
+            assert th.count("data-i18n=") == 1, (table_id, th)
+        assert len(fields) == len(set(fields)), (table_id, fields)
+
+    # The click path: wired once, and a click repaints all three tables so the
+    # arrow on the header a reader just used is the arrow on the rows below it.
+    block = _report_block(source)
+    wire = _extract_js_function(block, "function usageReportWireTableSort() {")
+    assert "th[data-report-sort]" in wire
+    assert "usageReportRenderTables(usageReportState.model)" in wire
+    assert "usageReportWireTableSort();" in _extract_js_function(block, "function usageReportWire() {")
+
+
+def test_the_report_tables_speak_the_overview_vocabulary() -> None:
+    """Two pages, one set of column names, in that order.
+
+    The report used to say "In" where the overview said "Input" and "Tokens" where
+    it said "Total", and qualified cost with an API-list-price footnote. Every
+    header now carries the key the overview tables carry, in the order the overview
+    prints them, so the same word cannot mean two things depending on the tab a
+    reader is on. The report's own column keys are gone rather than parked.
+    """
+    source = _source()
+    assert "usageReportCol" not in source, "the report's private column keys outlived the shared terms"
+
+    expected = {
+        "usageReportAgentsTable": (
+            "tool", "input", "output", "cache", "total", "sessions", "active", "cost", "msgs",
+        ),
+        "usageReportModelsTable": ("model", "total", "share", "cost", "msgs"),
+        "usageReportProjectsTable": ("project", "total", "share", "cost", "msgs"),
+    }
+    terms = set()
+    for table_id, labels in expected.items():
+        found = []
+        for th in _report_table_headers(source, table_id):
+            match = re.search(r'data-i18n="([^"]+)"', th)
+            assert match, (table_id, th)
+            found.append(match.group(1))
+            terms.add(match.group(1))
+        assert tuple(found) == labels, (table_id, found)
+
+    # A shared term is only shared if all six locales carry it.
+    for term in sorted(terms):
+        assert len(re.findall(r"^        %s: '" % term, source, re.M)) == len(I18N_LANGS), term
+
+
+def test_the_active_time_tile_prints_one_figure() -> None:
+    """The tile showed a wall-clock span, an "est." pill and a second figure.
+
+    All three said roughly the same thing, and the span beside it was the window
+    the range line already names. One label, one number: the agent total.
+    """
+    source = _source()
+    for leftover in ("usageReportKActiveSub", "usageReportEst", "usageReportActiveSub", "usage-report-pill"):
+        assert leftover not in source, leftover
+
+    # With the pill gone, the column header tooltip is where the estimate is admitted.
+    assert re.search(
+        r'data-report-sort="activeMs"[^>]*data-i18n-title="activeTimeHint"', source
+    ), "the active column stopped carrying the estimate caveat"
+
+    tile = source[source.index('data-i18n="usageReportActiveTime"') : source.index("usageReportDays")]
+    assert tile.count("usage-report-kpi-value") == 1, "the tile carries one figure"
+    assert "usage-report-kpi-sub" not in tile, "and no second line under it"
+    hero = _extract_js_function(_report_block(source), "function usageReportRenderHeroActivity(model) {")
+    assert "formatDurationUnits(model.agentMs)" in hero
+    assert "usageReportKActiveSub" not in hero
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_the_share_column_ranks_because_the_row_carries_the_share_it_prints(
+    tmp_path: Path,
+) -> None:
+    """A sortable column needs a field, not a figure invented at paint time.
+
+    The by-model and by-project tables show a share the facet does not serve, so it
+    is folded onto the row where the sort can read it. Executed because the failure
+    is silent: without the field every row ties, and the column "works" by handing
+    back the name order.
+    """
+    source = _source()
+    body = "\n".join(_extract_js_function(source, sig) for sig in MODEL_SIGNATURES) + MODEL_FIXTURE
+    model = json.loads(_run_node(tmp_path, "usage-report-share-field.js", body))["whole"]
+
+    assert model["modelNames"] == ["alpha", "beta"], "a ranked model with no tokens gets no row"
+    assert model["modelShares"] == [pytest.approx(600 / 900), pytest.approx(300 / 900)]
+    assert model["projectNames"] == ["one", "two"]
+    assert model["projectShares"] == [pytest.approx(500 / 900), pytest.approx(300 / 900)]
+    # A facet that did not answer has no total to divide by, and no rows to sort.
+    down = json.loads(_run_node(tmp_path, "usage-report-share-field.js", body))["noInsights"]
+    assert down["modelNames"] == [] and down["modelShares"] == []
+    assert down["projectNames"] == [] and down["projectShares"] == []
+
+
+FACET_TABLE_SIGNATURES = (
+    "function usageReportSortedRows(rows, sort) {",
+    "function usageReportNoticeRow(colSpan, message) {",
+    "function usageReportFacetRow(name, row) {",
+    "function usageReportRenderModels(model) {",
+    "function usageReportRenderProjects(model) {",
+)
+
+FACET_TABLE_FIXTURE = """
+const USAGE_REPORT_EM = '\\u2014';
+function makeNode(tag, id) {
+  const node = {
+    id, tag, children: [], className: '', textContent: '', colSpan: null,
+    append(...kids) { kids.forEach((kid) => this.children.push(kid)); },
+    appendChild(kid) { this.children.push(kid); return kid; },
+    replaceChildren(...kids) { this.children = kids; },
+  };
+  return node;
+}
+const bodies = {
+  usageReportModelsBody: makeNode('tbody', 'usageReportModelsBody'),
+  usageReportProjectsBody: makeNode('tbody', 'usageReportProjectsBody'),
+};
+const notes = {
+  usageReportModelsNote: makeNode('p', 'usageReportModelsNote'),
+  usageReportProjectsNote: makeNode('p', 'usageReportProjectsNote'),
+};
+const filled = {};
+const document = {
+  createElement: (tag) => makeNode(tag),
+  createDocumentFragment: () => makeNode('fragment'),
+  getElementById: (id) => bodies[id] || notes[id],
+};
+const t = (key, params) => (params ? `${key}:${JSON.stringify(params)}` : key);
+const formatNumber = (v) => `n${v}`;
+const formatTokenCount = (v) => `t${v}`;
+const formatCurrency = (v) => `$${v}`;
+function usageReportFigure(value, format) {
+  return value === null || value === undefined ? USAGE_REPORT_EM : format(value);
+}
+function usageReportShare(fraction) {
+  return fraction === null || fraction === undefined ? USAGE_REPORT_EM : `${Math.round(fraction * 1000) / 10}%`;
+}
+function usageReportFillNote(el, lines) { filled[el.id] = lines.map((line) => line.text); }
+
+const rows = [
+  { model: 'alpha', project: 'alpha', tokens: 100, messages: 10, cost: 1, share: 0.1 },
+  { model: 'beta', project: 'beta', tokens: 900, messages: 5, cost: 40, share: 0.9 },
+  { model: 'gamma', project: 'gamma', tokens: 400, messages: 90, cost: 0, share: 0.4 },
+];
+const REPORT = {
+  models: rows, modelRows: rows,
+  projectsAvailable: true, projectRows: rows,
+  facetTotal: 1000, unattrShare: 0.011,
+};
+// A cell's text may sit on a child label, the way the real row nests it.
+const textOf = (node) => node.textContent || (node.children || []).map(textOf).join('');
+const cells = (tbody) => tbody.children[0].children.map((tr) => tr.children.map((td) => textOf(td)));
+const names = (tbody) => cells(tbody).map((row) => row[0]);
+
+usageReportRenderModels(REPORT);
+usageReportRenderProjects(REPORT);
+const out = {
+  modelsDefault: cells(bodies.usageReportModelsBody),
+  projectsDefault: names(bodies.usageReportProjectsBody),
+  notes: { ...filled },
+};
+
+// The reader clicked the cost column, then the share column ascending: the
+// column they chose is the order they get, not the facet's ranking of tokens.
+usageReportTableSort.models = { field: 'cost', direction: 'desc' };
+usageReportRenderModels(REPORT);
+out.byCost = names(bodies.usageReportModelsBody);
+usageReportTableSort.models = { field: 'share', direction: 'asc' };
+usageReportRenderModels(REPORT);
+out.byShare = names(bodies.usageReportModelsBody);
+usageReportTableSort.models = { field: 'messages', direction: 'asc' };
+usageReportRenderModels(REPORT);
+out.byMessages = names(bodies.usageReportModelsBody);
+
+// A facet an older server never served: one notice spanning the table, not a
+// header over an empty grid.
+usageReportTableSort.models = { field: 'tokens', direction: 'desc' };
+usageReportRenderModels({ models: null, modelRows: [], facetTotal: 0 });
+usageReportRenderProjects({ projectsAvailable: false, projectRows: [], facetTotal: 0 });
+const noticeRow = bodies.usageReportModelsBody.children[0];
+const notice = noticeRow.children[0];
+out.notice = { cells: noticeRow.children.length, colSpan: notice.colSpan, text: notice.textContent };
+out.projectsNotice = bodies.usageReportProjectsBody.children[0].children[0].textContent;
+
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_the_model_and_project_tables_rank_on_the_column_the_header_names(
+    tmp_path: Path,
+) -> None:
+    """Two new tables, run rather than read, because both halves fail quietly.
+
+    The rows are the facet's four figures with the share the reader clicked kept
+    in step with them, and a facet an older server does not serve has to say so in
+    the table it is missing from instead of printing an empty one.
+    """
+    source = _source()
+    block = _report_block(source)
+    body = "\n".join(_extract_js_function(block, sig) for sig in FACET_TABLE_SIGNATURES)
+    body += _table_sort_state(source) + FACET_TABLE_FIXTURE
+    out = json.loads(_run_node(tmp_path, "usage-report-facet-tables.js", body))
+
+    assert [row[0] for row in out["modelsDefault"]] == ["beta", "gamma", "alpha"], "tokens desc is the default"
+    # The dear model leads a cost ranking even though it is not the biggest one,
+    # and a model nothing was priced for prints a dash rather than $0.00.
+    assert out["byCost"] == ["beta", "alpha", "gamma"], out["byCost"]
+    assert out["byShare"] == ["alpha", "gamma", "beta"], "the share column ranks by the share it shows"
+    assert out["byMessages"] == ["beta", "alpha", "gamma"], "message count is its own ranking"
+    assert out["modelsDefault"][0] == ["beta", "t900", "90%", "$40", "n5"], out["modelsDefault"][0]
+    assert out["modelsDefault"][1] == ["gamma", "t400", "40%", "\u2014", "n90"]
+    assert out["modelsDefault"][2] == ["alpha", "t100", "10%", "$1", "n10"]
+    assert out["projectsDefault"] == ["beta", "gamma", "alpha"], "the project table sorts the same way"
+    # The difference between the table and the hero is the period's own usage, and
+    # the note under the project table is where it is admitted.
+    assert out["notes"]["usageReportProjectsNote"] == ['usageReportUnattributed:{"pct":"1.1%"}']
+    assert out["notes"]["usageReportModelsNote"] == []
+    assert out["notice"] == {
+        "cells": 1,
+        "colSpan": 5,
+        "text": 'usageReportFacetsMissing:{"facets":"models"}',
+    }
+    assert out["projectsNotice"] == 'usageReportFacetsMissing:{"facets":"projects"}'
 
 
 def test_the_server_warms_the_exact_facet_string_the_tab_asks_for() -> None:
@@ -1605,6 +1939,8 @@ def test_the_new_sections_render_after_the_day_map() -> None:
         "usageReportRenderPodium(model)",
         "usageReportRenderWhen(model)",
         "usageReportRenderAgents(model)",
+        "usageReportRenderModels(model)",
+        "usageReportRenderProjects(model)",
         "usageReportRenderFooter(model)",
     ]
     positions = [render.index(call) for call in order]
@@ -1620,6 +1956,10 @@ def test_the_new_sections_are_cleared_before_the_next_load() -> None:
         "usageReportGroupNote",
         "usageReportWhen",
         "usageReportAgentsBody",
+        "usageReportModelsBody",
+        "usageReportModelsNote",
+        "usageReportProjectsBody",
+        "usageReportProjectsNote",
         "usageReportFooter",
     ):
         assert f"'{element}'" in loading, element

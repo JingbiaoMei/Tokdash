@@ -729,6 +729,41 @@ def test_server_payloads_are_added_up(tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_the_per_tool_rows_are_added_up_the_same_way(tmp_path):
+    """The tools table ranks by these rows, so a second server has to add to a
+    tool's session count and agent time rather than replace them."""
+    payloads = [
+        {
+            "active_ms": 100,
+            "active_ms_sum": 150,
+            "by_tool": {
+                "codex": {"tool_label": "Codex", "session_count": 3, "active_ms_sum": 90},
+                "claude": {"tool_label": "Claude", "session_count": 1, "active_ms_sum": 60},
+            },
+        },
+        {
+            "active_ms": 60,
+            "active_ms_sum": 30,
+            "by_tool": {"codex": {"tool_label": "Codex", "session_count": 2, "active_ms_sum": 30}},
+        },
+        None,
+    ]
+    result = _combine(tmp_path, payloads)
+
+    assert result["by_tool"]["codex"] == {
+        "tool_label": "Codex",
+        "session_count": 5,
+        "active_ms_sum": 120,
+    }
+    assert result["by_tool"]["claude"] == {
+        "tool_label": "Claude",
+        "session_count": 1,
+        "active_ms_sum": 60,
+    }, "a tool only one server reported keeps its own row"
+    assert result["active_ms_sum"] == 180, "the headline still adds every tool"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
 def test_the_delta_is_recomputed_from_the_combined_totals(tmp_path):
     """Averaging the servers' percentages would weight a quiet one like a busy one."""
     payloads = [

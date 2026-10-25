@@ -5,20 +5,20 @@ range change is never dropped while its label is already on screen — which mea
 the running load must not commit its results once it has been superseded, and the
 queue must not outlive the selection that filled it. String assertions cannot see
 any of that, so these run the extracted function against controllable promises.
+
+The same queue carries the Overview's agent-time card, whose own request waits
+behind /api/usage. Some scenarios swap the real card loader and the Codex review
+toggle in for their stubs, so the order in which the card clears, refetches and
+repaints comes from the shipped code too.
 """
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 
 
-import tokdash
+from support.frontend import extract_js_function, index_source, needs_node, run_node
 
-from support.frontend import extract_js_function, needs_node
-
-
-INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 
 pytestmark = needs_node
 
@@ -120,8 +120,31 @@ __FUNCTIONS__
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 function fetchFor(range) {
-  return fetches.find((entry) => entry.url.includes(`date_from=${range}`) && !entry.done);
+  return fetches.find((entry) => entry.url.startsWith('/api/usage')
+    && entry.url.includes(`date_from=${range}`) && !entry.done);
 }
+
+// The agent-time card's own requests, for the scenarios that run its real loader.
+const activeTimeFetches = () => fetches.filter((entry) => entry.url.startsWith('/api/active-time'));
+function settleActiveTime(index, settle) {
+  const entry = activeTimeFetches()[index];
+  if (!entry) throw new Error(`no active-time request #${index}`);
+  entry.done = true;
+  settle(entry);
+}
+function landActiveTime(index, payload) {
+  settleActiveTime(index, (entry) => entry.resolve([
+    { server: { id: 'local' }, payload: { unavailable_tools: [], ...payload } },
+  ]));
+}
+function failActiveTime(index, message) {
+  settleActiveTime(index, (entry) => entry.reject(new Error(message)));
+}
+const card = () => ({
+  status: overviewActiveTimeState.status,
+  agentMs: overviewActiveTimeState.data ? overviewActiveTimeState.data.active_ms_sum : null,
+});
+const cardWithRenders = () => ({ ...card(), rendered: [...log.activeCards] });
 
 function resolveRange(range, payload) {
   const entry = fetchFor(range);
@@ -157,6 +180,7 @@ async function main() {
     out.rendered = log.rendered;
     out.lastWindowKey = lastWindowKey;
     out.activeLoads = log.activeLoads;
+    out.facetLoads = log.facetLoads;
   }
 
   if (scenario === 'superseded-result-is-not-committed') {
@@ -173,6 +197,8 @@ async function main() {
     out.lastWindowKey = lastWindowKey;
     out.usage = lastUsageResponse && lastUsageResponse.range;
     out.urls = fetches.map((entry) => entry.url);
+    out.activeLoads = log.activeLoads;
+    out.facetLoads = log.facetLoads;
   }
 
   if (scenario === 'superseded-failure-is-not-shown') {
@@ -307,6 +333,111 @@ async function main() {
     out.updateInFlight = updateInFlight;
   }
 
+  // --- with the real agent-time loader (REAL_ACTIVE_TIME_CARD) ---------------
+
+  if (scenario === 'the-review-toggle-refetches-the-card') {
+    currentStartDate = new Date(2026, 0, 5);
+    currentEndDate = new Date(2026, 0, 5);
+    includeCodexReviewSessions = false;
+    pick('2026-01-05');
+    await settle();
+    resolveRange('2026-01-05');
+    await settle(); await settle();
+    landActiveTime(0, { active_ms: 60000, active_ms_sum: 60000 });
+    await settle();
+    out.before = card();
+    log.activeCards.length = 0;
+    // Review sessions count towards agent time, so turning them on changes the
+    // figure for the range already on screen.
+    onCodexReviewToggle({ target: { checked: true } });
+    out.onToggle = cardWithRenders();
+    landActiveTime(1, { active_ms: 60000, active_ms_sum: 180000 });
+    await settle();
+    out.after = cardWithRenders();
+    out.urls = activeTimeFetches().map((entry) => entry.url);
+    out.stored = storedPrefs['tokdash-show-codex-review-sessions'] ?? null;
+  }
+
+  if (scenario === 'a-late-reply-cannot-overwrite-a-newer-range') {
+    const first = loadOverviewActiveTime(null, 'A', 'A');
+    const second = loadOverviewActiveTime(null, 'B', 'B');
+    landActiveTime(1, { active_ms_sum: 2000 });
+    await second;
+    landActiveTime(0, { active_ms_sum: 1000 });   // A's answer arrives last
+    await first;
+    out.afterLateReply = { ...card(), key: overviewActiveTimeState.key };
+    // A late failure must not turn the newer figure into an error either.
+    const third = loadOverviewActiveTime(null, 'C', 'C');
+    const fourth = loadOverviewActiveTime(null, 'D', 'D');
+    landActiveTime(3, { active_ms_sum: 4000 });
+    await fourth;
+    failActiveTime(2, 'late boom');
+    await third;
+    out.afterLateFailure = card();
+  }
+
+  if (scenario === 'a-refresh-keeps-the-figure-and-a-new-range-blanks-it') {
+    const load = loadOverviewActiveTime(null, 'A', 'A');
+    landActiveTime(0, { active_ms_sum: 1000 });
+    await load;
+    log.activeCards.length = 0;
+    // The same range again, as the Refresh button asks for it.
+    const refresh = loadOverviewActiveTime(null, 'A', 'A', { force: true });
+    out.whileRefreshing = cardWithRenders();
+    failActiveTime(1, 'offline');
+    await refresh;
+    out.afterFailedRefresh = cardWithRenders();
+    log.activeCards.length = 0;
+    const other = loadOverviewActiveTime(null, 'B', 'B');
+    out.onNewRange = cardWithRenders();
+    landActiveTime(2, { active_ms_sum: 3000 });
+    await other;
+    out.afterNewRange = card();
+    out.urls = activeTimeFetches().map((entry) => entry.url);
+  }
+
+  if (scenario === 'a-range-change-clears-the-card-before-its-usage-lands') {
+    pick('X');
+    await settle();
+    resolveRange('X');
+    await settle(); await settle();
+    landActiveTime(0, { active_ms_sum: 1000 });
+    await settle();
+    out.onX = card();
+    log.activeCards.length = 0;
+    // An automatic refresh of the same range keeps the figure while it runs...
+    pick('X');
+    await settle();
+    out.duringRefresh = cardWithRenders();
+    // ...and a range picked in the middle of it is queued behind it, but the card
+    // clears now rather than when the queued range gets its turn.
+    pick('Y');
+    await settle();
+    out.onQueuedPick = {
+      ...cardWithRenders(),
+      queued: pendingDashboardRequest && pendingDashboardRequest.dateFrom,
+    };
+    resolveRange('X');
+    await settle(); await settle();
+    // The card's own request still waits for its range's usage to land.
+    out.requestsBeforeYUsage = activeTimeFetches().length;
+    resolveRange('Y');
+    await settle(); await settle();
+    out.requestsAfterYUsage = activeTimeFetches().map((entry) => entry.url);
+    landActiveTime(1, { active_ms_sum: 2000 });
+    await settle();
+    out.onY = card();
+    // From idle the order is the same, and the Refresh button's force reaches
+    // the card's request too.
+    log.activeCards.length = 0;
+    pick('Z', { forceRefresh: true });
+    await settle();
+    out.onPickZ = { ...cardWithRenders(), requests: activeTimeFetches().length };
+    resolveRange('Z');
+    await settle(); await settle();
+    out.zRequest = activeTimeFetches().at(-1).url;
+  }
+
   process.stdout.write(JSON.stringify(out));
 }
 
@@ -315,7 +446,7 @@ main();
 
 
 def _dashboard_functions() -> str:
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     return "\n".join(
         extract_js_function(source, signature)
         for signature in (
@@ -332,21 +463,50 @@ def _dashboard_functions() -> str:
     )
 
 
-def _run(tmp_path: Path, scenario: str) -> dict:
+def _real_active_time_card() -> str:
+    """The agent-time card's real loader, and the Codex review toggle that calls it.
+
+    Appended after the harness stubs, so the real loadOverviewActiveTime replaces
+    the recording one: in a plain script a later function declaration wins. Its
+    requests join the same deferred queue as /api/usage, so a scenario lands the
+    two in whatever order it is testing. renderOverviewActiveTime stays the stub,
+    which records the state the card was painted in.
+    """
+    source = index_source()
+    listener = source.index(
+        "document.getElementById('codexReviewToggle')?.addEventListener('change', "
+    )
+    return "\n".join([
+        "let currentStartDate = null;",
+        "let currentEndDate = null;",
+        "const storedPrefs = {};",
+        "const localStorage = { setItem(key, value) { storedPrefs[key] = String(value); } };",
+        "function ensureSessionsLoaded() {}",
+        "function paintToolsTableIfLoaded() {}",
+        extract_js_function(source, "function formatLocalDateYmd(date) {"),
+        extract_js_function(source, "function pctChange(current, previous) {"),
+        extract_js_function(source, "function combineActiveTimePayloads(payloads) {"),
+        extract_js_function(
+            source,
+            "async function loadOverviewActiveTime(customDays, dateFrom, dateTo, options = {}) {",
+        ),
+        # The listener is an anonymous arrow inside addEventListener(...), so it is
+        # sliced from its own parameter list and given a name to call it by.
+        "const onCodexReviewToggle = " + extract_js_function(source[listener:], "(event) => {") + ";",
+    ])
+
+
+def _run(tmp_path: Path, scenario: str, real: str = "") -> dict:
     functions = _dashboard_functions()
+    if real:
+        functions += "\n// --- real code that replaces the stubs above ---\n" + real
     harness = tmp_path / f"{scenario}.js"
     harness.write_text(HARNESS.replace("__FUNCTIONS__", functions), encoding="utf-8")
-    result = subprocess.run(
-        ["node", str(harness), scenario],
-        check=True,
-        capture_output=True,
-        encoding="utf-8",
-    )
-    return json.loads(result.stdout)
+    return json.loads(run_node(harness, scenario))
 
 
 def test_a_server_switch_invalidates_facets_before_usage_arrives(tmp_path: Path) -> None:
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     functions = _dashboard_functions() + "\n" + "\n".join(
         extract_js_function(source, signature)
         for signature in (
@@ -400,9 +560,7 @@ const facets = (serverId, messages) => [{ server: { id: serverId }, payload: {
 """
     harness = tmp_path / "server-switch-facets.js"
     harness.write_text(body, encoding="utf-8")
-    out = json.loads(subprocess.run(
-        ["node", str(harness)], check=True, capture_output=True, encoding="utf-8",
-    ).stdout)
+    out = json.loads(run_node(harness))
 
     assert out["afterSwitch"] == {"messages": None, "status": "loading"}
     assert out["obsoleteReplyProjects"] == []
@@ -421,8 +579,10 @@ def test_returning_to_the_in_flight_range_cancels_the_queue(tmp_path):
     assert [url for url in out["urls"] if "date_from=Y" in url] == [], "Y must never be fetched"
     assert out["rendered"] == ["X"]
     assert out["lastWindowKey"] == "X_X"
-    # The deferred active-time fetch follows the range actually on screen.
+    # The deferred active-time and Project Details fetches follow the range
+    # actually on screen.
     assert out["activeLoads"] == ["X"]
+    assert out["facetLoads"] == ["X"]
 
 
 def test_a_superseded_load_commits_nothing(tmp_path):
@@ -438,6 +598,10 @@ def test_a_superseded_load_commits_nothing(tmp_path):
     assert out["usage"] == "Y"
     assert out["lastWindowKey"] == "Y_Y"
     assert sum("date_from=Y" in url for url in out["urls"]) == 1
+    # The superseded range skips its deferred work: the card and Project Details
+    # load once, for the range that committed.
+    assert out["activeLoads"] == ["Y"]
+    assert out["facetLoads"] == ["Y"]
 
 
 def test_a_superseded_failure_is_not_shown(tmp_path):
@@ -517,3 +681,89 @@ def test_every_same_range_refresh_reports_but_initial_and_range_loads_do_not(tmp
     assert out["forcedDelta"] == 25
     assert out["afterRangeChange"] == 2
     assert out["afterOtherRangeRefresh"] == 3
+
+
+# --- the agent-time card, with its real loader --------------------------------
+
+
+def test_the_review_toggle_refetches_the_card(tmp_path):
+    """Codex review sessions count towards agent time, so the toggle must refetch.
+
+    Without the refetch the card keeps the previous split until the next range
+    change, under a toggle that says otherwise.
+    """
+    out = _run(tmp_path, "the-review-toggle-refetches-the-card", _real_active_time_card())
+
+    assert out["before"] == {"status": "ready", "agentMs": 60000}
+    assert out["stored"] == "1"
+    # The old split is cleared the moment the toggle moves, not when the new one lands.
+    assert out["onToggle"] == {"status": "loading", "agentMs": None, "rendered": ["loading"]}
+    assert out["after"] == {"status": "ready", "agentMs": 180000, "rendered": ["loading", "ready"]}
+    assert out["urls"] == [
+        "/api/active-time?date_from=2026-01-05&date_to=2026-01-05&include_review_sessions=false",
+        "/api/active-time?date_from=2026-01-05&date_to=2026-01-05&include_review_sessions=true",
+    ]
+
+
+def test_a_late_reply_cannot_overwrite_a_newer_range(tmp_path):
+    """The reply for a range the user has left lands last; the newer figure stays."""
+    out = _run(tmp_path, "a-late-reply-cannot-overwrite-a-newer-range", _real_active_time_card())
+
+    late = out["afterLateReply"]
+    assert (late["status"], late["agentMs"]) == ("ready", 2000), late
+    assert late["key"].startswith("B_B:"), late
+    assert out["afterLateFailure"] == {"status": "ready", "agentMs": 4000}, (
+        "a late failure for a superseded range turned the current figure into an error"
+    )
+
+
+def test_a_refresh_keeps_the_figure_and_a_new_range_blanks_it(tmp_path):
+    """A cold read takes seconds. The old range's figure must not sit under the new
+    one, but a refresh of the same range has nothing to hide, and if it fails the
+    figure it already had is still the right one."""
+    out = _run(
+        tmp_path, "a-refresh-keeps-the-figure-and-a-new-range-blanks-it", _real_active_time_card()
+    )
+
+    assert out["whileRefreshing"]["agentMs"] == 1000
+    assert out["whileRefreshing"]["rendered"] == [], "a same-range refresh blanked the card"
+    assert out["afterFailedRefresh"] == {"status": "ready", "agentMs": 1000, "rendered": ["ready"]}
+    assert out["onNewRange"] == {"status": "loading", "agentMs": None, "rendered": ["loading"]}
+    # Clearing before the request takes its id is what lets the request survive it.
+    assert out["afterNewRange"] == {"status": "ready", "agentMs": 3000}
+    # Every call asks the server, an unchanged range included, so the five-minute
+    # refresh moves this card too; the Refresh button's reaches past its cache.
+    assert out["urls"] == [
+        "/api/active-time?date_from=A&date_to=A",
+        "/api/active-time?date_from=A&date_to=A&refresh=1",
+        "/api/active-time?date_from=B&date_to=B",
+    ]
+
+
+def test_a_range_change_clears_the_card_before_its_usage_lands(tmp_path):
+    """The card's request waits behind /api/usage; clearing it must not wait too.
+
+    The picker relabels at once, so until the new range's usage lands the old
+    agent time would sit under the new date. That holds whether the range runs at
+    once or is queued behind a load already in flight.
+    """
+    out = _run(
+        tmp_path, "a-range-change-clears-the-card-before-its-usage-lands", _real_active_time_card()
+    )
+
+    assert out["onX"] == {"status": "ready", "agentMs": 1000}
+    assert out["duringRefresh"] == {"status": "ready", "agentMs": 1000, "rendered": []}
+    assert out["onQueuedPick"] == {
+        "status": "loading", "agentMs": None, "rendered": ["loading"], "queued": "Y",
+    }, "a queued range left the previous range's figure on screen"
+    # X's refresh was superseded, so its deferred request never went out, and
+    # Y's waited for Y's usage.
+    assert out["requestsBeforeYUsage"] == 1
+    assert out["requestsAfterYUsage"][-1] == "/api/active-time?date_from=Y&date_to=Y"
+    assert len(out["requestsAfterYUsage"]) == 2
+    assert out["onY"] == {"status": "ready", "agentMs": 2000}
+    assert out["onPickZ"] == {
+        "status": "loading", "agentMs": None, "rendered": ["loading"], "requests": 2,
+    }
+    assert out["zRequest"] == "/api/active-time?date_from=Z&date_to=Z&refresh=1"
+

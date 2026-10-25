@@ -5,6 +5,11 @@ so these pin the parts that fail silently: a tab nobody can open, a window off
 by one day (the printed range line is the only part of a report a reader can
 check by hand), a day-map rule that quietly stops matching the Stats tab, and
 model-derived text reaching the DOM as markup.
+
+Most of them run the shipped code under Node: the window math, the model
+builder, the loader and its requests, the renderers painted onto a stub DOM,
+the paint order, the control wiring and the share cards. The few that still
+read the page as text pin markup, CSS and copy that a stub DOM cannot show.
 """
 
 from __future__ import annotations

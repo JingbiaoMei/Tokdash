@@ -418,23 +418,6 @@ process.stdout.write(JSON.stringify({
         assert "renderPeriodChips" not in out[tab]["log"]
 
 
-def test_a_past_window_names_itself() -> None:
-    """'This month' over an August report is a lie: past windows take the
-    card-style title, and a completed year prints its number, not 'year to date'."""
-    source = _source()
-    title = extract_js_function(source, "function usageReportPeriodTitle(model) {")
-    assert "usageReportCardTitle(model)" in title
-    card = extract_js_function(source, "function usageReportCardTitle(model) {")
-    assert "-12-31" in card
-
-
-def test_the_card_filename_names_the_theme() -> None:
-    """The card wears the active style theme, so the export names it -- the
-    same window saved under two themes must not overwrite itself."""
-    fn = extract_js_function(_source(), "function usageReportCardFilename(model, tier, mode) {")
-    assert "dataset.uiTheme" in fn
-
-
 # --- one source down, executed for real under node --------------------------
 
 
@@ -3292,7 +3275,131 @@ process.stdout.write(JSON.stringify(out));
         "this machine",
         "desk",
     ]
-    assert "nicknameInput.placeholder = usageReportMachineName()" in _source()
+
+
+@needs_node
+def test_the_card_filename_names_the_theme(tmp_path: Path) -> None:
+    """The card wears the active style theme, so the export names it: the same
+    window saved under two themes must not overwrite itself. A theme name that
+    is not filename-safe is folded to one, and no theme is "default"."""
+    report = _card_audit(tmp_path, """
+const names = {};
+for (const theme of ['paper', 'Ocean Blue', '', '!!!', null]) {
+  if (theme === null) delete document.documentElement.dataset.uiTheme;
+  else document.documentElement.dataset.uiTheme = theme;
+  names[String(theme)] = usageReportCardFilename(busy, 'amber', 'dark');
+}
+process.stdout.write(JSON.stringify(names));
+""")
+    stem = "tokdash-report-2026-09-01_2026-09-30-amber"
+    assert report == {
+        "paper": f"{stem}-paper-dark.png",
+        "Ocean Blue": f"{stem}-oceanblue-dark.png",
+        "": f"{stem}-default-dark.png",
+        "!!!": f"{stem}-default-dark.png",
+        "null": f"{stem}-default-dark.png",
+    }
+
+
+@needs_node
+def test_a_past_window_names_itself(tmp_path: Path) -> None:
+    """'This month' over an August report is a lie: past windows take the
+    card-style title, and a completed year prints its number, not 'year to date'."""
+    source = _source()
+    report = _card_audit(tmp_path, "\n".join([
+        extract_js_function(source, "function formatDateKey(date) {"),
+        extract_js_function(source, "function usageReportPeriodTitle(model) {"),
+        """
+const usageReportToday = () => new Date(2026, 8, 30);
+const title = (period, from, to) => usageReportPeriodTitle({ period, range: { from, to } });
+process.stdout.write(JSON.stringify({
+  today: title('day', '2026-09-30', '2026-09-30'),
+  pastDay: title('day', '2026-09-12', '2026-09-12'),
+  thisWeek: title('week', '2026-09-28', '2026-09-30'),
+  pastWeek: title('week', '2026-09-21', '2026-09-27'),
+  thisMonth: title('month', '2026-09-01', '2026-09-30'),
+  pastMonth: title('month', '2026-08-01', '2026-08-31'),
+  thisYear: title('year', '2026-01-01', '2026-09-30'),
+  pastYear: title('year', '2025-01-01', '2025-12-31'),
+}));
+""",
+    ]))
+    english = _i18n_english_copy(source)
+    assert report == {
+        "today": english["usageReportTitleDay"],
+        "pastDay": "2026-09-12",
+        "thisWeek": english["usageReportTitleWeek"],
+        "pastWeek": english["usageReportCardWeekTitle"].replace("{date}", "2026-09-21"),
+        "thisMonth": english["usageReportTitleMonth"],
+        "pastMonth": "August 2026",
+        "thisYear": english["usageReportTitleYear"],
+        "pastYear": "2025",
+    }
+
+
+@needs_node
+def test_share_card_colours_follow_the_theme_with_a_literal_fallback(tmp_path: Path) -> None:
+    """The card wears the active theme in both exported modes, dark tokens over
+    light ones, the theme's own heat ramp, and one level of var() aliasing. The
+    literal slate palette survives only as the fallback: no stylesheet, a token
+    the sheets do not define, or no ramp to borrow."""
+    report = _card_audit(tmp_path, """
+const out = { fallback: USAGE_REPORT_CARD_FALLBACK };
+out.fallbackRamps = [
+  USAGE_REPORT_CARD_FALLBACK.light.heat === DEFAULT_HEAT_COLORS_LIGHT,
+  USAGE_REPORT_CARD_FALLBACK.dark.heat === DEFAULT_HEAT_COLORS_DARK,
+];
+out.noSheets = [usageReportCardPalette('light'), usageReportCardPalette('dark')];
+const rule = (selectorText, props) => ({ selectorText, style: { getPropertyValue: (name) => props[name] || '' } });
+const base = {
+  '--color-bg': '#fff', '--color-text': '#111', '--color-muted': '#555', '--color-label': '#999',
+  '--color-border': '#ddd', '--color-primary': '#00f', '--color-secondary': '#0af',
+  '--color-cost': '#0a0', '--color-surface-glass': '#fefefe',
+};
+document.styleSheets = [
+  { cssRules: [rule(':root', base), rule('html.dark', { '--color-bg': '#000', '--color-text': '#eee' })] },
+  // A cross-origin sheet refuses to be read; it is skipped, not fatal.
+  { get cssRules() { throw new Error('SecurityError'); } },
+  { cssRules: [
+    rule('html[data-ui-theme="ocean"]', { '--color-primary': '#0077be', '--color-secondary': 'var(--color-primary)' }),
+    rule('html.dark[data-ui-theme="ocean"], html.dark[data-ui-theme="reef"]', { '--color-primary': '#7fd3ff' }),
+    rule('html[data-ui-theme="paper"]', { '--color-primary': '#a52a2a' }),
+  ] },
+];
+document.documentElement.dataset.uiTheme = 'ocean';
+out.noRamp = usageReportCardPalette('light');
+const asked = [];
+globalThis.getHeatColors = (theme, dark) => {
+  asked.push([theme, dark]);
+  return [`${theme}-${dark ? 'dark' : 'light'}-0`, `${theme}-${dark ? 'dark' : 'light'}-1`];
+};
+out.light = usageReportCardPalette('light');
+out.dark = usageReportCardPalette('dark');
+delete document.documentElement.dataset.uiTheme;
+out.unthemed = usageReportCardPalette('light').primary;
+out.asked = asked;
+document.styleSheets = [{ cssRules: [rule(':root', { ...base, '--color-cost': '' })] }];
+out.missingToken = usageReportCardPalette('light');
+process.stdout.write(JSON.stringify(out));
+""")
+    fallback = report["fallback"]
+    assert "var(--" not in json.dumps(fallback), "the fallback must not depend on a stylesheet"
+    assert report["fallbackRamps"] == [True, True]
+    assert report["noSheets"] == [fallback["light"], fallback["dark"]]
+    assert report["noRamp"] == fallback["light"]
+    assert report["missingToken"] == fallback["light"]
+    assert report["light"] == {
+        "bg": "#fff", "panel": "#fefefe", "text": "#111", "muted": "#555", "faint": "#999",
+        "border": "#ddd", "primary": "#0077be", "secondary": "#0077be", "cost": "#0a0",
+        "heat": ["ocean-light-0", "ocean-light-1"], "barBg": "ocean-light-0",
+    }
+    assert report["dark"] == {
+        "bg": "#000", "panel": "#fefefe", "text": "#eee", "muted": "#555", "faint": "#999",
+        "border": "#ddd", "primary": "#7fd3ff", "secondary": "#7fd3ff", "cost": "#0a0",
+        "heat": ["ocean-dark-0", "ocean-dark-1"], "barBg": "ocean-dark-0",
+    }
+    assert report["asked"] == [["ocean", False], ["ocean", True], ["paper", False]]
+    assert report["unthemed"] == "#a52a2a", "no theme on the page reads as the paper theme"
 
 
 @needs_node
@@ -3379,84 +3486,317 @@ def test_share_panel_offers_two_tiers_and_three_export_paths() -> None:
     assert "data-save" not in panel
 
 
-def test_every_export_writes_both_themes_for_the_tier_it_names() -> None:
-    """Howard's rule: a download is never one file, and never the on-screen theme."""
-    source = _source()
-    export = extract_js_function(source, "async function usageReportExportCards(tier) {")
-    assert "for (const mode of ['light', 'dark'])" in export
-    assert "tiers = tier === 'all' ? ['green', 'amber'] : [tier]" in export
-    assert export.count("toBlob") == 1, "one paint-to-file path, so previews and files agree"
-    assert "usageReportCardFilename(model, current, mode)" in export
-    assert "t('usageReportExported', { n: wrote })" in export
-    assert "t('usageReportExportNothing')" in export, "a download that wrote nothing must say so"
-    assert "usageReportExportCards(button.dataset.export)" in source
-    assert not re.search(r"anchor\.download\s*=\s*[^,)]*\(model,[^)]*'light'\)", export)
+EXPORT_SCENARIO = """
+const created = [];
+const revoked = [];
+const timers = [];
+const URL = {
+  createObjectURL: (blob) => { created.push(blob.name); return `blob:${blob.name}`; },
+  revokeObjectURL: (url) => { revoked.push(url); },
+};
+const setTimeout = (fn, ms) => { timers.push([fn, ms]); };
+const downloads = [];
+const createElement = document.createElement;
+document.createElement = (tag) => {
+  const node = createElement(tag);
+  if (tag === 'a') {
+    node.click = () => downloads.push({
+      name: node.download, href: node.href, attached: document.body.children.includes(node),
+    });
+  }
+  return node;
+};
+const status = document.getElementById('usageReportExportStatus');
+status.hidden = true;
+const canvas = (key, blank = false) => ({ toBlob: (done, type) => done(blank || type !== 'image/png' ? null : { name: key }) });
+const previews = (keys) => Object.fromEntries(keys.map((key) => [key, canvas(key)]));
+const every = ['green:light', 'green:dark', 'amber:light', 'amber:dark'];
+const run = async (tier) => {
+  downloads.length = 0;
+  await usageReportExportCards(tier);
+  return { files: downloads.map((d) => d.name), attached: downloads.every((d) => d.attached), status: [status.hidden, status.textContent] };
+};
+(async () => {
+  const out = {};
+  document.documentElement.dataset.uiTheme = 'Ocean Blue';
+  usageReportState.model = { range: { from: '2026-09-01', to: '2026-09-30' } };
+  usageReportState.previews = previews(every);
+  out.green = await run('green');
+  out.all = await run('all');
+  // The tier's previews are not painted yet: say so rather than look idle.
+  usageReportState.previews = previews(['green:light', 'green:dark']);
+  out.amberMissing = await run('amber');
+  // A canvas that yields no blob writes no file and is not counted.
+  usageReportState.previews = { ...previews(every), 'green:dark': canvas('green:dark', true) };
+  out.oneBlank = await run('green');
+  // A second click while the first export is still writing is not a second set.
+  usageReportState.previews = previews(every);
+  downloads.length = 0;
+  await Promise.all([usageReportExportCards('green'), usageReportExportCards('green')]);
+  out.doubleClick = downloads.length;
+  out.exportingAfter = usageReportState.exporting;
+  usageReportState.model = null;
+  out.noModel = await run('all');
+  out.timers = timers.map(([, ms]) => ms);
+  timers.forEach(([fn]) => fn());
+  out.revokedAll = revoked.length === created.length && revoked.every((url, i) => url === `blob:${created[i]}`);
+  process.stdout.write(JSON.stringify(out));
+})();
+"""
 
 
-def test_a_download_never_names_a_window_it_did_not_paint() -> None:
-    """A period switch mid-paint must not pair one window's filename with the
-    previous window's pixels, and the version stamp is rarely in for the first
-    paint, so the cards have to be repainted when it lands."""
-    source = _source()
-    share = extract_js_function(source, "async function usageReportRenderShare(model) {")
-    assert share.index("usageReportState.previews = {}") < share.index("await usageReportCardFonts()"), (
-        "the preview set has to be retired before the paint goes async"
-    )
-    version = extract_js_function(source, "function usageReportLoadVersion() {")
-    assert "usageReportRenderShare(usageReportState.model)" in version
+@needs_node
+def test_every_export_writes_both_themes_for_the_tier_it_names(tmp_path: Path) -> None:
+    """Howard's rule: a download is never one file, and never the on-screen theme.
 
-
-def test_a_landing_load_leaves_a_half_typed_nickname_alone() -> None:
-    """The placeholder has to follow the server the report reads, and it is read on
-    every render. The field's value is not: a load that lands while someone is
-    still typing would otherwise wipe text that has not been committed yet.
+    A tier exports its light and dark card, "all" exports both tiers, each file
+    named for its window, tier, style theme and mode. A download that wrote
+    nothing says so, and a click while an export is still writing does not
+    start a second set.
     """
-    block = _report_block(_source())
-    render = extract_js_function(block, "function usageReportRender() {")
-    assert "usageReportShareHint()" in render
-    assert "usageReportSyncShareInputs()" not in render
-    hint = extract_js_function(block, "function usageReportShareHint() {")
-    assert ".value" not in hint, "only the placeholder may be written on a render"
-    assert "placeholder = usageReportMachineName()" in hint
-    wire = extract_js_function(block, "function usageReportWireShare() {")
-    assert "usageReportSyncShareInputs()" in wire, "stored prefs still reach the field once, at wire time"
+    program = _report_dom(
+        EXPORT_SCENARIO,
+        "function usageReportCardFilename(model, tier, mode) {",
+        "async function usageReportExportCards(tier) {",
+    )
+    out = json.loads(_run_node(tmp_path, "usage-report-export.js", program))
+
+    def files(*keys: str) -> list[str]:
+        return [
+            f"tokdash-report-2026-09-01_2026-09-30-{key.split(':')[0]}-oceanblue-{key.split(':')[1]}.png"
+            for key in keys
+        ]
+
+    assert out["green"] == {
+        "files": files("green:light", "green:dark"), "attached": True,
+        "status": [False, 'usageReportExported{"n":2}'],
+    }
+    assert out["all"]["files"] == files("green:light", "green:dark", "amber:light", "amber:dark")
+    assert out["all"]["status"] == [False, 'usageReportExported{"n":4}']
+    assert out["amberMissing"] == {"files": [], "attached": True, "status": [False, "usageReportExportNothing"]}
+    assert out["oneBlank"]["files"] == files("green:light")
+    assert out["oneBlank"]["status"] == [False, 'usageReportExported{"n":1}']
+    assert out["doubleClick"] == 2 and out["exportingAfter"] is False
+    assert out["noModel"]["files"] == []
+    assert out["timers"] == [4000] * 9 and out["revokedAll"], "an exported blob URL was never released"
 
 
-def test_share_card_colours_follow_the_theme_with_a_literal_fallback() -> None:
-    """The card wears the active theme in both exported modes; the literal slate
-    palette survives only as the no-stylesheet fallback (and the node tests)."""
-    source = _source()
-    palette = extract_js_function(source, "function usageReportCardPalette(mode) {")
-    assert "usageReportThemeTokens(theme, dark)" in palette
-    assert "getHeatColors(theme, dark)" in palette, "the ramp is the theme's own, not the default scale"
-    assert "USAGE_REPORT_CARD_FALLBACK[mode]" in palette
-    tokens = extract_js_function(source, "function usageReportThemeTokens(theme, dark) {")
-    assert 'html.dark[data-ui-theme="' in tokens, "the dark export must read the theme's dark tokens"
-    fallback = extract_js_function(source, "const USAGE_REPORT_CARD_FALLBACK = {")
-    assert "var(--" not in fallback
-    assert "heat: DEFAULT_HEAT_COLORS_LIGHT" in fallback
-    assert "heat: DEFAULT_HEAT_COLORS_DARK" in fallback
+RENDER_SHARE_SCENARIO = """
+const USAGE_REPORT_CARD = { W: 360, H: 640 };
+console.debug = () => {};
+let releaseFonts = [];
+function usageReportCardFonts() { return new Promise((resolve) => releaseFonts.push(resolve)); }
+function usageReportLoadCardIcons() { return Promise.resolve(); }
+const built = [];
+function usageReportBuildCard(model, tier, mode) {
+  built.push(`${model.name}/${tier}/${mode}`);
+  return { budget: 600, used: 500, overflowBy: 0, opt: { maxProjects: 3 } };
+}
+function usageReportPaintCard(canvas) { return canvas; }
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+const model = (name, from) => ({ name, range: { from, to: from }, tools: [], cells: [] });
+(async () => {
+  const out = {};
+  usageReportState.previews = { 'green:light': 'last window', 'green:dark': 'last window' };
+  const august = usageReportRenderShare(model('august', '2026-08-01'));
+  out.whilePainting = Object.keys(usageReportState.previews);
+  // A period switch lands before August's fonts do.
+  const september = usageReportRenderShare(model('september', '2026-09-01'));
+  releaseFonts.forEach((release) => release());
+  await Promise.all([august, september]);
+  await settle();
+  out.built = built;
+  out.previews = Object.keys(usageReportState.previews).sort();
+  out.cardFile = document.getElementById('usageReportStack').dataset.cardFile;
+  out.boxes = ['usageReportGreenCards', 'usageReportAmberCards'].map((id) => document.getElementById(id).children.length);
+  process.stdout.write(JSON.stringify(out));
+})();
+"""
 
 
-def test_the_prefs_key_follows_the_convention_the_page_already_uses() -> None:
-    """Every other stored key is `tokdash-*`; a lone dotted key is invisible to
-    anyone grepping localStorage for this app."""
-    source = _source()
-    key = re.search(r"const USAGE_REPORT_PREFS_KEY = '([^']+)'", source)
-    assert key and key.group(1).startswith("tokdash-"), key and key.group(1)
-    assert "." not in key.group(1)
+@needs_node
+def test_a_download_never_names_a_window_it_did_not_paint(tmp_path: Path) -> None:
+    """A period switch mid-paint must not pair one window's filename with the
+    previous window's pixels. The previews double as the export source, so they
+    are retired before the paint waits on fonts, and a paint a newer one
+    overtook is dropped rather than landing on top of it.
+    """
+    program = _report_dom(
+        RENDER_SHARE_SCENARIO,
+        "function usageReportCardFilename(model, tier, mode) {",
+        "async function usageReportRenderShare(model) {",
+    )
+    out = json.loads(_run_node(tmp_path, "usage-report-render-share.js", program))
+
+    assert out["whilePainting"] == [], "the last window's previews stayed exportable during the paint"
+    assert out["built"] == [
+        f"september/{tier}/{mode}" for tier in ("green", "amber") for mode in ("light", "dark")
+    ], "an overtaken paint still drew its cards"
+    assert out["previews"] == ["amber:dark", "amber:light", "green:dark", "green:light"]
+    assert out["cardFile"] == "tokdash-report-2026-09-01_2026-09-01-green-default-light.png"
+    assert out["boxes"] == [2, 2]
 
 
-def test_share_prefs_carry_the_nickname_and_the_cost_choice() -> None:
-    source = _source()
-    read = extract_js_function(source, "function usageReportReadPrefs() {")
-    write = extract_js_function(source, "function usageReportWritePrefs() {")
-    for fn in (read, write):
-        assert "nickname" in fn and "includeCost" in fn
-    # Cost prints by default (the header is tokens + cost); the toggle is the
-    # opt-out. Only a prefsV-stamped blob may carry that opt-out -- period
-    # clicks write prefs too, so an unstamped includeCost:false is incidental.
-    assert "prefsV === 2" in read, "only a stamped pref may turn cost off"
-    assert "prefsV: 2" in write, "new writes must stamp the blob"
+PREFS_SCENARIO = """
+const stored = {};
+let full = false;
+const localStorage = {
+  getItem: (key) => (key in stored ? stored[key] : null),
+  setItem: (key, value) => {
+    if (full) throw new Error('QuotaExceededError');
+    stored[key] = String(value);
+  },
+};
+const state = () => ({
+  period: usageReportState.period, serverId: usageReportState.serverId,
+  nickname: usageReportState.nickname, includeCost: usageReportState.includeCost,
+});
+const out = {};
+usageReportReadPrefs();
+out.nothingStored = state();
+usageReportState.period = 'year';
+usageReportState.serverId = 'mac';
+usageReportState.nickname = 'desk';
+usageReportState.includeCost = false;
+usageReportWritePrefs();
+out.keys = Object.keys(stored);
+out.written = JSON.parse(stored[USAGE_REPORT_PREFS_KEY]);
+const fresh = () => Object.assign(usageReportState, { period: 'month', serverId: 'local', nickname: '', includeCost: true });
+fresh();
+usageReportReadPrefs();
+out.roundTrip = state();
+// A blob from before the stamp: period clicks wrote includeCost too, so its
+// false is incidental, not a choice.
+stored[USAGE_REPORT_PREFS_KEY] = JSON.stringify({
+  period: 'week', serverId: '', nickname: '   a nickname far longer than any card has room for  ', includeCost: false,
+});
+fresh();
+usageReportReadPrefs();
+out.unstamped = state();
+stored[USAGE_REPORT_PREFS_KEY] = JSON.stringify({ prefsV: 2, period: 'decade', includeCost: 'no' });
+fresh();
+usageReportReadPrefs();
+out.invalid = state();
+stored[USAGE_REPORT_PREFS_KEY] = '{not json';
+fresh();
+usageReportReadPrefs();
+out.corrupt = state();
+full = true;
+usageReportWritePrefs();
+out.quotaSurvived = true;
+process.stdout.write(JSON.stringify(out));
+"""
 
 
+@needs_node
+def test_share_prefs_carry_the_nickname_and_the_cost_choice(tmp_path: Path) -> None:
+    """The period, server, nickname and cost choice survive a reload.
+
+    Cost prints by default (the header is tokens and cost), and the toggle is
+    the opt-out. Only a prefsV-stamped blob may carry that opt-out: period
+    clicks write prefs too, so an unstamped includeCost false is incidental.
+    Every other stored key is `tokdash-*`, so this one is too, and a bad blob
+    or a full store is no prefs rather than a broken tab.
+    """
+    program = _report_dom(
+        PREFS_SCENARIO,
+        "function usageReportReadPrefs() {",
+        "function usageReportWritePrefs() {",
+    )
+    out = json.loads(_run_node(tmp_path, "usage-report-prefs.js", program))
+
+    defaults = {"period": "month", "serverId": "local", "nickname": "", "includeCost": True}
+    assert out["nothingStored"] == defaults
+    [key] = out["keys"]
+    assert key.startswith("tokdash-") and "." not in key, key
+    assert out["written"] == {
+        "prefsV": 2, "period": "year", "serverId": "mac", "nickname": "desk", "includeCost": False,
+    }
+    assert out["roundTrip"] == {"period": "year", "serverId": "mac", "nickname": "desk", "includeCost": False}
+    assert out["unstamped"] == {
+        "period": "week", "serverId": "local",
+        "nickname": "a nickname far longer than any card has room for".strip()[:24], "includeCost": True,
+    }
+    assert out["invalid"] == defaults
+    assert out["corrupt"] == defaults
+    assert out["quotaSurvived"] is True
+
+
+SHARE_WIRE_SCENARIO = """
+const log = [];
+function usageReportWritePrefs() { log.push('writePrefs'); }
+function usageReportRender() { log.push('render'); }
+function usageReportRenderShare() { log.push('renderShare'); return Promise.resolve(); }
+function usageReportExportCards(tier) { log.push(`export:${tier}`); }
+function usageReportFitYearCells() {}
+const exportButtons = ['green', 'amber', 'all'].map((tier) => {
+  const button = makeNode('button');
+  button.dataset.export = tier;
+  return button;
+});
+document.querySelectorAll = (selector) => (selector === '#report-content [data-export]' ? exportButtons : []);
+const input = document.getElementById('usageReportNicknameInput');
+const toggle = document.getElementById('usageReportCostToggle');
+const field = () => ({ value: input.value, placeholder: input.placeholder, checked: toggle.checked, log: log.splice(0) });
+SERVERS = [{ id: 'local', label: 'Local' }, { id: 'mac', label: 'mac-studio' }];
+const out = {};
+// Stored prefs reach the fields once, when the panel is wired.
+usageReportState.nickname = 'desk';
+usageReportState.includeCost = false;
+usageReportWireShare();
+out.wired = field();
+// A load lands while a new nickname is half typed, from another server.
+usageReportState.nickname = '';
+usageReportState.serverId = 'mac';
+input.value = 'half-typ';
+usageReportShareHint();
+out.landed = field();
+usageReportState.serverId = 'local';
+usageReportShareHint();
+out.local = field();
+// Committing the field stores it; with no report yet there is nothing to repaint.
+input.value = '   a nickname far too long for any card  ';
+input.fire('change');
+out.committed = { ...field(), nickname: usageReportState.nickname };
+usageReportState.model = { notices: {} };
+input.value = 'desk';
+input.fire('change');
+out.committedWithReport = field();
+toggle.checked = true;
+toggle.fire('change');
+out.cost = { ...field(), includeCost: usageReportState.includeCost };
+exportButtons.forEach((button) => button.click());
+out.exports = log.splice(0);
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@needs_node
+def test_a_landing_load_leaves_a_half_typed_nickname_alone(tmp_path: Path) -> None:
+    """The placeholder follows the server the report reads, on every render. The
+    field's value does not: a load that lands while someone is still typing would
+    otherwise wipe text that has not been committed yet. Stored prefs reach the
+    fields once, at wire time; a committed nickname is trimmed, stored and
+    repainted everywhere the machine is named, and each export button hands the
+    exporter the tier it is labelled with.
+    """
+    program = _report_dom(
+        SHARE_WIRE_SCENARIO,
+        "function usageReportShareHint() {",
+        "function usageReportSyncShareInputs() {",
+        "function usageReportWireShare() {",
+    )
+    out = json.loads(_run_node(tmp_path, "usage-report-share-wire.js", program))
+
+    assert out["wired"] == {"value": "desk", "placeholder": "desk", "checked": False, "log": []}
+    assert out["landed"] == {"value": "half-typ", "placeholder": "mac-studio", "checked": False, "log": []}
+    assert out["local"]["value"] == "half-typ"
+    assert out["local"]["placeholder"] == "usageReportCardNicknameFallback"
+    nickname = "a nickname far too long for any card".strip()[:24]
+    assert out["committed"] == {
+        "value": nickname, "placeholder": "usageReportCardNicknameFallback", "checked": False,
+        "log": ["writePrefs"], "nickname": nickname,
+    }
+    assert out["committedWithReport"]["log"] == ["writePrefs", "render"]
+    assert out["cost"]["log"] == ["writePrefs", "renderShare"] and out["cost"]["includeCost"] is True
+    assert out["exports"] == ["export:green", "export:amber", "export:all"]

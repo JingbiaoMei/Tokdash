@@ -2077,7 +2077,6 @@
     .usage-report-kpi-label { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; color: var(--color-label); }
     .usage-report-kpi-value { font-size: clamp(20px, 2.2vw, 27px); font-weight: 800; margin-top: 6px; letter-spacing: -.02em; overflow-wrap: anywhere; }
     .usage-report-kpi-sub { font-size: 12px; color: var(--color-muted); margin-top: 4px; }
-    .usage-report-pill { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; vertical-align: middle; color: var(--color-cta); background: color-mix(in srgb, var(--color-cta) 16%, transparent); }
     .usage-report-delta-up { color: #16A34A; font-weight: 800; }
     .usage-report-delta-down { color: #DC2626; font-weight: 800; }
     html.dark .usage-report-delta-up { color: #4ADE80; }
@@ -2284,7 +2283,13 @@
     .usage-report-agents th:first-child, .usage-report-agents td:first-child { text-align: left; }
     .usage-report-agents tbody tr { transition: background-color .12s ease; }
     .usage-report-agents tbody tr:hover { background: color-mix(in srgb, var(--color-secondary) 7%, transparent); }
-    .usage-report-agents .usage-report-qual { color: var(--color-label); font-weight: 700; font-size: 9px; display: block; text-transform: none; letter-spacing: 0; }
+    .usage-report-agents th.is-sortable { cursor: pointer; user-select: none; }
+    .usage-report-agents th.is-sortable:hover { color: var(--color-text); }
+    .usage-report-agents th[aria-sort="ascending"] .report-sort::after,
+    .usage-report-agents th[aria-sort="descending"] .report-sort::after {
+      content: "\25B2"; margin-left: 3px; font-size: 9px; opacity: .9;
+    }
+    .usage-report-agents th[aria-sort="descending"] .report-sort::after { content: "\25BC"; }
 
 
     /* Share cards. Each tier shows both PNGs side by side because every export
@@ -3770,13 +3775,16 @@
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
                 <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="tool" data-sortable="tool">Tool</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="tokens" data-sortable="tokens">Tokens</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="hitPct" data-sortable="cache_hit_rate" data-i18n-title="cacheHitRateHint">Hit %</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="sessions" data-sortable="sessions">Sessions</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="active" data-sortable="activeMs" data-i18n-title="activeTimeHint">Active</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="msgs" data-sortable="messages">Msgs</th>
               </tr>
             </thead>
             <tbody id="toolsTable">
-              <tr><td colspan="4" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
+              <tr><td colspan="7" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
             </tbody>
           </table>
         </div>
@@ -3789,7 +3797,7 @@
         </div>
       </section>
 
-      <section class="surface p-5">
+      <section class="surface p-5 mb-6">
         <h2 class="text-base font-extrabold mono mb-4" data-i18n="combinedModels">Combined Models</h2>
         <p class="text-xs mb-3" style="color: var(--color-muted);" data-i18n="combinedModelsDesc">Unified view across all apps and providers. Models with the same name are aggregated regardless of source.</p>
         <div class="flex items-center justify-between mb-3">
@@ -3815,6 +3823,32 @@
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section class="surface p-5">
+        <h2 class="text-base font-extrabold mono mb-4" data-i18n="projectDetails">Project Details</h2>
+        <p class="text-xs mb-3" style="color: var(--color-muted);" data-i18n="projectDetailsDesc">Usage attributed to the project each session ran in. Rows with no recorded project path sit in the unattributed line under the table.</p>
+        <div class="flex items-center justify-between mb-3">
+          <div id="projectDetailsInfo" class="text-xs" style="color: var(--color-muted);"></div>
+          <button id="projectDetailsToggle" class="btn btn-ghost" type="button" style="min-height: 36px; padding: 6px 10px; font-size: 12px; display:none;" data-i18n="showAll">Show all</button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm" data-i18n-aria="projectDetails" aria-label="Project Details">
+            <thead>
+              <tr class="border-b" style="border-color: var(--color-border);">
+                <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="project" data-sortable="project">Project</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="share" data-sortable="share">Share</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="msgs" data-sortable="messages">Msgs</th>
+              </tr>
+            </thead>
+            <tbody id="projectDetailsTable">
+              <tr><td colspan="5" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p id="projectDetailsNote" class="text-xs mt-3" style="color: var(--color-muted);"></p>
       </section>
     </div>
 
@@ -5676,16 +5710,12 @@
                 <div class="usage-report-kpi-value mono" id="usageReportKMessages">—</div>
               </div>
               <div>
-                <div class="usage-report-kpi-label" data-i18n="usageReportColSessions">Sessions</div>
+                <div class="usage-report-kpi-label" data-i18n="sessions">Sessions</div>
                 <div class="usage-report-kpi-value mono" id="usageReportKSessions">—</div>
               </div>
               <div>
-                <div class="usage-report-kpi-label">
-                  <span data-i18n="usageReportActiveTime">Active time</span>
-                  <span class="usage-report-pill" data-i18n="usageReportEst">est.</span>
-                </div>
+                <div class="usage-report-kpi-label" data-i18n="usageReportActiveTime">Active time</div>
                 <div class="usage-report-kpi-value mono" id="usageReportKActive">—</div>
-                <div class="usage-report-kpi-sub mono" id="usageReportKActiveSub"></div>
               </div>
               <div>
                 <div class="usage-report-kpi-label" data-i18n="usageReportDays">Active days</div>
@@ -5727,23 +5757,66 @@
               <span class="usage-report-panel-title" data-i18n="usageReportByAgent">By agent</span>
             </div>
             <div class="usage-report-agents-wrap">
-              <table class="usage-report-agents">
+              <table class="usage-report-agents" id="usageReportAgentsTable" data-report-table="agents">
                 <thead>
                   <tr>
-                    <th scope="col" data-i18n="usageReportColAgent">Agent</th>
-                    <th scope="col" data-i18n="usageReportColSessions">Sessions</th>
-                    <th scope="col" data-i18n="usageReportColTokens">Tokens</th>
-                    <th scope="col" data-i18n="usageReportColIn">In</th>
-                    <th scope="col" data-i18n="usageReportColOut">Out</th>
-                    <th scope="col" data-i18n="usageReportColCache">Cache read</th>
-                    <th scope="col"><span data-i18n="usageReportColCost">Cost</span><span class="usage-report-qual" data-i18n="usageReportColCostQual">API list price</span></th>
-                    <th scope="col" data-i18n="usageReportColActive">Active</th>
+                    <th scope="col" class="is-sortable" data-report-sort="tool" aria-sort="none"><span class="report-sort" data-i18n="tool">Tool</span></th>
+                    <th scope="col" class="is-sortable" data-report-sort="tokensIn" aria-sort="none"><span class="report-sort" data-i18n="input">Input</span></th>
+                    <th scope="col" class="is-sortable" data-report-sort="tokensOut" aria-sort="none"><span class="report-sort" data-i18n="output">Output</span></th>
+                    <th scope="col" class="is-sortable" data-report-sort="tokensCache" aria-sort="none"><span class="report-sort" data-i18n="cache">Cache</span></th>
+                    <th scope="col" class="is-sortable" data-report-sort="tokens" aria-sort="none"><span class="report-sort" data-i18n="total">Total</span></th>
+                    <th scope="col" class="is-sortable" data-report-sort="sessions" aria-sort="none"><span class="report-sort" data-i18n="sessions">Sessions</span></th>
+                    <th scope="col" class="is-sortable" data-report-sort="activeMs" aria-sort="none" data-i18n-title="activeTimeHint"><span class="report-sort" data-i18n="active">Active</span></th>
+                    <th scope="col" class="is-sortable" data-report-sort="cost" aria-sort="none"><span class="report-sort" data-i18n="cost">Cost</span></th>
+                    <th scope="col" class="is-sortable" data-report-sort="messages" aria-sort="none"><span class="report-sort" data-i18n="msgs">Msgs</span></th>
                   </tr>
                 </thead>
                 <tbody id="usageReportAgentsBody"></tbody>
               </table>
             </div>
             <p class="usage-report-note" id="usageReportAgentsNote"></p>
+          </section>
+
+          <section class="usage-report-panel">
+            <div class="usage-report-panel-head">
+              <span class="usage-report-panel-title" data-i18n="usageReportByModel">By model</span>
+            </div>
+            <div class="usage-report-agents-wrap">
+              <table class="usage-report-agents" id="usageReportModelsTable" data-report-table="models">
+                <thead>
+                  <tr>
+                    <th scope="col" class="is-sortable" data-report-sort="model" aria-sort="none"><span class="report-sort" data-i18n="model">Model</span></th>
+                    <th scope="col" class="is-sortable" data-report-sort="tokens" aria-sort="none"><span class="report-sort" data-i18n="total">Total</span></th>
+                    <th scope="col" class="is-sortable" data-report-sort="share" aria-sort="none"><span class="report-sort" data-i18n="share">Share</span></th>
+                    <th scope="col" class="is-sortable" data-report-sort="cost" aria-sort="none"><span class="report-sort" data-i18n="cost">Cost</span></th>
+                    <th scope="col" class="is-sortable" data-report-sort="messages" aria-sort="none"><span class="report-sort" data-i18n="msgs">Msgs</span></th>
+                  </tr>
+                </thead>
+                <tbody id="usageReportModelsBody"></tbody>
+              </table>
+            </div>
+            <p class="usage-report-note" id="usageReportModelsNote"></p>
+          </section>
+
+          <section class="usage-report-panel">
+            <div class="usage-report-panel-head">
+              <span class="usage-report-panel-title" data-i18n="usageReportByProject">By project</span>
+            </div>
+            <div class="usage-report-agents-wrap">
+              <table class="usage-report-agents" id="usageReportProjectsTable" data-report-table="projects">
+                <thead>
+                  <tr>
+                    <th scope="col" class="is-sortable" data-report-sort="project" aria-sort="none"><span class="report-sort" data-i18n="project">Project</span></th>
+                    <th scope="col" class="is-sortable" data-report-sort="tokens" aria-sort="none"><span class="report-sort" data-i18n="total">Total</span></th>
+                    <th scope="col" class="is-sortable" data-report-sort="share" aria-sort="none"><span class="report-sort" data-i18n="share">Share</span></th>
+                    <th scope="col" class="is-sortable" data-report-sort="cost" aria-sort="none"><span class="report-sort" data-i18n="cost">Cost</span></th>
+                    <th scope="col" class="is-sortable" data-report-sort="messages" aria-sort="none"><span class="report-sort" data-i18n="msgs">Msgs</span></th>
+                  </tr>
+                </thead>
+                <tbody id="usageReportProjectsBody"></tbody>
+              </table>
+            </div>
+            <p class="usage-report-note" id="usageReportProjectsNote"></p>
           </section>
 
           <section class="usage-report-panel">
@@ -7285,6 +7358,23 @@
     let pricingDbLastPayload = null;  // last GET/PUT payload, so the source line can re-localize
     const MAX_COMBINED_MODELS_ROWS = 300;
     let combinedModelsShowAll = false;
+    // The two overview tables that need a facet scan -- Project Details and the
+    // message column of the tools table -- ride one request. The scan is the
+    // expensive part and it is the same scan for both, so they are read together
+    // and neither is put in front of the KPI cards. The key is the range and
+    // server selection the facets were read for, so a range change cannot leave
+    // another window's figures on screen.
+    const MAX_PROJECT_DETAIL_ROWS = 300;
+    let projectDetailsShowAll = false;
+    const overviewFacetsState = {
+      key: null,
+      rows: [],
+      toolMessages: null,
+      unattributedTokens: 0,
+      facetTotal: 0,
+      status: 'idle',
+      requestId: 0,
+    };
     // Tri-state: true/false once the user toggles, null when never set so the
     // server default (TOKDASH_INCLUDE_CODEX_GUARDIAN) decides. codexReviewDefault
     // mirrors the effective server default echoed by the codex sessions response.
@@ -7648,6 +7738,9 @@
         appsModelsBreakdown: 'Apps & Models Breakdown',
         combinedModels: 'Combined Models',
         combinedModelsDesc: 'Unified view across all apps and providers. Models with the same name are aggregated regardless of source.',
+        projectDetails: 'Project Details',
+        projectDetailsDesc: 'Usage attributed to the project each session ran in. Rows with no recorded project path sit in the unattributed line under the table.',
+        share: 'Share',
         codexSessions: 'Codex Sessions',
         claudeSessions: 'Claude Code Sessions',
         opencodeSessions: 'OpenCode Sessions',
@@ -7969,6 +8062,7 @@
         avgCacheHitRate: 'Avg Cache Hit Rate',
         cacheHitRate: 'Cache Hit Rate',
         hitPct: 'Hit %',
+        active: 'Active',
         hit: 'hit',
         na: 'n/a',
         cacheHitRateHint: 'Share of prompt input served from cache (cache reads ÷ all prompt input). Cache writes count as misses; output excluded. Sources without cache data show n/a.',
@@ -7991,6 +8085,8 @@
         sparklineRecordedAt: 'Recorded {date}.',
         nModels: '{n} models',
         showingTopN: 'Showing top {top} of {total} models',
+        nProjects: '{n} projects',
+        projectDetailsUnattributed: '{pct} of the tokens in this range carry no project path and are left out of the table.',
         mon: 'Mon',
         tue: 'Tue',
         wed: 'Wed',
@@ -8038,10 +8134,8 @@
         usageReportTokens: 'Tokens',
         usageReportCost: 'Cost',
         usageReportActiveTime: 'Active time',
-        usageReportEst: 'est.',
         usageReportDays: 'Active days',
         usageReportDaysTitle: 'Days',
-        usageReportActiveSub: '{agent} of agent time in parallel',
         usageReportVsPriorDay: 'vs the previous day',
         usageReportVsPrior: 'vs the prior {n} days',
         usageReportNoDelta: 'no prior window to compare yet',
@@ -8057,6 +8151,7 @@
         usageReportSessionsActive: '{sessions} sessions · {hours} active',
         usageReportFacetCovers: 'Analytics facets cover {pct} of the period total - a different scan of the same window.',
         usageReportMissingProjects: 'project records unavailable on this server',
+        usageReportUnattributed: '{pct} of the period has no project attribution',
         usageReportWhen: 'When you work',
         usageReportWhenTz: 'Local time · {tz}',
         usageReportPeakHour: 'Peak hour',
@@ -8064,15 +8159,8 @@
         usageReportNightNote: 'share of tokens, {window}',
         usageReportPeakDay: 'Peak day',
         usageReportByAgent: 'By agent',
-        usageReportColAgent: 'Agent',
-        usageReportColSessions: 'Sessions',
-        usageReportColTokens: 'Tokens',
-        usageReportColIn: 'In',
-        usageReportColOut: 'Out',
-        usageReportColCache: 'Cache read',
-        usageReportColCost: 'Cost',
-        usageReportColCostQual: 'API list price',
-        usageReportColActive: 'Active',
+        usageReportByProject: 'By project',
+        usageReportByModel: 'By model',
         usageReportFooterSrc: 'data: tokdash on {machine} · {n} tool sources · v{version}',
         usageReportShareTitle: 'Share',
         usageReportSharePreamble: 'Two cards, two privacy tiers. The preview is the export: same layout, same painted pixels.',
@@ -8441,6 +8529,9 @@
         appsModelsBreakdown: '应用与模型明细',
         combinedModels: '合并模型',
         combinedModelsDesc: '跨所有应用和服务商的统一视图。同名模型会自动合并，无论其来源。',
+        projectDetails: '项目详情',
+        projectDetailsDesc: '按会话所在项目归类的用量。没有记录项目路径的使用会归入表格下方的未归属一行。',
+        share: '占比',
         codexSessions: 'Codex 会话',
         claudeSessions: 'Claude Code 会话',
         opencodeSessions: 'OpenCode 会话',
@@ -8762,6 +8853,7 @@
         avgCacheHitRate: '平均缓存命中率',
         cacheHitRate: '缓存命中率',
         hitPct: '命中率',
+        active: '活跃时长',
         hit: '命中',
         na: '无',
         cacheHitRateHint: '提示词输入中来自缓存的比例（缓存读取 ÷ 全部提示词输入）。缓存写入计为未命中；不含输出。无缓存数据的来源显示“无”。',
@@ -8784,6 +8876,8 @@
         sparklineRecordedAt: '记录于 {date}。',
         nModels: '{n} 个模型',
         showingTopN: '显示前 {top} 个，共 {total} 个模型',
+        nProjects: '{n} 个项目',
+        projectDetailsUnattributed: '本区间 {pct} 的 token 没有项目路径，未列入下表。',
         mon: '周一',
         tue: '周二',
         wed: '周三',
@@ -8831,10 +8925,8 @@
         usageReportTokens: 'Token',
         usageReportCost: '费用',
         usageReportActiveTime: '活跃时长',
-        usageReportEst: '估算',
         usageReportDays: '活跃天数',
         usageReportDaysTitle: '每日',
-        usageReportActiveSub: '并行 agent 时间合计 {agent}',
         usageReportVsPriorDay: '较前一天',
         usageReportVsPrior: '较之前 {n} 天',
         usageReportNoDelta: '暂无可对比的前期区间',
@@ -8850,6 +8942,7 @@
         usageReportSessionsActive: '{sessions} 个会话 · 活跃 {hours}',
         usageReportFacetCovers: '分析分面覆盖本期总量的 {pct} —— 与总量来自同一窗口的另一次扫描。',
         usageReportMissingProjects: '该服务器无项目归属记录',
+        usageReportUnattributed: '本期 {pct} 的用量没有项目归属',
         usageReportWhen: '你的时间分布',
         usageReportWhenTz: '当地时间 · {tz}',
         usageReportPeakHour: '高峰时段',
@@ -8857,15 +8950,8 @@
         usageReportNightNote: '{window} 的 token 占比',
         usageReportPeakDay: '高峰日',
         usageReportByAgent: '按 agent',
-        usageReportColAgent: '工具',
-        usageReportColSessions: '会话',
-        usageReportColTokens: 'Token',
-        usageReportColIn: '输入',
-        usageReportColOut: '输出',
-        usageReportColCache: '缓存读取',
-        usageReportColCost: '费用',
-        usageReportColCostQual: '目录价',
-        usageReportColActive: '活跃时长',
+        usageReportByProject: '按项目',
+        usageReportByModel: '按模型',
         usageReportFooterSrc: '数据来源：{machine}上的 tokdash · {n} 个工具来源 · v{version}',
         usageReportShareTitle: '分享',
         usageReportSharePreamble: '两张卡片，两种隐私级别。预览即导出：同一套排版，同一批像素。',
@@ -9235,6 +9321,9 @@
         appsModelsBreakdown: 'アプリとモデルの内訳',
         combinedModels: 'モデル統合',
         combinedModelsDesc: 'すべてのアプリとプロバイダーにわたる統合ビュー。同名のモデルは出典を問わず集計されます。',
+        projectDetails: 'プロジェクト詳細',
+        projectDetailsDesc: '各セッションが実行されたプロジェクトに割り当てた使用量です。プロジェクトパスが記録されていない行は表の下の未分類にまとまります。',
+        share: '割合',
         codexSessions: 'Codex セッション',
         claudeSessions: 'Claude Code セッション',
         opencodeSessions: 'OpenCode セッション',
@@ -9556,6 +9645,7 @@
         avgCacheHitRate: '平均キャッシュヒット率',
         cacheHitRate: 'キャッシュヒット率',
         hitPct: 'ヒット率',
+        active: 'アクティブ時間',
         hit: 'ヒット',
         na: 'N/A',
         cacheHitRateHint: 'プロンプト入力のうちキャッシュから供給された割合（キャッシュ読み取り ÷ プロンプト入力全体）。キャッシュ書き込みはミスにカウントされます。出力は除外します。キャッシュデータのないソースは N/A と表示されます。',
@@ -9578,6 +9668,8 @@
         sparklineRecordedAt: '{date} に記録。',
         nModels: '{n} 件のモデル',
         showingTopN: '{total} 件のうち上位 {top} 件を表示中',
+        nProjects: '{n} 件のプロジェクト',
+        projectDetailsUnattributed: 'この範囲のトークンの {pct} にはプロジェクトパスがないため、表に含まれていません。',
         mon: '月',
         tue: '火',
         wed: '水',
@@ -9625,10 +9717,8 @@
         usageReportTokens: 'トークン',
         usageReportCost: 'コスト',
         usageReportActiveTime: 'アクティブ時間',
-        usageReportEst: '推定',
         usageReportDays: '稼働日',
         usageReportDaysTitle: '日別',
-        usageReportActiveSub: '並列エージェント時間の合計 {agent}',
         usageReportVsPriorDay: '前日比',
         usageReportVsPrior: '前 {n} 日間比',
         usageReportNoDelta: '比較できる前期がありません',
@@ -9644,6 +9734,7 @@
         usageReportSessionsActive: '{sessions} セッション · 稼働 {hours}',
         usageReportFacetCovers: '分析ファセットは期間合計の {pct} をカバーします - 同じ期間を別系統で集計した値です。',
         usageReportMissingProjects: 'このサーバーではプロジェクト記録を利用できません',
+        usageReportUnattributed: '期間中の {pct} にはプロジェクトの割り当てがありません',
         usageReportWhen: '作業時間帯',
         usageReportWhenTz: 'ローカル時刻 · {tz}',
         usageReportPeakHour: 'ピーク時間帯',
@@ -9651,15 +9742,8 @@
         usageReportNightNote: 'トークンシェア、{window}',
         usageReportPeakDay: 'ピーク曜日',
         usageReportByAgent: 'エージェント別',
-        usageReportColAgent: 'エージェント',
-        usageReportColSessions: 'セッション',
-        usageReportColTokens: 'トークン',
-        usageReportColIn: '入力',
-        usageReportColOut: '出力',
-        usageReportColCache: 'キャッシュ読み出し',
-        usageReportColCost: 'コスト',
-        usageReportColCostQual: 'API 公称価格',
-        usageReportColActive: '稼働時間',
+        usageReportByProject: 'プロジェクト別',
+        usageReportByModel: 'モデル別',
         usageReportFooterSrc: 'データ出所: {machine}の tokdash · {n} 個のツールソース · v{version}',
         usageReportShareTitle: '共有',
         usageReportSharePreamble: '2 種のカード、2 段階の公開範囲。プレビューがそのまま書き出しです。同じレイアウト、同じ描画結果です。',
@@ -10029,6 +10113,9 @@
         appsModelsBreakdown: '앱 및 모델 내역',
         combinedModels: '통합 모델',
         combinedModelsDesc: '모든 앱과 제공자에 걸친 통합 뷰. 같은 이름의 모델은 출처와 관계없이 집계됩니다.',
+        projectDetails: '프로젝트 상세',
+        projectDetailsDesc: '각 세션이 실행된 프로젝트에 할당된 사용량입니다. 프로젝트 경로가 기록되지 않은 행은 표 아래 미분류 항목에 포함됩니다.',
+        share: '비중',
         codexSessions: 'Codex 세션',
         claudeSessions: 'Claude Code 세션',
         opencodeSessions: 'OpenCode 세션',
@@ -10350,6 +10437,7 @@
         avgCacheHitRate: '평균 캐시 적중률',
         cacheHitRate: '캐시 적중률',
         hitPct: '적중률',
+        active: '활성 시간',
         hit: '적중',
         na: 'N/A',
         cacheHitRateHint: '프롬프트 입력 중 캐시로 처리된 비율 (캐시 읽기 ÷ 프롬프트 입력 전체). 캐시 쓰기는 미스로 계산되고, 출력은 제외됩니다. 캐시 데이터가 없는 소스는 N/A로 표시됩니다.',
@@ -10372,6 +10460,8 @@
         sparklineRecordedAt: '{date} 기록됨.',
         nModels: '{n}개 모델',
         showingTopN: '{total}개 중 상위 {top}개 표시',
+        nProjects: '{n}개 프로젝트',
+        projectDetailsUnattributed: '이 범위의 토큰 중 {pct}는 프로젝트 경로가 없어 표에 포함되지 않았습니다.',
         mon: '월',
         tue: '화',
         wed: '수',
@@ -10419,10 +10509,8 @@
         usageReportTokens: '토큰',
         usageReportCost: '비용',
         usageReportActiveTime: '활성 시간',
-        usageReportEst: '추정',
         usageReportDays: '활동일',
         usageReportDaysTitle: '일자별',
-        usageReportActiveSub: '병렬 에이전트 시간 합계 {agent}',
         usageReportVsPriorDay: '전일 대비',
         usageReportVsPrior: '이전 {n}일 대비',
         usageReportNoDelta: '비교할 이전 기간이 없습니다',
@@ -10438,6 +10526,7 @@
         usageReportSessionsActive: '세션 {sessions}회 · 활동 {hours}',
         usageReportFacetCovers: '분석 데이터가 기간 합계의 {pct}를 포함합니다 - 같은 기간을 다른 방식으로 집계한 값입니다.',
         usageReportMissingProjects: '이 서버에서는 프로젝트 기록을 사용할 수 없습니다',
+        usageReportUnattributed: '이 기간 사용량의 {pct}는 프로젝트 할당이 없습니다',
         usageReportWhen: '작업 시간대',
         usageReportWhenTz: '로컬 시간 · {tz}',
         usageReportPeakHour: '최고 시간대',
@@ -10445,15 +10534,8 @@
         usageReportNightNote: '토큰 비중, {window}',
         usageReportPeakDay: '최고 요일',
         usageReportByAgent: '에이전트별',
-        usageReportColAgent: '에이전트',
-        usageReportColSessions: '세션',
-        usageReportColTokens: '토큰',
-        usageReportColIn: '입력',
-        usageReportColOut: '출력',
-        usageReportColCache: '캐시 읽기',
-        usageReportColCost: '비용',
-        usageReportColCostQual: 'API 정가',
-        usageReportColActive: '활동',
+        usageReportByProject: '프로젝트별',
+        usageReportByModel: '모델별',
         usageReportFooterSrc: '데이터: {machine}의 tokdash · 툴 소스 {n}개 · v{version}',
         usageReportShareTitle: '공유',
         usageReportSharePreamble: '두 장의 카드, 두 단계의 공개 범위. 미리보기가 그대로 내보내기 결과입니다. 같은 배치, 같은 그려진 픽셀입니다.',
@@ -10823,6 +10905,9 @@
         appsModelsBreakdown: 'Desglose de apps y modelos',
         combinedModels: 'Modelos combinados',
         combinedModelsDesc: 'Vista unificada de todas las apps y proveedores. Los modelos con el mismo nombre se agregan sin importar su origen.',
+        projectDetails: 'Detalles de proyectos',
+        projectDetailsDesc: 'Uso atribuido al proyecto en el que se ejecutó cada sesión. Las filas sin ruta de proyecto registrada van a la línea de no atribuidos bajo la tabla.',
+        share: 'Cuota',
         codexSessions: 'Sesiones de Codex',
         claudeSessions: 'Sesiones de Claude Code',
         opencodeSessions: 'Sesiones de OpenCode',
@@ -11144,6 +11229,7 @@
         avgCacheHitRate: 'Tasa media de acierto de caché',
         cacheHitRate: 'Tasa de acierto de caché',
         hitPct: 'Acierto %',
+        active: 'Activo',
         hit: 'acierto',
         na: 'n/d',
         cacheHitRateHint: 'Proporción de la entrada del prompt servida desde la caché (lecturas de caché ÷ toda la entrada del prompt). Las escrituras de caché cuentan como fallas; la salida queda excluida. Los orígenes sin datos de caché muestran n/d.',
@@ -11166,6 +11252,8 @@
         sparklineRecordedAt: 'Registrado el {date}.',
         nModels: '{n} modelos',
         showingTopN: 'Mostrando los {top} primeros de {total} modelos',
+        nProjects: '{n} proyectos',
+        projectDetailsUnattributed: 'El {pct} de los tokens de este rango no tiene ruta de proyecto y queda fuera de la tabla.',
         mon: 'lun',
         tue: 'mar',
         wed: 'mié',
@@ -11213,10 +11301,8 @@
         usageReportTokens: 'Tokens',
         usageReportCost: 'Coste',
         usageReportActiveTime: 'Tiempo activo',
-        usageReportEst: 'est.',
         usageReportDays: 'Días activos',
         usageReportDaysTitle: 'Días',
-        usageReportActiveSub: '{agent} de tiempo de agente en paralelo',
         usageReportVsPriorDay: 'frente al día anterior',
         usageReportVsPrior: 'frente a los {n} días anteriores',
         usageReportNoDelta: 'sin periodo anterior que comparar',
@@ -11232,6 +11318,7 @@
         usageReportSessionsActive: '{sessions} sesiones · tiempo activo: {hours}',
         usageReportFacetCovers: 'Las facetas de análisis cubren {pct} del total del periodo: un escaneo distinto de la misma ventana.',
         usageReportMissingProjects: 'sin registros de proyecto en este servidor',
+        usageReportUnattributed: 'el {pct} del periodo no tiene atribución de proyecto',
         usageReportWhen: 'Cuándo trabajas',
         usageReportWhenTz: 'Hora local · {tz}',
         usageReportPeakHour: 'Hora punta',
@@ -11239,15 +11326,8 @@
         usageReportNightNote: 'proporción de tokens, {window}',
         usageReportPeakDay: 'Día punta',
         usageReportByAgent: 'Por agente',
-        usageReportColAgent: 'Agente',
-        usageReportColSessions: 'Sesiones',
-        usageReportColTokens: 'Tokens',
-        usageReportColIn: 'Entrada',
-        usageReportColOut: 'Salida',
-        usageReportColCache: 'Caché leída',
-        usageReportColCost: 'Coste',
-        usageReportColCostQual: 'Precio de lista API',
-        usageReportColActive: 'Activo',
+        usageReportByProject: 'Por proyecto',
+        usageReportByModel: 'Por modelo',
         usageReportFooterSrc: 'datos: tokdash en {machine} · {n} fuentes de herramientas · v{version}',
         usageReportShareTitle: 'Compartir',
         usageReportSharePreamble: 'Dos tarjetas, dos niveles de privacidad. La vista previa es la exportación: mismo diseño, mismos píxeles pintados.',
@@ -11617,6 +11697,9 @@
         appsModelsBreakdown: 'Detalhamento de apps e modelos',
         combinedModels: 'Modelos combinados',
         combinedModelsDesc: 'Visão unificada de todos os apps e provedores. Modelos com o mesmo nome são agregados independentemente da origem.',
+        projectDetails: 'Detalhes dos projetos',
+        projectDetailsDesc: 'Uso atribuído ao projeto em que cada sessão foi executada. Linhas sem caminho de projeto registrado ficam na linha de não atribuído abaixo da tabela.',
+        share: 'Fatia',
         codexSessions: 'Sessões do Codex',
         claudeSessions: 'Sessões do Claude Code',
         opencodeSessions: 'Sessões do OpenCode',
@@ -11938,6 +12021,7 @@
         avgCacheHitRate: 'Taxa média de acerto de cache',
         cacheHitRate: 'Taxa de acerto de cache',
         hitPct: 'Acerto %',
+        active: 'Ativo',
         hit: 'acerto',
         na: 'n/d',
         cacheHitRateHint: 'Proporção da entrada do prompt atendida pelo cache (leituras de cache ÷ toda a entrada do prompt). Escritas de cache contam como falhas; a saída fica excluída. Origens sem dados de cache mostram n/d.',
@@ -11960,6 +12044,8 @@
         sparklineRecordedAt: 'Registrado em {date}.',
         nModels: '{n} modelos',
         showingTopN: 'Mostrando os {top} primeiros de {total} modelos',
+        nProjects: '{n} projetos',
+        projectDetailsUnattributed: '{pct} dos tokens neste intervalo não têm caminho de projeto e ficam fora da tabela.',
         mon: 'seg',
         tue: 'ter',
         wed: 'qua',
@@ -12007,10 +12093,8 @@
         usageReportTokens: 'Tokens',
         usageReportCost: 'Custo',
         usageReportActiveTime: 'Tempo ativo',
-        usageReportEst: 'est.',
         usageReportDays: 'Dias ativos',
         usageReportDaysTitle: 'Dias',
-        usageReportActiveSub: '{agent} de tempo de agente em paralelo',
         usageReportVsPriorDay: 'em relação ao dia anterior',
         usageReportVsPrior: 'em relação aos {n} dias anteriores',
         usageReportNoDelta: 'sem período anterior para comparar',
@@ -12026,6 +12110,7 @@
         usageReportSessionsActive: '{sessions} sessões · tempo ativo: {hours}',
         usageReportFacetCovers: 'Os dados da análise cobrem {pct} do total do período: outra leitura da mesma janela.',
         usageReportMissingProjects: 'sem registros de projeto neste servidor',
+        usageReportUnattributed: '{pct} do período não tem atribuição de projeto',
         usageReportWhen: 'Quando você trabalha',
         usageReportWhenTz: 'Hora local · {tz}',
         usageReportPeakHour: 'Hora de pico',
@@ -12033,15 +12118,8 @@
         usageReportNightNote: 'parcela dos tokens, {window}',
         usageReportPeakDay: 'Dia de pico',
         usageReportByAgent: 'Por agente',
-        usageReportColAgent: 'Agente',
-        usageReportColSessions: 'Sessões',
-        usageReportColTokens: 'Tokens',
-        usageReportColIn: 'Entrada',
-        usageReportColOut: 'Saída',
-        usageReportColCache: 'Cache lida',
-        usageReportColCost: 'Custo',
-        usageReportColCostQual: 'Preço de lista da API',
-        usageReportColActive: 'Ativo',
+        usageReportByProject: 'Por projeto',
+        usageReportByModel: 'Por modelo',
         usageReportFooterSrc: 'dados: tokdash · {machine} · {n} fontes de ferramentas · v{version}',
         usageReportShareTitle: 'Compartilhar',
         usageReportSharePreamble: 'Dois cartões, dois níveis de privacidade. A prévia é a exportação: mesmo layout, mesmos pixels pintados.',
@@ -14065,7 +14143,7 @@
       // breakdown tables (their headers carry data-i18n, unlike the regenerated
       // Apps & Models sub-tables).
       if (typeof breakdownSortState !== 'undefined') {
-        [['toolsTable', 'tools'], ['allModelsTable', 'combined']].forEach(([id, key]) => {
+        [['toolsTable', 'tools'], ['allModelsTable', 'combined'], ['projectDetailsTable', 'projects']].forEach(([id, key]) => {
           const tbl = document.getElementById(id)?.closest('table');
           if (tbl) renderBreakdownSortArrows(tbl, breakdownSortState[key]);
         });
@@ -14919,6 +14997,7 @@
       if (info) info.textContent = '';
       const toggle = document.getElementById('combinedModelsToggle');
       if (toggle) toggle.style.display = 'none';
+      clearOverviewFacets();
       overviewBreakdownWindowKey = null;
       // Callbacks queued by the render being cleared are now stale too. Nothing has
       // rendered for the incoming range yet, so this is the only thing that can
@@ -16027,6 +16106,15 @@
         updateCombinedModelsTable(lastCombinedModels);
         overviewBreakdownWindowKey = paintedWindowKey;
       });
+      // Project Details has its own source rather than this payload, so it is
+      // repainted here for the same reason the two breakdowns are: a language
+      // switch reruns this function, and its labels are built in JS.
+      scheduleIdle(() => {
+        if (breakdownToken !== overviewRenderToken) return;
+        if (overviewFacetsState.status === 'ready' || overviewFacetsState.status === 'error') {
+          updateProjectDetailsTable();
+        }
+      });
       if (Array.isArray(statsCache.default)) {
         statsCache.default = reconcileTodayProfileContribution(
           statsCache.default,
@@ -16134,11 +16222,11 @@
       // the report even when the user previously dismissed it for this range.
       if (forceRefresh) refreshReportDismissedWindowKey = null;
 
-      // The date picker moved its label before this ran, so whatever is on screen now
-      // sits under a heading that does not name it. Drop the deferred breakdowns and
-      // mark the rest as pending. A same-range refresh is excluded: its content is
-      // still the right range's, and the refresh button reports that load itself.
-      if (windowKey !== overviewBreakdownWindowKey) {
+      // A date or server selection change invalidates the deferred breakdowns
+      // before /api/usage starts, including any facet response still in flight.
+      // An unchanged selection keeps its content while the refresh runs.
+      if (windowKey !== overviewBreakdownWindowKey
+          || (lastUsageServerKey !== null && lastUsageServerKey !== usageServerKeyFor())) {
         clearOverviewBreakdowns();
         if (lastUsageResponse) setOverviewState({ pending: true });
       }
@@ -16371,6 +16459,7 @@
           scheduleStatsWarm(forceRefresh);
           loadActivityInsights({ force: forceRefresh }).catch(() => {});
           loadOverviewActiveTime(customDays, dateFrom, dateTo, { force: forceRefresh }).catch(() => {});
+          loadOverviewFacets(customDays, dateFrom, dateTo, { force: forceRefresh }).catch(() => {});
         }
       }
     }
@@ -16520,6 +16609,10 @@
       let prevActiveMs = 0;
       let prevAgentMs = 0;
       let comparable = false;
+      // Per-tool rows are additive too -- agent time is a sum, not a clock -- so
+      // the tools table can rank a tool by the sessions and runtime it recorded
+      // on every selected server rather than on whichever answered last.
+      const byTool = {};
       payloads.forEach((payload) => {
         if (!payload) return;
         combined.active_ms += Number(payload.active_ms) || 0;
@@ -16527,6 +16620,15 @@
         combined.active_gap_cap_ms = Math.max(combined.active_gap_cap_ms, Number(payload.active_gap_cap_ms) || 0);
         (payload.unavailable_tools || []).forEach((tool) => {
           if (!combined.unavailable_tools.includes(tool)) combined.unavailable_tools.push(tool);
+        });
+        Object.entries(payload.by_tool || {}).forEach(([tool, row]) => {
+          const bucket = byTool[tool] || (byTool[tool] = {
+            tool_label: row && row.tool_label,
+            session_count: 0,
+            active_ms_sum: 0,
+          });
+          bucket.session_count += Number(row && row.session_count) || 0;
+          bucket.active_ms_sum += Number(row && row.active_ms_sum) || 0;
         });
         // The percentages cannot be averaged — add the previous windows up the
         // same way and take the change of the totals.
@@ -16536,6 +16638,7 @@
           prevAgentMs += Number(payload.comparison.active_ms_sum_prev) || 0;
         }
       });
+      combined.by_tool = byTool;
       combined.comparison = comparable
         ? {
             active_ms_prev: prevActiveMs,
@@ -16646,6 +16749,9 @@
         overviewActiveTimeState.status = overviewActiveTimeState.data ? 'ready' : 'error';
       }
       renderOverviewActiveTime();
+      // Per-tool sessions and runtime live in the tools table, so they arrive here
+      // twice over: once for the card, once for the column that reads them.
+      paintToolsTableIfLoaded();
       if (typeof renderOverviewSparklines === 'function') renderOverviewSparklines();
     }
 
@@ -18519,8 +18625,10 @@
       tools: { field: 'tokens', direction: 'desc' },
       apps: { field: 'cost', direction: 'desc' },
       combined: { field: 'cost', direction: 'desc' },
+      projects: { field: 'tokens', direction: 'desc' },
     };
-    const BREAKDOWN_NUMERIC_FIELDS = new Set(['tokens_in', 'tokens_out', 'tokens_cache', 'tokens', 'cost', 'messages', 'cache_hit_rate']);
+    const BREAKDOWN_NUMERIC_FIELDS = new Set(['tokens_in', 'tokens_out', 'tokens_cache', 'tokens', 'cost', 'messages', 'cache_hit_rate', 'share', 'sessions', 'activeMs']);
+    const OVERVIEW_TABLE_DASH = '\u2014';
 
     function getBreakdownComparator(field, direction) {
       const dir = direction === 'asc' ? 1 : -1;
@@ -18579,18 +18687,27 @@
       const table = tbody.closest('table');
       if (table) setupBreakdownSort(table, 'tools', () => updateToolsTable(lastByTool));
 
+      // Sessions and runtime come from /api/active-time, messages from the tools
+      // facet. Both land after /api/usage does, so the table is painted twice: an
+      // absent figure is an em dash, which is a different fact from a zero.
+      const activity = overviewActiveTimeState.data?.by_tool || {};
+      const messageCounts = overviewFacetsState.toolMessages;
       const rows = Object.entries(byTool || {})
         .filter(([, data]) => Number(data?.tokens || 0) > 0)
         .map(([tool, data]) => ({
           tool,
           tokens: Number(data.tokens || 0),
           cache_hit_rate: data.cache_hit_rate,
+          sessions: activity[tool] ? Number(activity[tool].session_count) || 0 : null,
+          activeMs: activity[tool] ? Number(activity[tool].active_ms_sum) || 0 : null,
           cost: Number(data.cost || 0),
+          messages: messageCounts && messageCounts[tool] !== undefined
+            ? Number(messageCounts[tool]) || 0 : null,
         }));
 
       if (rows.length === 0) {
         const row = document.createElement('tr');
-        row.innerHTML = `<td colspan="4" class="text-center py-10" style="color: var(--color-muted);">${t('noData')}</td>`;
+        row.innerHTML = `<td colspan="7" class="text-center py-10" style="color: var(--color-muted);">${t('noData')}</td>`;
         tbody.replaceChildren(row);
         return;
       }
@@ -18608,9 +18725,12 @@
         toolCell.appendChild(createToolIdentity(row.tool));
         tr.appendChild(toolCell);
         tr.insertAdjacentHTML('beforeend', `
-          <td class="py-3 px-4 text-right text-slate-700">${formatTokenCount(row.tokens)}</td>
+          <td class="py-3 px-4 text-right font-semibold text-slate-800">${formatTokenCount(row.tokens)}</td>
           <td class="py-3 px-4 text-right text-slate-700">${formatHitRate(row.cache_hit_rate)}</td>
+          <td class="py-3 px-4 text-right text-slate-700">${row.sessions === null ? OVERVIEW_TABLE_DASH : formatNumber(row.sessions)}</td>
+          <td class="py-3 px-4 text-right text-slate-700">${row.activeMs === null ? OVERVIEW_TABLE_DASH : formatDurationUnits(row.activeMs)}</td>
           <td class="py-3 px-4 text-right font-bold" style="color:var(--color-cost)">${formatCurrency(row.cost)}</td>
+          <td class="py-3 px-4 text-right text-slate-500">${row.messages === null ? OVERVIEW_TABLE_DASH : formatNumber(row.messages)}</td>
         `);
         frag.appendChild(tr);
       });
@@ -18803,6 +18923,237 @@
       });
 
       tbody.replaceChildren(frag);
+    }
+
+    // Project Details. One row per project the facet attributed usage to, plus a
+    // line for the usage that found no project path at all -- without it the table
+    // reads as the whole range while quietly summing to less than the cards above.
+    function combineOverviewFacets(payloads) {
+      const projects = new Map();
+      const toolMessages = {};
+      let unattributedTokens = 0;
+      let facetTotal = 0;
+      let projectsServed = false;
+      let toolsServed = false;
+      (payloads || []).forEach((payload) => {
+        const block = payload && payload.projects;
+        if (block && Array.isArray(block.projects)) {
+          projectsServed = true;
+          facetTotal += Number(payload.totals && payload.totals.tokens) || 0;
+          unattributedTokens += Number(block.unattributed && block.unattributed.tokens) || 0;
+          block.projects.forEach((row) => {
+            const name = String(row && row.project != null ? row.project : '');
+            if (!name) return;
+            const bucket = projects.get(name) || { project: name, tokens: 0, messages: 0, cost: 0 };
+            bucket.tokens += Number(row.tokens) || 0;
+            bucket.messages += Number(row.messages) || 0;
+            bucket.cost += Number(row.cost) || 0;
+            projects.set(name, bucket);
+          });
+        }
+        const tools = payload && payload.tools;
+        if (tools && Array.isArray(tools.ranked)) {
+          toolsServed = true;
+          tools.ranked.forEach((row) => {
+            const name = String(row && row.tool != null ? row.tool : '');
+            if (!name) return;
+            toolMessages[name] = (toolMessages[name] || 0) + (Number(row.messages) || 0);
+          });
+        }
+      });
+      // Two facets, and an older server may serve one and not the other. Nothing
+      // answered at all is the only case with no table to paint.
+      if (!projectsServed && !toolsServed) return null;
+      let rows = null;
+      if (projectsServed) {
+        rows = [...projects.values()].filter((row) => row.tokens > 0);
+        rows.forEach((row) => { row.share = facetTotal > 0 ? row.tokens / facetTotal : null; });
+      }
+      return {
+        rows,
+        toolMessages: toolsServed ? toolMessages : null,
+        unattributedTokens,
+        facetTotal,
+      };
+    }
+
+    function projectDetailsLoadingRow() {
+      const row = document.createElement('tr');
+      const cell = document.createElement('td');
+      cell.colSpan = 5;
+      cell.className = 'tokdash-loading-placeholder text-center py-10';
+      cell.style.color = 'var(--color-muted)';
+      const label = document.createElement('span');
+      label.className = 'tokdash-loading-label';
+      label.textContent = t('loading');
+      cell.append(label);
+      row.append(cell);
+      return row;
+    }
+
+    function updateProjectDetailsTable() {
+      const tbody = document.getElementById('projectDetailsTable');
+      if (!tbody) return;
+
+      const table = tbody.closest('table');
+      if (table) setupBreakdownSort(table, 'projects', updateProjectDetailsTable);
+
+      const infoEl = document.getElementById('projectDetailsInfo');
+      const toggleBtn = document.getElementById('projectDetailsToggle');
+      const noteEl = document.getElementById('projectDetailsNote');
+
+      if (overviewFacetsState.status === 'loading') {
+        tbody.replaceChildren(projectDetailsLoadingRow());
+        if (infoEl) infoEl.textContent = '';
+        if (toggleBtn) toggleBtn.style.display = 'none';
+        if (noteEl) noteEl.textContent = '';
+        return;
+      }
+
+      if (overviewFacetsState.status === 'error') {
+        tbody.replaceChildren(createErrorRow(5, ''));
+        if (infoEl) infoEl.textContent = '';
+        if (toggleBtn) toggleBtn.style.display = 'none';
+        if (noteEl) noteEl.textContent = '';
+        return;
+      }
+
+      const rows = [...overviewFacetsState.rows];
+      const st = breakdownSortState.projects;
+      rows.sort(getBreakdownComparator(st.field, st.direction));
+
+      const shouldCap = rows.length > MAX_PROJECT_DETAIL_ROWS;
+      const showAll = projectDetailsShowAll || !shouldCap;
+      const shown = showAll ? rows : rows.slice(0, MAX_PROJECT_DETAIL_ROWS);
+
+      if (infoEl) {
+        if (!rows.length) infoEl.textContent = '';
+        else if (showAll) infoEl.textContent = t('nProjects').replace('{n}', formatNumber(rows.length));
+        else infoEl.textContent = t('showingTopN')
+          .replace('{top}', formatNumber(MAX_PROJECT_DETAIL_ROWS))
+          .replace('{total}', formatNumber(rows.length));
+      }
+
+      if (toggleBtn) {
+        if (!shouldCap) {
+          toggleBtn.style.display = 'none';
+        } else {
+          toggleBtn.style.display = '';
+          toggleBtn.textContent = showAll ? t('showTop') : t('showAll');
+        }
+      }
+
+      const facetTotal = overviewFacetsState.facetTotal;
+      if (noteEl) {
+        const unattr = facetTotal > 0
+          ? Number(overviewFacetsState.unattributedTokens || 0) / facetTotal
+          : 0;
+        noteEl.textContent = unattr > 0.005
+          ? t('projectDetailsUnattributed').replace('{pct}', formatPercent(unattr))
+          : '';
+      }
+
+      if (!shown.length) {
+        tbody.replaceChildren(createNoDataRow(5));
+        return;
+      }
+
+      const fragment = document.createDocumentFragment();
+      shown.forEach((row) => {
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-slate-50 transition';
+        const name = document.createElement('td');
+        name.className = 'py-2 px-3 mono text-slate-800';
+        name.textContent = row.project;
+        name.title = row.project;
+        tr.append(name);
+        [
+          [formatTokenCount(row.tokens), 'py-2 px-3 text-right font-semibold text-slate-800'],
+          [row.share === null || row.share === undefined ? t('na') : formatPercent(row.share), 'py-2 px-3 text-right text-slate-700'],
+          [formatCurrency(row.cost), 'py-2 px-3 text-right font-bold'],
+          [formatNumber(row.messages || 0), 'py-2 px-3 text-right text-slate-700'],
+        ].forEach(([figure, className], index) => {
+          const cell = document.createElement('td');
+          cell.className = className;
+          if (index === 2) cell.style.color = 'var(--color-cost)';
+          cell.textContent = figure;
+          tr.append(cell);
+        });
+        fragment.append(tr);
+      });
+      tbody.replaceChildren(fragment);
+    }
+
+    function clearOverviewFacets() {
+      overviewFacetsState.requestId += 1;
+      overviewFacetsState.key = null;
+      overviewFacetsState.rows = [];
+      overviewFacetsState.toolMessages = null;
+      // Loading, not idle: the repaint hooks skip a table with nothing to say, and
+      // an idle clear would let a stale range's rows back in behind the spinner.
+      overviewFacetsState.status = 'loading';
+      overviewFacetsState.unattributedTokens = 0;
+      overviewFacetsState.facetTotal = 0;
+      const tbody = document.getElementById('projectDetailsTable');
+      if (tbody) tbody.replaceChildren(projectDetailsLoadingRow());
+      const info = document.getElementById('projectDetailsInfo');
+      if (info) info.textContent = '';
+      const note = document.getElementById('projectDetailsNote');
+      if (note) note.textContent = '';
+      const toggle = document.getElementById('projectDetailsToggle');
+      if (toggle) toggle.style.display = 'none';
+    }
+
+    async function loadOverviewFacets(customDays, dateFrom, dateTo, options = {}) {
+      const key = `${windowKeyFor(customDays, dateFrom, dateTo)}|${usageServerKeyFor()}`;
+      if (overviewFacetsState.key !== key) {
+        clearOverviewFacets();
+        paintToolsTableIfLoaded();
+      }
+      const requestId = ++overviewFacetsState.requestId;
+      const isCurrent = () => requestId === overviewFacetsState.requestId
+        && key === `${windowKeyFor(customDays, dateFrom, dateTo)}|${usageServerKeyFor()}`;
+      const params = (dateFrom && dateTo)
+        ? `date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}`
+        : `period=${encodeURIComponent(customDays ? String(customDays) : 'today')}`;
+      const refreshParam = options.force ? '&refresh=1' : '';
+      overviewFacetsState.key = key;
+      overviewFacetsState.status = 'loading';
+      updateProjectDetailsTable();
+      let merged = null;
+      try {
+        const rows = await fetchSelectedServers(`/api/insights?facets=tools,projects&${params}${refreshParam}`);
+        if (!isCurrent()) return;
+        if (!rows.length) throw new Error(t('loadFailed'));
+        merged = combineOverviewFacets(rows.map((row) => row.payload));
+        if (!merged) throw new Error('neither facet answered');
+      } catch (error) {
+        if (!isCurrent()) return;
+        console.error('Error fetching overview facets:', error);
+        overviewFacetsState.rows = [];
+        overviewFacetsState.toolMessages = null;
+        overviewFacetsState.status = 'error';
+        updateProjectDetailsTable();
+        paintToolsTableIfLoaded();
+        return;
+      }
+      overviewFacetsState.toolMessages = merged.toolMessages;
+      overviewFacetsState.rows = merged.rows || [];
+      overviewFacetsState.unattributedTokens = merged.unattributedTokens;
+      overviewFacetsState.facetTotal = merged.facetTotal;
+      // A server that served the tools facet but not the projects one still has a
+      // tools table to fill and no project table to show.
+      overviewFacetsState.status = merged.rows ? 'ready' : 'error';
+      updateProjectDetailsTable();
+      paintToolsTableIfLoaded();
+    }
+
+    // The tools table borrows two columns from requests that land after it does,
+    // so each of those responses repaints it. Guarded: an empty by_tool map is a
+    // range with no usage, and painting that before the usage response arrives
+    // would print "no data" over a table that is still loading.
+    function paintToolsTableIfLoaded() {
+      if (Object.keys(lastByTool || {}).length) updateToolsTable(lastByTool);
     }
 
     function formatEpochSeconds(value) {
@@ -23954,8 +24305,16 @@
       const hourly = (ins && ins.hourly) || null;
       const weekday = (ins && ins.weekday) || null;
       const projectsBlock = ins && ins.projects && Array.isArray(ins.projects.projects) ? ins.projects : null;
-      const projectRows = projectsBlock ? projectsBlock.projects.filter((row) => Number(row.tokens) > 0) : [];
       const facetTotal = (ins && ins.totals && Number(ins.totals.tokens)) || 0;
+      // The share travels on the row rather than being recomputed at paint time,
+      // because the column a reader clicks is the field the sort reads: a share
+      // that only existed inside the row painter was a header that ranked nothing.
+      const facetShare = (tokens) => (facetTotal > 0 ? (Number(tokens) || 0) / facetTotal : null);
+      const projectRows = projectsBlock
+        ? projectsBlock.projects
+          .filter((row) => Number(row.tokens) > 0)
+          .map((row) => ({ ...row, share: facetShare(row.tokens) }))
+        : [];
       const projectSum = projectRows.reduce((sum, row) => sum + (Number(row.tokens) || 0), 0);
       const unattributed = (projectsBlock && projectsBlock.unattributed && Number(projectsBlock.unattributed.tokens)) || 0;
       const { unattrShare, gapShare } = usageReportProjectShares(facetTotal, projectSum, unattributed);
@@ -23984,8 +24343,23 @@
           tokensCache: split && split.tokens_cache !== undefined ? Number(split.tokens_cache) || 0 : null,
           sessions: activity ? Number(activity.session_count) || 0 : null,
           activeMs: activity ? Number(activity.active_ms_sum) || 0 : null,
+          // Message counts come from the same facet scan as the tokens, so the
+          // tools table on the Overview can print the same figure for them.
+          messages: row.messages === null || row.messages === undefined
+            ? null : Number(row.messages) || 0,
         };
       });
+      // The model facet serves tokens, cost and messages and nothing else, so
+      // those are the columns the by-model table prints. A model gets no token
+      // split borrowed from a different scan -- the facet names the models it
+      // ranked, and only it does.
+      const modelRows = (models || []).filter((row) => Number(row.tokens) > 0).map((row) => ({
+        model: row.model,
+        tokens: Number(row.tokens) || 0,
+        messages: Number(row.messages) || 0,
+        cost: Number(row.cost) || 0,
+        share: facetShare(row.tokens),
+      }));
       // The table prints every tool the facet ranked, in that order. A tool with no
       // recorded session has no runtime to print and shows em dashes in those two
       // columns; it still gets its row rather than a folded tail.
@@ -24018,6 +24392,7 @@
         facetTotal,
         unattrShare, gapShare,
         agentRows,
+        modelRows,
         elapsedWeekdays,
         atByTool: byTool,
         coverage: (ins && ins.coverage) || null,
@@ -24159,11 +24534,14 @@
       ['usageReportKTokens', 'usageReportKCost', 'usageReportKMessages', 'usageReportKSessions', 'usageReportKActive', 'usageReportKDays'].forEach((id) => {
         renderLoadingPlaceholder(document.getElementById(id));
       });
-      ['usageReportKTokensSub', 'usageReportKActiveSub', 'usageReportKDaysSub',
+      ['usageReportKTokensSub', 'usageReportKDaysSub',
         'usageReportHeat', 'usageReportStreak', 'usageReportLegend',
         'usageReportRange', 'usageReportProgress',
         'usageReportPodium', 'usageReportGroupNote', 'usageReportWhen', 'usageReportTz',
-        'usageReportAgentsBody', 'usageReportAgentsNote', 'usageReportFooter'].forEach((id) => usageReportText(document.getElementById(id), ''));
+        'usageReportAgentsBody', 'usageReportAgentsNote',
+        'usageReportModelsBody', 'usageReportModelsNote',
+        'usageReportProjectsBody', 'usageReportProjectsNote',
+        'usageReportFooter'].forEach((id) => usageReportText(document.getElementById(id), ''));
       usageReportText(document.getElementById('usageReportTitle'), t({ day: 'usageReportTitleDay', week: 'usageReportTitleWeek', month: 'usageReportTitleMonth', year: 'usageReportTitleYear' }[usageReportState.period]));
       usageReportClearShare();
     }
@@ -24261,8 +24639,9 @@
     function usageReportRenderHeroActivity(model) {
       const empty = model.isEmpty;
       usageReportText(document.getElementById('usageReportKSessions'), usageReportFigure(model.sessions, formatNumber));
-      usageReportText(document.getElementById('usageReportKActive'), empty || !model.activeMs ? '—' : formatDurationUnits(model.activeMs));
-      usageReportText(document.getElementById('usageReportKActiveSub'), empty || !model.agentMs ? '' : t('usageReportActiveSub', { agent: formatDurationUnits(model.agentMs) }));
+      // One figure, and it is the agent total: the wall-clock span beside it said
+      // "the window was open", which a reader already knows from the range line.
+      usageReportText(document.getElementById('usageReportKActive'), empty || !model.agentMs ? '—' : formatDurationUnits(model.agentMs));
       const daysEl = document.getElementById('usageReportKDays');
       daysEl.classList.remove('tokdash-loading-placeholder');
       // No streaks facet is no active-day count: "0/30" reads as a month nobody
@@ -24649,21 +25028,136 @@
       host.append(hours, side);
     }
 
+    /* The three ranking tables sort the same way: click a header to rank by that
+       column, click it again to flip the direction. A sort is a reader's choice
+       about the data rather than a fact about it, so it survives a reload --
+       nobody who came back for cost per model should be asked to say so twice.
+       Field names are the row's own properties, so a header says exactly what it
+       sorts and there is no mapping table to keep honest. */
+    const usageReportTableSort = {
+      agents: { field: 'tokens', direction: 'desc' },
+      models: { field: 'tokens', direction: 'desc' },
+      projects: { field: 'tokens', direction: 'desc' },
+    };
+    const USAGE_REPORT_NAME_FIELDS = new Set(['tool', 'model', 'project']);
+
+    function usageReportSortedRows(rows, sort) {
+      const dir = sort.direction === 'asc' ? 1 : -1;
+      const nameOf = (row) => String(row.tool ?? row.model ?? row.project ?? '');
+      return [...rows].sort((a, b) => {
+        if (USAGE_REPORT_NAME_FIELDS.has(sort.field)) {
+          return String(a[sort.field] ?? '').localeCompare(String(b[sort.field] ?? '')) * dir;
+        }
+        // An absent figure is never the smallest one. A tool with no session
+        // count belongs at the bottom of a session ranking, not at its head,
+        // which is where a plain numeric sort would put its zero.
+        const left = a[sort.field];
+        const right = b[sort.field];
+        const missingLeft = left === null || left === undefined;
+        const missingRight = right === null || right === undefined;
+        if (missingLeft && missingRight) return nameOf(a).localeCompare(nameOf(b));
+        if (missingLeft) return 1;
+        if (missingRight) return -1;
+        const delta = Number(left) - Number(right);
+        return delta !== 0 ? delta * dir : nameOf(a).localeCompare(nameOf(b));
+      });
+    }
+
+    // The arrow itself is painted by CSS off aria-sort, so the translation pass
+    // -- which rewrites each header's text node -- cannot strip the indicator.
+    function usageReportRenderTableSortHeaders() {
+      document.querySelectorAll('table[data-report-table]').forEach((table) => {
+        const sort = usageReportTableSort[table.dataset.reportTable];
+        if (!sort) return;
+        table.querySelectorAll('th[data-report-sort]').forEach((th) => {
+          th.setAttribute('aria-sort', th.dataset.reportSort === sort.field
+            ? (sort.direction === 'asc' ? 'ascending' : 'descending')
+            : 'none');
+        });
+      });
+    }
+
+    function usageReportRenderTables(model) {
+      usageReportRenderTableSortHeaders();
+      if (!model) return;
+      usageReportRenderAgents(model);
+      usageReportRenderModels(model);
+      usageReportRenderProjects(model);
+    }
+
+    function usageReportWireTableSort() {
+      document.querySelectorAll('table[data-report-table]').forEach((table) => {
+        if (table.dataset.sortInit) return;
+        table.dataset.sortInit = '1';
+        const sort = usageReportTableSort[table.dataset.reportTable];
+        if (!sort) return;
+        table.querySelectorAll('th[data-report-sort]').forEach((th) => {
+          th.addEventListener('click', () => {
+            const field = th.dataset.reportSort;
+            if (sort.field === field) {
+              sort.direction = sort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+              sort.field = field;
+              // A rank opens biggest-first; a name column opens A-to-Z.
+              sort.direction = USAGE_REPORT_NAME_FIELDS.has(field) ? 'asc' : 'desc';
+            }
+            usageReportRenderTables(usageReportState.model);
+          });
+        });
+      });
+    }
+
+    function usageReportNoticeRow(colSpan, message) {
+      const tr = document.createElement('tr');
+      const cell = document.createElement('td');
+      cell.colSpan = colSpan;
+      cell.textContent = message;
+      tr.append(cell);
+      return tr;
+    }
+
+    /* Model and project rows carry the four figures their facet actually serves.
+       The share is taken against the facet's own total, not the hero's, so the
+       column adds up against the number the rows were folded out of. */
+    function usageReportFacetRow(name, row) {
+      const tr = document.createElement('tr');
+      const nameCell = document.createElement('td');
+      const label = document.createElement('span');
+      label.className = 'usage-report-tile-name-label';
+      label.textContent = name === null || name === undefined ? USAGE_REPORT_EM : String(name);
+      label.title = label.textContent;
+      nameCell.append(label);
+      tr.append(nameCell);
+      [
+        usageReportFigure(row.tokens, formatTokenCount),
+        usageReportShare(row.share),
+        Number(row.cost) > 0 ? formatCurrency(row.cost) : USAGE_REPORT_EM,
+        usageReportFigure(row.messages, formatNumber),
+      ].forEach((figure) => {
+        const cell = document.createElement('td');
+        cell.className = 'mono';
+        cell.textContent = figure;
+        tr.append(cell);
+      });
+      return tr;
+    }
+
     function usageReportAgentRow(row) {
       const tr = document.createElement('tr');
       const name = document.createElement('td');
       name.append(createToolIdentity(row.tool));
       tr.append(name);
       [
-        usageReportFigure(row.sessions, formatNumber),
-        usageReportFigure(row.tokens, formatTokenCount),
         usageReportFigure(row.tokensIn, formatTokenCount),
         usageReportFigure(row.tokensOut, formatTokenCount),
         usageReportFigure(row.tokensCache, formatTokenCount),
+        usageReportFigure(row.tokens, formatTokenCount),
+        usageReportFigure(row.sessions, formatNumber),
+        usageReportFigure(row.activeMs, formatDurationUnits),
         // A tool nothing was priced for has no cost, which is not the same fact
         // as a free one, so an unpriced row prints a dash rather than $0.00.
         row.cost > 0 ? formatCurrency(row.cost) : USAGE_REPORT_EM,
-        usageReportFigure(row.activeMs, formatDurationUnits),
+        usageReportFigure(row.messages, formatNumber),
       ].forEach((text) => {
         const cell = document.createElement('td');
         cell.className = 'mono';
@@ -24679,26 +25173,17 @@
       if (!body) return;
 
       if (!model.tools) {
-        const tr = document.createElement('tr');
-        const cell = document.createElement('td');
-        cell.colSpan = 8;
-        cell.textContent = t('usageReportFacetsMissing', { facets: 'tools' });
-        tr.append(cell);
-        body.replaceChildren(tr);
+        body.replaceChildren(usageReportNoticeRow(9, t('usageReportFacetsMissing', { facets: 'tools' })));
         usageReportFillNote(note, []);
         return;
       }
 
       const fragment = document.createDocumentFragment();
-      model.agentRows.forEach((row) => fragment.append(usageReportAgentRow(row)));
+      usageReportSortedRows(model.agentRows, usageReportTableSort.agents)
+        .forEach((row) => fragment.append(usageReportAgentRow(row)));
 
       if (!model.agentRows.length) {
-        const tr = document.createElement('tr');
-        const cell = document.createElement('td');
-        cell.colSpan = 8;
-        cell.textContent = t('usageReportEmptyPeriod');
-        tr.append(cell);
-        fragment.append(tr);
+        fragment.append(usageReportNoticeRow(9, t('usageReportEmptyPeriod')));
       }
 
       body.replaceChildren(fragment);
@@ -24708,6 +25193,49 @@
       // for the period totals, so the line moves here instead.
       usageReportFillNote(note, usageReportShowFacetCoverage(model) && !model.projectsAvailable
         ? [{ text: t('usageReportFacetCovers', { pct: usageReportShare(model.facetTotal / model.tokens) }) }]
+        : []);
+    }
+
+    function usageReportRenderModels(model) {
+      const body = document.getElementById('usageReportModelsBody');
+      const note = document.getElementById('usageReportModelsNote');
+      if (!body) return;
+
+      if (!model.models) {
+        body.replaceChildren(usageReportNoticeRow(5, t('usageReportFacetsMissing', { facets: 'models' })));
+        usageReportFillNote(note, []);
+        return;
+      }
+
+      const rows = usageReportSortedRows(model.modelRows, usageReportTableSort.models);
+      const fragment = document.createDocumentFragment();
+      rows.forEach((row) => fragment.append(usageReportFacetRow(row.model, row)));
+      if (!rows.length) fragment.append(usageReportNoticeRow(5, t('usageReportEmptyPeriod')));
+      body.replaceChildren(fragment);
+      usageReportFillNote(note, []);
+    }
+
+    function usageReportRenderProjects(model) {
+      const body = document.getElementById('usageReportProjectsBody');
+      const note = document.getElementById('usageReportProjectsNote');
+      if (!body) return;
+
+      if (!model.projectsAvailable) {
+        body.replaceChildren(usageReportNoticeRow(5, t('usageReportFacetsMissing', { facets: 'projects' })));
+        usageReportFillNote(note, []);
+        return;
+      }
+
+      const rows = usageReportSortedRows(model.projectRows, usageReportTableSort.projects);
+      const fragment = document.createDocumentFragment();
+      rows.forEach((row) => fragment.append(usageReportFacetRow(row.project, row)));
+      if (!rows.length) fragment.append(usageReportNoticeRow(5, t('usageReportEmptyPeriod')));
+      body.replaceChildren(fragment);
+
+      // Usage that found no project is still the period's usage, and a table that
+      // sums to less than the hero above it owes the reader the difference.
+      usageReportFillNote(note, model.unattrShare
+        ? [{ text: t('usageReportUnattributed', { pct: usageReportShare(model.unattrShare) }), faint: true }]
         : []);
     }
 
@@ -25394,6 +25922,9 @@
       usageReportRenderPodium(model);
       usageReportRenderWhen(model);
       usageReportRenderAgents(model);
+      usageReportRenderModels(model);
+      usageReportRenderProjects(model);
+      usageReportRenderTableSortHeaders();
       usageReportShareHint();
       usageReportRenderFooter(model);
       // Last, and off the main paint: the cards wait for webfonts and brand icons.
@@ -25406,6 +25937,7 @@
       if (usageReportState.wired) return;
       usageReportState.wired = true;
       usageReportReadPrefs();
+      usageReportWireTableSort();
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden) usageReportResumePending();
       });
@@ -28595,6 +29127,14 @@
       combinedModelsToggle.addEventListener('click', () => {
         combinedModelsShowAll = !combinedModelsShowAll;
         updateCombinedModelsTable(lastCombinedModels);
+      });
+    }
+
+    const projectDetailsToggle = document.getElementById('projectDetailsToggle');
+    if (projectDetailsToggle) {
+      projectDetailsToggle.addEventListener('click', () => {
+        projectDetailsShowAll = !projectDetailsShowAll;
+        updateProjectDetailsTable();
       });
     }
 

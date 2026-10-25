@@ -149,6 +149,9 @@ function updateTokenCompositionBar() {}
 function updateStatsInsights() {}
 function updateAppsBreakdown() {}
 function updateCombinedModelsTable() {}
+// renderOverviewTab queues a Project Details repaint too; nothing is loaded here.
+const overviewFacetsState = { status: 'idle' };
+function updateProjectDetailsTable() {}
 function scheduleIdle(fn) { fn(); }
 
 // --- the code under test -----------------------------------------------------

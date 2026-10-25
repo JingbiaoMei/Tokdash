@@ -142,6 +142,14 @@ function scheduleStatsWarm() {}
 function loadActivityInsights() { return Promise.resolve(); }
 function loadOverviewActiveTime() { return Promise.resolve(); }
 function renderOverviewActiveTime() {}
+// Project Details is a third breakdown, but it reads its own endpoint rather than
+// this payload. Cold 'idle' status is what the real painter guards on, so the
+// deferred repaint it is hooked into here stays a no-op and these tests keep
+// measuring the two breakdowns that do ride on the usage response.
+const overviewFacetsState = { status: 'idle', rows: [], key: null, requestId: 0, facetTotal: 0, unattributedTokens: 0 };
+function loadOverviewFacets() { return Promise.resolve(); }
+function updateProjectDetailsTable() {}
+function clearOverviewFacets() { overviewFacetsState.status = 'loading'; }
 function sleep() { return Promise.resolve(); }
 function alert(message) { log.alerts.push(String(message)); }
 function t(key) { return key; }

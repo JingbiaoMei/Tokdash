@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from support.frontend import index_source, run_node
+from support.report import activate_dashboard_tab_program
 
 SRC = index_source()
 
@@ -162,33 +163,6 @@ def test_the_chart_is_one_view_with_two_layouts_and_no_second_ranking():
     assert 'id="usageReportSpeedBucket"' in chart, "the grouping lives on the chart it groups"
     assert "data-speed-sort" not in chart, "no second sortable model ranking"
     assert chart.count("<table") == 0, "the chart's data table is built from the chart, not a second view"
-
-
-def test_the_page_asks_for_speed_only_when_the_subtab_is_open():
-    """Laziness is the point: the summary report must not pay for this view.
-
-    The rule is one gate the whole view dispatches through, so it holds for the
-    report's own load, a subtab click, a tab return and a window that was hidden
-    when the request was queued. Asserted by running the loader rather than by
-    reading for a guard at each call site: the call sites are the part that
-    multiplies, and a load that forgets the gate is invisible to a string match.
-    """
-    callers = [
-        name for name in ("usageReportLoadSpeed", "usageReportEnsureTrend")
-        if "/api/output-speed" in _extract(
-            "async function usageReportLoadSpeed("
-            if name == "usageReportLoadSpeed"
-            else "function usageReportEnsureTrend("
-        )
-    ]
-    assert callers == ["usageReportLoadSpeed", "usageReportEnsureTrend"]
-    loader = _extract("async function loadUsageReport(options = {})")
-    assert len(loader) > 500, "the extractor returned a signature, not a body"
-    assert "/api/output-speed" not in loader
-    assert "usageReportLoadSpeed" not in loader
-    activate = _extract("function activateDashboardTab(")
-    assert "if (tab === 'speed')" in activate
-    assert "usageReportSpeedResume()" in activate
 
 
 def test_a_hidden_or_otherwise_unviewed_panel_asks_for_nothing(tmp_path):
@@ -668,7 +642,7 @@ def test_terminal_chart_followup_reads_snapshot_but_explicit_chart_load_can_ensu
     ])
     out = _run_node(tmp_path, 'terminal_trend_snapshot', program)
     assert len(out) == 3 and 'cache_only=1' in out[0] and 'cache_only' not in out[1]
-    assert all('view=trend' in url for url in out)
+    assert all(url.startswith('/api/output-speed?') and 'view=trend' in url for url in out)
     assert 'bucket' not in out[1] and 'bucket=week' in out[2], "a grouping is its own chart"
 
 
@@ -938,13 +912,42 @@ def test_no_report_call_site_names_a_function_that_does_not_exist():
     assert not missing, f"called but never defined: {missing}"
 
 
-def test_standalone_speed_activation_sets_its_gate_before_loading():
-    body = _extract("function activateDashboardTab(")
-    assert body.index("usageReportSpeedState.active = tab === 'speed'") < body.index("usageReportSpeedResume()")
-    assert "outputSpeedRetirePending()" in body
-    assert "usageReportSpeedSetSubtab" not in body
-    # The page's own period control replaces the quick ranges, as the report's does.
-    assert "overviewRanges.hidden = tab === 'report' || tab === 'speed'" in body
+def test_standalone_speed_activation_sets_its_gate_before_loading(tmp_path):
+    """Laziness is the point: nothing on this page is asked for until it is open.
+
+    The tab switch sets the page's flag and only then wires and resumes it, since
+    every speed request goes through a gate that reads that flag. Leaving retires
+    what the page had in flight, and opening the Report or the Overview asks it
+    for nothing. (That the report's own load never dispatches speed is run in
+    tests/test_usage_report_frontend.py.)
+    """
+    program = activate_dashboard_tab_program("""
+const out = {};
+out.speed = visit('speed');
+out.report = visit('report');
+out.overview = visit('overview');
+out.speedAgain = visit('speed');
+console.log(JSON.stringify(out));
+""")
+    out = _run_node(tmp_path, "speed_activation", program)
+
+    speed = out["speed"]
+    assert speed["panels"] == ["speed-content"] and speed["speedActive"] is True, speed
+    assert "wireSpeed:active=true" in speed["log"] and "resumeSpeed:active=true" in speed["log"], (
+        f"the page was resumed before its gate was set: {speed['log']}"
+    )
+    assert speed["log"].index("wireSpeed:active=true") < speed["log"].index("resumeSpeed:active=true")
+    # The page walks the shared range with its own period control, so the quick
+    # ranges step aside here as they do for the report's chips.
+    assert speed["rangesHidden"] is True and speed["chipsHidden"] is True
+
+    report = out["report"]
+    assert "retireSpeed:active=true" in report["log"], report["log"]
+    assert report["speedActive"] is False
+    assert not [entry for entry in report["log"] if entry.startswith(("wireSpeed", "resumeSpeed"))]
+    assert not [entry for entry in out["overview"]["log"] if "Speed" in entry], out["overview"]["log"]
+    assert out["overview"]["rangesHidden"] is False
+    assert "resumeSpeed:active=true" in out["speedAgain"]["log"], "a return did not resume the page"
 
 
 def test_the_table_and_its_spanned_rows_agree_on_the_column_count():

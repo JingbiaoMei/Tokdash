@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from support.frontend import extract_js_function, index_source, needs_node, run_node
+from support.report import activate_dashboard_tab_program
 
 I18N_LANGS = ("en", "zh", "ja", "ko", "es", "pt")
 
@@ -82,26 +83,55 @@ def test_report_tab_is_registered_between_stats_and_quota() -> None:
     assert "report" in tabs
     assert tabs.index("report") == tabs.index("stats") + 1
     assert 'data-i18n="usageReport"' in nav
-
-
-def test_report_tab_has_a_content_panel_and_one_lazy_load_branch() -> None:
-    source = _source()
+    # The switch finds a tab's panel by a built id, which the page-wide id check
+    # cannot see, so the panel the button opens is pinned here.
     assert '<div id="report-content" class="tab-content">' in source
-    activate = source[
-        source.index("function activateDashboardTab(tab) {") :
-        source.index("function openOverviewProfile() {")
-    ]
-    assert "if (tab === 'report' && !usageReportState.loaded) {" in activate
-    assert "loadUsageReport();" in activate
-    # Loaded once and not re-fetched on every switch, like the pricing tab: the
-    # period switcher, the server picker and Retry are what ask the server again.
-    assert activate.count("loadUsageReport();") == 1
-    # The page going away is a dispatch decision too. What was in flight belongs to
-    # a view the reader left, and its callback queues more work behind it.
-    assert "usageReportRetirePending()" in activate
-    assert "usageReportState.active = tab === 'report';" in activate
-    assert activate.index("usageReportState.active = tab === 'report';") < activate.index("loadUsageReport();")
-    assert "usageReportSpeedSetSubtab" not in activate
+
+
+@needs_node
+def test_the_report_tab_loads_once_and_sets_its_gate_before_it_dispatches(tmp_path: Path) -> None:
+    """The tab switch owns the Report page's `active` flag.
+
+    The page loads the first time it is opened and not on every switch, like the
+    pricing tab: the period switcher, the server picker and Retry are what ask
+    the server again. The flag has to be set before that load, because the
+    loader reads it to decide whether the two slow requests have anywhere to
+    land. Leaving retires what was in flight, since its callbacks queue more work
+    behind a view the reader left; coming back resumes what was put off, and a
+    silent re-read that came due while the page was away runs then.
+    """
+    program = activate_dashboard_tab_program("""
+const out = {};
+out.first = visit('report');
+out.away = visit('overview');
+out.back = visit('report');
+usageReportState.staleReread = { token: 1, period: 'month', back: 0, serverId: 'local' };
+out.awayAgain = visit('stats');
+out.backToStale = visit('report');
+process.stdout.write(JSON.stringify(out));
+""")
+    out = json.loads(_run_node(tmp_path, "report-activate.js", program))
+
+    first = out["first"]
+    assert first["panels"] == ["report-content"] and first["selected"] == ["report"], first
+    assert first["reportActive"] is True
+    assert "loadReport:active=true" in first["log"], (
+        f"the load dispatched before the page was marked active: {first['log']}"
+    )
+    loads = [entry for visit in out.values() for entry in visit["log"] if entry.startswith("loadReport")]
+    assert loads == ["loadReport:active=true"], f"the report loaded on more than its first visit: {loads}"
+
+    for leaving in ("away", "awayAgain"):
+        assert "retireReport:active=true" in out[leaving]["log"], (leaving, out[leaving]["log"])
+        assert out[leaving]["reportActive"] is False
+
+    assert "resumeReport:active=true" in out["back"]["log"], out["back"]["log"]
+    assert "fireStale:active=true" in out["backToStale"]["log"], out["backToStale"]["log"]
+    assert not [entry for entry in out["backToStale"]["log"] if entry.startswith("resumeReport")]
+
+    # Opening the report asks the speed page for nothing.
+    for visit in (out["first"], out["back"], out["backToStale"]):
+        assert not [entry for entry in visit["log"] if "Speed" in entry], visit["log"]
 
 
 def test_report_panels_are_painted_from_the_theme_token() -> None:
@@ -443,14 +473,23 @@ process.stdout.write(JSON.stringify(out));
     }
 
 
-def test_the_report_tab_swaps_quick_ranges_for_period_chips() -> None:
+@needs_node
+def test_the_report_tab_swaps_quick_ranges_for_period_chips(tmp_path: Path) -> None:
     """On the Report tab the trailing-window presets step aside for chips that
-    walk the report's period back, named from real dates."""
+    walk the report's period back, and the chips are drawn as the tab opens."""
+    program = activate_dashboard_tab_program("""
+process.stdout.write(JSON.stringify({
+  report: visit('report'), overview: visit('overview'), stats: visit('stats'),
+}));
+""")
+    out = json.loads(_run_node(tmp_path, "report-top-bar.js", program))
+    assert (out["report"]["rangesHidden"], out["report"]["chipsHidden"]) == (True, False)
+    assert "renderPeriodChips" in out["report"]["log"]
+    for tab in ("overview", "stats"):
+        assert (out[tab]["rangesHidden"], out[tab]["chipsHidden"]) == (False, True), (tab, out[tab])
+        assert "renderPeriodChips" not in out[tab]["log"]
+
     source = _source()
-    assert 'id="overviewQuickRanges"' in source and 'id="reportPeriodChips"' in source
-    tab = extract_js_function(source, "function activateDashboardTab(tab) {")
-    assert "overviewRanges.hidden = tab === 'report'" in tab
-    assert "reportChips.hidden = tab !== 'report'" in tab
     defs = extract_js_function(source, "function usageReportChipDefs() {")
     assert "getMonthLabels()" in defs, "month chips must be named from real dates"
     assert "usageReportChipWeeksAgo" in defs
@@ -1075,12 +1114,9 @@ function usageReportScheduleStaleReread() { calls.push('scheduleStale'); }
 const document = { hidden: false };
 const usageReportSpeedState = { subtab: 'summary' };
 function usageReportSpeedInvalidate() { calls.push('speedInvalidate'); }
-// The real function's first line is its own visibility gate, tested in
-// tests/test_output_speed_frontend.py; this stub keeps just the part this harness
-// reads -- that the summary subtab ends up with no speed request at all.
-function usageReportLoadSpeed() {
-  if (usageReportSpeedState.subtab === 'speed') calls.push('loadSpeed');
-}
+// Recorded unconditionally: the report's own load never dispatches the speed
+// page, whatever that page's gate would have done with the call.
+function usageReportLoadSpeed() { calls.push('loadSpeed'); }
 function usageReportEnsureSummary() { calls.push('ensureSummary'); }
 function usageReportApplyPendingChoice() {}
 function fetchJsonWithRetry(server, url) {
@@ -1404,6 +1440,9 @@ def test_leaving_report_defers_summary_and_never_dispatches_speed(tmp_path: Path
     assert "fetch:/api/insights" not in left and "fetch:/api/active-time" not in left, (
         f"a load continued into the expensive half after the page was left: {left}"
     )
+    for calls in (summary, deferred, left):
+        assert not [call for call in calls if call.startswith("fetch:/api/output-speed")], calls
+        assert "speedInvalidate" not in calls, "the report's load charged the speed page"
 
 
 SUMMARY_RACE_HARNESS = """

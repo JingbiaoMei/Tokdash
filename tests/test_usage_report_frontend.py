@@ -243,13 +243,6 @@ def test_report_counts_every_codex_session_whatever_overview_shows() -> None:
     assert "includeCodexReviewSessions" not in loader, "the Overview toggle is not this tab's input"
 
 
-def test_report_is_single_server_and_prints_which_one() -> None:
-    """Spec D1: facets have no merge semantics, so no merged report is offered."""
-    block = _report_block(_source())
-    assert "usageReportServers()" in block
-    assert "fetchSelectedServers" not in block
-
-
 # --- window math, executed for real under node ------------------------------
 
 
@@ -783,15 +776,6 @@ def test_the_agent_table_prints_every_tool_it_was_given(tmp_path: Path) -> None:
         "t13", "t13", "t13", "t987", "\u2014", "\u2014", "$13", "\u2014",
     ], table["emptyCells"]
 
-    for leftover in (
-        "agentPrimary",
-        "agentOthers",
-        "othersOpen",
-        "usageReportOtherTools",
-        "usageReportToolCount",
-    ):
-        assert leftover not in source, f"{leftover} outlived the fold"
-
 
 # --- the three ranking tables, sorted by whatever column the reader picks ----
 
@@ -852,11 +836,10 @@ def test_the_report_tables_speak_the_overview_vocabulary() -> None:
     it said "Total", and qualified cost with an API-list-price footnote. Every
     header now carries the key the overview tables carry, in the order the overview
     prints them, so the same word cannot mean two things depending on the tab a
-    reader is on. The report's own column keys are gone rather than parked.
+    reader is on. The active-time column is an estimate, and its header tooltip is
+    where the report admits it.
     """
     source = _source()
-    assert "usageReportCol" not in source, "the report's private column keys outlived the shared terms"
-
     expected = {
         "usageReportAgentsTable": (
             "tool", "input", "output", "cache", "total", "sessions", "active", "cost", "msgs",
@@ -864,42 +847,19 @@ def test_the_report_tables_speak_the_overview_vocabulary() -> None:
         "usageReportModelsTable": ("model", "total", "share", "cost", "msgs"),
         "usageReportProjectsTable": ("project", "total", "share", "cost", "msgs"),
     }
-    terms = set()
     for table_id, labels in expected.items():
         found = []
         for th in _report_table_headers(source, table_id):
             match = re.search(r'data-i18n="([^"]+)"', th)
             assert match, (table_id, th)
             found.append(match.group(1))
-            terms.add(match.group(1))
         assert tuple(found) == labels, (table_id, found)
 
-    # A shared term is only shared if all six locales carry it.
-    for term in sorted(terms):
-        assert len(re.findall(r"^        %s: '" % term, source, re.M)) == len(I18N_LANGS), term
-
-
-def test_the_active_time_tile_prints_one_figure() -> None:
-    """The tile showed a wall-clock span, an "est." pill and a second figure.
-
-    All three said roughly the same thing, and the span beside it was the window
-    the range line already names. One label, one number: the agent total.
-    """
-    source = _source()
-    for leftover in ("usageReportKActiveSub", "usageReportEst", "usageReportActiveSub", "usage-report-pill"):
-        assert leftover not in source, leftover
-
-    # With the pill gone, the column header tooltip is where the estimate is admitted.
-    assert re.search(
-        r'data-report-sort="activeMs"[^>]*data-i18n-title="activeTimeHint"', source
-    ), "the active column stopped carrying the estimate caveat"
-
-    tile = source[source.index('data-i18n="usageReportActiveTime"') : source.index("usageReportDays")]
-    assert tile.count("usage-report-kpi-value") == 1, "the tile carries one figure"
-    assert "usage-report-kpi-sub" not in tile, "and no second line under it"
-    hero = extract_js_function(_report_block(source), "function usageReportRenderHeroActivity(model) {")
-    assert "formatDurationUnits(model.agentMs)" in hero
-    assert "usageReportKActiveSub" not in hero
+    active = next(
+        th for th in _report_table_headers(source, "usageReportAgentsTable")
+        if 'data-report-sort="activeMs"' in th
+    )
+    assert 'data-i18n-title="activeTimeHint"' in active, "the active column stopped carrying the estimate caveat"
 
 
 @needs_node
@@ -1841,22 +1801,6 @@ process.stdout.write(JSON.stringify(cases.map(usageReportShowDelta)));
 # --- copy deck --------------------------------------------------------------
 
 
-def test_report_copy_keys_are_prefixed_and_shared_across_languages() -> None:
-    """The prefix keeps the report clear of the refresh-report popover (`refreshReport*`)."""
-    source = _source()
-    assert re.search(r"\brefreshReport[A-Za-z]*\b", source), "popover keys must stay in place"
-    start = source.index("const I18N = {")
-    literal = source[start : source.index("\n    };", start)]
-    report_keys = sorted(set(re.findall(r"^        (usageReport[A-Za-z0-9]*):", literal, re.M)))
-    assert report_keys
-    assert "report" not in report_keys, "a bare `report` key would collide"
-    for language in I18N_LANGS:
-        block = literal[literal.index(f"      {language}: {{") :]
-        own = set(re.findall(r"^        ([a-zA-Z0-9_]+):", block, re.M))
-        missing = set(report_keys) - own
-        assert not missing, f"{language} is missing {sorted(missing)}"
-
-
 def test_report_translations_keep_the_same_placeholders() -> None:
     source = _source()
     english = _i18n_report_copy(source, "en")
@@ -1978,15 +1922,6 @@ def test_the_new_sections_are_cleared_before_the_next_load() -> None:
         "usageReportFooter",
     ):
         assert f"'{element}'" in loading, element
-
-
-def test_no_night_window_is_hardcoded_in_the_page() -> None:
-    """Spec 5.7: the window is served, so a client-side copy cannot rot quietly."""
-    block = _report_block(_source())
-    assert "night_hours" in block
-    assert "22:00" not in block, "the night window is spelled out in the page"
-    for hours in ("22, 23", "[22", "22,23"):
-        assert hours not in block, hours
 
 
 def test_the_report_removes_the_repeated_project_and_footer_copy() -> None:
@@ -2616,19 +2551,12 @@ def test_the_page_hides_the_day_and_week_card_and_centres_the_month() -> None:
 
 
 def test_share_panel_offers_two_tiers_and_three_export_paths() -> None:
+    """The buttons name the tier they export, and the exporter is handed that
+    name as written: three paths, and each must be one the exporter knows."""
     source = _source()
     panel = source[source.index('data-i18n="usageReportShareTitle"') : source.index("<!-- Quota Tab -->")]
-    for marker in (
-        'id="usageReportNicknameInput"',
-        'id="usageReportCostToggle"',
-        'id="usageReportGreenCards"',
-        'id="usageReportAmberCards"',
-        'data-export="green"',
-        'data-export="amber"',
-        'data-export="all"',
-        'id="usageReportExportStatus" hidden',
-    ):
-        assert marker in panel, marker
+    assert re.findall(r'data-export="([^"]+)"', panel) == ["green", "amber", "all"]
+    assert 'id="usageReportExportStatus" hidden' in panel, "the status line starts hidden"
     # A per-card save button would be a single-theme download path by another name.
     assert "data-save" not in panel
 

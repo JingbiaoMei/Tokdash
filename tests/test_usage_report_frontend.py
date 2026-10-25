@@ -173,15 +173,6 @@ def test_report_renders_on_a_language_switch() -> None:
 # --- data access ------------------------------------------------------------
 
 
-def test_day_map_reuses_the_dashboard_quantile_rule_not_the_served_intensity() -> None:
-    """Spec D3: one shading rule for the product, and it is the Stats tab's."""
-    block = _report_block(_source())
-    assert "quantileThresholds(" in block
-    assert "quantileLevel(" in block
-    assert "heatColor(" in block
-    assert "intensity" not in block
-
-
 def test_report_renders_data_text_without_inner_html() -> None:
     """Tool, model and project names are data; they never travel as markup."""
     assert "innerHTML" not in _report_block(_source())
@@ -498,7 +489,12 @@ const HEAT_COLORS = new Array(8).fill('#000');
 const INSIGHTS = {
   range: { from: '2026-09-01', to: '2026-09-03' },
   totals: { tokens: 900, messages: 90, cost: 9 },
-  daily: [{ date: '2026-09-01', tokens: 300, messages: 30 }],
+  // The served intensity contradicts the token counts on purpose: the busier day
+  // is served as the faintest. The day map shades by the Stats tab's rule.
+  daily: [
+    { date: '2026-09-01', tokens: 300, messages: 30, intensity: 0 },
+    { date: '2026-09-02', tokens: 10, messages: 1, intensity: 7 },
+  ],
   streaks: { active_days: 2, current_streak: 2, longest_streak: 9 },
   firsts: { busiest_day: '2026-09-01', busiest_day_tokens: 300 },
   tools: { ranked: [{ tool: 'codex', tokens: 600, cost: 6 }, { tool: 'claude', tokens: 300, cost: 3 }] },
@@ -516,7 +512,13 @@ const INSIGHTS = {
     attributed_project_count: 2,
   },
 };
-const USAGE = { total_tokens: 1000, total_messages: 100, total_cost: 10, by_tool: {}, apps: {} };
+// codex has a per-app row with an output column; claude only has a by-tool row,
+// which carries no output figure.
+const USAGE = {
+  total_tokens: 1000, total_messages: 100, total_cost: 10,
+  by_tool: { claude: { tokens_in: 40, tokens_cache: 50 } },
+  apps: { codex: { tokens_in: 10, tokens_out: 20, tokens_cache: 30 } },
+};
 const ACTIVE = {
   active_ms: 5000,
   active_ms_sum: 7000,
@@ -539,6 +541,8 @@ const shape = (model) => ({
   projectShares: model.projectRows.map((row) => row.share),
   hasStreaks: !!model.streaks,
   notices: model.notices,
+  levels: Object.fromEntries(model.cells.filter((cell) => cell.inWindow).map((cell) => [cell.date, cell.level])),
+  agentSplit: model.agentRows.map((row) => [row.tool, row.tokens, row.tokensIn, row.tokensOut, row.tokensCache]),
 });
 process.stdout.write(JSON.stringify({
   whole: shape(build({})),
@@ -601,6 +605,39 @@ def test_the_first_paint_builds_a_model_over_two_absent_sources(tmp_path: Path) 
     assert first["sessions"] is None, "no active time yet is not a count of zero"
     assert first["hasStreaks"] is False
     assert first["activeMs"] == 0
+
+
+@needs_node
+def test_the_day_map_shades_by_the_dashboard_quantiles_not_the_served_intensity(tmp_path: Path) -> None:
+    """Spec D3: one shading rule for the product, and it is the Stats tab's.
+
+    The fixture serves an `intensity` that ranks the two days backwards. The
+    report's levels come from the quantile thresholds over the calendar's token
+    counts, so the 300-token day is the darkest, the 10-token day the faintest
+    shaded one, and a day with no row is unshaded.
+    """
+    source = _source()
+    body = "\n".join(extract_js_function(source, sig) for sig in MODEL_SIGNATURES) + MODEL_FIXTURE
+    whole = json.loads(_run_node(tmp_path, "usage-report-levels.js", body))["whole"]
+    assert whole["levels"] == {"2026-09-01": 7, "2026-09-02": 1, "2026-09-03": 0}, whole["levels"]
+
+
+@needs_node
+def test_the_agent_table_never_invents_a_token_split(tmp_path: Path) -> None:
+    """Tokens and cost come from the facet scan, the split from /api/usage.
+
+    The two are different scans, and the page must not blur them into one figure.
+    Only /api/usage's per-app rows carry output tokens, so a tool with no such row
+    (OpenClaw, or here claude) prints a dash for output rather than a borrowed
+    or invented one.
+    """
+    source = _source()
+    body = "\n".join(extract_js_function(source, sig) for sig in MODEL_SIGNATURES) + MODEL_FIXTURE
+    whole = json.loads(_run_node(tmp_path, "usage-report-split.js", body))["whole"]
+    assert whole["agentSplit"] == [
+        ["codex", 600, 10, 20, 30],
+        ["claude", 300, 40, None, 50],
+    ], whole["agentSplit"]
 
 
 AGENTS_TABLE_SIGNATURES = (
@@ -1949,17 +1986,6 @@ def test_the_report_removes_the_repeated_project_and_footer_copy() -> None:
     for key in ("usageReportPodiumProjectNote", "usageReportProjectGroupNote", "usageReportFooterDays", "usageReportFooterCost", "usageReportFooterActive", "usageReportSentence"):
         assert key not in _source()
     assert "usageReportMissingProjects" in block
-
-
-def test_the_agent_table_never_invents_a_token_split() -> None:
-    """OpenClaw has no output-token column; its row must show a dash, not a guess."""
-    block = _report_block(_source())
-    agents = extract_js_function(block, BUILD_MODEL_SIGNATURE)
-    assert "tokensOut: app && app.tokens_out !== undefined" in agents
-    # Tokens and cost come from the facet scan, the split from /api/usage: the
-    # two are different scans and the page must not blur them into one figure.
-    assert "usageApps[tool]" in agents
-    assert "usageReportFacetCovers" in block
 
 
 def test_weekday_rows_that_have_not_happened_print_no_figure() -> None:

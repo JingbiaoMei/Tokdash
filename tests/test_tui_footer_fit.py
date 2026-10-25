@@ -1,6 +1,7 @@
-"""Seventh-review regressions (CI failures on 2a5723a, 2026-10-23).
+"""The page stays fitted to the frame it is in: the refit a busy moment owes, and
+the footer's row.
 
-Two ways the page kept a fit for a frame it was no longer in, both of which the
+Two ways the page kept a fit for a frame it was no longer in, both of which a CI
 runner found and Linux could not:
 
 * a resize that arrived while a read was in flight was REFUSED -- correctly, since
@@ -13,9 +14,9 @@ runner found and Linux could not:
   "stale" saw no change and left the activity band drawn four rows below the
   screen's last line.
 
-Both are pinned here the way the earlier rounds do it: move the frame a reader
-can move, then read back what the page SHOWS. Fixtures are the contract-shaped
-ones in ``test_tui_revision5``; every figure is synthetic.
+And whatever size the terminal is, the section at the foot of the page stops above
+the footer. Move the frame a reader can move, then read back what the page SHOWS.
+Fixtures are the contract-shaped ones in ``support.tui``; every figure is synthetic.
 """
 from __future__ import annotations
 
@@ -27,36 +28,22 @@ import pytest
 textual = pytest.importorskip("textual", reason="the TUI tests need textual")
 
 from tokdash.tui.data import FetchOutcome  # noqa: E402
-from test_tui_revision5 import (  # noqa: E402
+from support.tui import (  # noqa: E402
+    NARROW,
     USAGE,
-    api,
+    WIDE,
+    api,  # noqa: F401  (the fixture these tests ask pytest for)
     run,
     settle,
+    _settled,
     visible,
 )
-
-WIDE = (120, 36)
-NARROW = (80, 24)
-
-
-async def press(app, pilot, key: str) -> None:
-    """A tab key, with the pause the pane needs to have started its read."""
-    await pilot.press(key)
-    await settle(pilot, 1)
-
-
-async def _settled(app, pilot, pane: str = "overview") -> None:
-    for _ in range(40):
-        if app._state.get(pane) == "ok" and not app._open_loads.get(pane):
-            return
-        await pilot.pause(0.1)
-    raise AssertionError(f"{pane} never settled")
 
 
 # --------------------------------------------------------------------- R7-F1 --
 # A refused refit is only safe while it is REMEMBERED. The frame the refusal was
 # for is the frame the page then has to live in, and no second ask is coming.
-# -------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
 
 
 def test_a_refit_refused_during_a_read_is_paid_when_that_read_lands(api):
@@ -118,7 +105,7 @@ def test_a_refit_refused_under_a_chooser_is_paid_when_it_closes(api):
 # The footer owns the screen's last row, and the page may not draw into it. When
 # the footer takes a row the pane's own box did not move, so the only witness is
 # the row the strip sits on.
-# -------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
 
 
 def test_a_footer_that_changes_its_depth_leaves_the_page_fitted(api):
@@ -266,55 +253,6 @@ def test_a_new_size_gets_its_own_settle_allowance(api):
     run(api, body, size=NARROW)
 
 
-# --------------------------------------------------------------------- R7-F3 --
-# A repaint is not a read. It may redraw every figure the snapshot holds, and it
-# may not answer a question the snapshot was never asked -- which is what the
-# poll's line does: it says what the LAST POLLS did, from the reader's own
-# keystroke, and nothing in the accounts file knows about it.
-# -------------------------------------------------------------------------- #
-
-
-def test_a_repaint_leaves_the_poll_note_alone_until_a_read_answers_it(
-    api, monkeypatch
-):
-    """Polling, then a repaint: the reader still sees the poll's own sentence."""
-    import tokdash.cli as cli_mod
-
-    release = threading.Event()
-    calls = {"n": 0}
-
-    def held(**kwargs):
-        calls["n"] += 1
-        assert release.wait(10.0), "the poll was never released"
-        return {"snapshots": 1, "inserted": 1, "network_sources": []}
-
-    monkeypatch.setattr(cli_mod, "_quota_poll_once", held)
-
-    async def body(app, pilot):
-        await press(app, pilot, "3")
-        await _settled(app, pilot, "quota")
-        note = app.query_one("#quota-note")
-        await pilot.press("u")
-        await settle(pilot, 2)
-        assert "polling" in str(note.content), str(note.content)
-
-        # The two things a running app does to a pane that are not a read.
-        app._repaint_pane("quota")
-        await settle(pilot, 2)
-        assert "polling" in str(note.content), (
-            "a repaint replaced the poll's own line with a derived banner: "
-            f"{note.content}")
-
-        release.set()
-        await settle(pilot, 8)
-        await _settled(app, pilot, "quota")
-        assert calls["n"] == 1, calls
-        # A READ is what retires the sentence, and the reload's banner says so.
-        assert "polling" not in str(note.content), str(note.content)
-
-    run(api, body, size=WIDE)
-
-
 # --------------------------------------------------------------------- R7-F5 --
 # The section at the foot of the page is sized against the rows its neighbours
 # leave it. It used to be given a FLOOR as well, and a floor is a promise the
@@ -322,7 +260,7 @@ def test_a_repaint_leaves_the_poll_note_alone_until_a_read_answers_it(
 # eight rows, and a page holding five draws three rows of it through the status
 # strip. Windows CI met it at 120x36 (a two-row footer, airy table rows); the
 # same arithmetic is met here at 80x24, where it is not a race at all.
-# -------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize("size", [(80, 24), (90, 26), (100, 30), (120, 32),

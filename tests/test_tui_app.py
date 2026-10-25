@@ -41,6 +41,7 @@ from tokdash.tui.app import (  # noqa: E402
 from tokdash.tui.data import FetchOutcome  # noqa: E402
 from tokdash.tui.formatting import EM_DASH  # noqa: E402
 from tokdash.usage_store import UsageDatabaseSchemaTooNewError  # noqa: E402
+from support.tui import wait_for  # noqa: E402  (polls a predicate; shared)
 
 TODAY = datetime.date(2026, 9, 20)
 WINDOWS = [
@@ -302,21 +303,6 @@ def drive(app, steps, size=(80, 24)):
             await steps(pilot)
 
     asyncio.run(main())
-
-
-async def wait_for(app, pilot, predicate, timeout=10.0):
-    """Thread jobs + chained awaits need more than one pause to settle.
-
-    The timeout is patience, not a cost: a predicate that holds returns at once,
-    and a CI runner shared by four workers has taken more than the two seconds
-    this used to allow to run one thread job.
-    """
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        await pilot.pause(0.02)
-    return predicate()
 
 
 def css_rule(selector):

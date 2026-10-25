@@ -9,8 +9,8 @@ TWO rows here, and each section header says the same figures the Tools view says
 for that tool.
 
 The view-model tests drive ``views.tool_model_sections`` with contract-shaped
-payloads; the pilot tests drive the real Textual pane through the same seams
-``test_tui_revision5`` pins.
+payloads; the pilot tests drive the real Textual pane through the fetch seams
+``support.tui`` patches.
 """
 from __future__ import annotations
 
@@ -26,8 +26,8 @@ from tokdash.sessions import TOOL_LABELS  # noqa: E402
 from tokdash.tui import views  # noqa: E402
 from tokdash.tui.formatting import EM_DASH  # noqa: E402
 
-import test_tui_revision5 as fx
-from test_tui_revision5 import lit, press, rows_of, settle, visible  # noqa: F401
+import support.tui as fx  # noqa: E402
+from support.tui import lit, press, rows_of, settle, visible  # noqa: E402,F401
 
 api = fx.api
 SHARED_MODEL = fx.SHARED_MODEL

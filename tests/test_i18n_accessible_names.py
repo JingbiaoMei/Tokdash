@@ -32,6 +32,9 @@ import pytest
 
 import tokdash  # type: ignore[import-untyped]
 
+from support.frontend import extract_i18n_literal
+
+
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -112,7 +115,7 @@ def english_dictionary(tmp_path_factory: pytest.TempPathFactory) -> dict[str, st
     if node is None:  # pragma: no cover - node ships with the dev extra
         pytest.skip("node not available")
     source = INDEX_HTML.read_text(encoding="utf-8")
-    literal = _i18n_literal(source)
+    literal = extract_i18n_literal(source)
     harness = tmp_path_factory.mktemp("i18n-en") / "en.js"
     harness.write_text(
         literal + "\nprocess.stdout.write(JSON.stringify(I18N.en));",
@@ -122,14 +125,6 @@ def english_dictionary(tmp_path_factory: pytest.TempPathFactory) -> dict[str, st
         [node, str(harness)], capture_output=True, check=True, encoding="utf-8"
     ).stdout
     return json.loads(output)
-
-
-def _i18n_literal(source: str) -> str:
-    start = source.find("const I18N = {")
-    assert start != -1, "const I18N = { not found in index.html"
-    end = source.find("\n    };", start)
-    assert end != -1, "unterminated I18N object in index.html"
-    return source[start : end + 6]
 
 
 def _style_blocks(source: str) -> list[str]:
@@ -764,7 +759,7 @@ def test_chart_tooltips_reuse_their_heading_terminology() -> None:
         REPO_ROOT / "_i18n_tooltip_probe.js"
     )
     harness.write_text(
-        _i18n_literal(source)
+        extract_i18n_literal(source)
         + "\nconst pairs = "
         + json.dumps(CHART_TOOLTIPS)
         + ";\nconst out = [];\n"

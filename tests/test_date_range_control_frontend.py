@@ -6,40 +6,25 @@ menu, open/commit wiring, and that state sync never fetches.
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
 
 import tokdash  # type: ignore[import-untyped]
+
+from support.frontend import extract_js_function, needs_node
+
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 
 
-def _extract_js_function(source: str, signature: str) -> str:
-    start = source.find(signature)
-    assert start != -1, f"{signature} not found in index.html"
-    body_start = start + len(signature) - 1
-    assert source[body_start] == "{", f"{signature} must end at the function body"
-    depth = 0
-    for index in range(body_start, len(source)):
-        if source[index] == "{":
-            depth += 1
-        elif source[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return source[start : index + 1]
-    raise AssertionError(f"unterminated JavaScript function: {signature}")
-
-
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_date_range_trigger_text_is_localized_and_deterministic(
     tmp_path: Path,
 ) -> None:
     source = INDEX_HTML.read_text(encoding="utf-8")
     functions = "\n".join(
-        _extract_js_function(source, signature)
+        extract_js_function(source, signature)
         for signature in (
             "function sameLocalDate(left, right) {",
             "function formatDateRangeDate(date, lang = currentLang) {",
@@ -129,12 +114,12 @@ def test_quick_ranges_use_progressive_disclosure_without_horizontal_scroll() -> 
 
 def test_date_range_state_sync_does_not_fetch() -> None:
     source = INDEX_HTML.read_text(encoding="utf-8")
-    sync = _extract_js_function(source, "function syncDateRangeControl() {")
-    commit = _extract_js_function(
+    sync = extract_js_function(source, "function syncDateRangeControl() {")
+    commit = extract_js_function(
         source,
         "function commitDateSelection(startDate, endDate, options = {}) {",
     )
-    i18n = _extract_js_function(source, "function applyI18n() {")
+    i18n = extract_js_function(source, "function applyI18n() {")
 
     assert "activeQuickRange || 'customRange'" in sync
     assert "formatDateRangeTriggerText(currentStartDate, currentEndDate)" in sync

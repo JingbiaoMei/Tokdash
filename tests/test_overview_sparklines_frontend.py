@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -43,13 +42,16 @@ import pytest
 
 import tokdash
 
+from support.frontend import needs_node
+
+
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 MODULE_START = "// ===== Overview sparklines"
 LIVE_CONTRACT = Path(__file__).parent / "fixtures" / "overview_sparklines" / "live_contract.json"
 MODULE_END = "    function renderOverviewTab(data) {"
 METRICS = ("tokens", "cost", "messages", "agent_time", "cache_hit_rate", "top_model")
 
-pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+pytestmark = needs_node
 
 
 def _source() -> str:

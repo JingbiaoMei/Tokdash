@@ -68,6 +68,14 @@ pytest tests/test_pricing_normalization.py -k lookup   # one file, filtered by t
 one worker; mark a new test that builds from the repo root or holds a fixed port with the same
 `xdist_group` as its peers, or two workers will collide on it.
 
+The frontend tests run the shipped JavaScript instead of searching it for strings: they slice
+the functions they need out of `index.html` with `extract_js_function()`, run them in Node over
+a stub DOM, and assert on what the code did. That helper, `run_node()` and the `needs_node`
+marker live in `tests/support/frontend.py`; import them rather than copying them into a new
+file. A test that only checks a string is present in the page passes as long as the string
+does, whatever the code around it now does. Keep text checks for what really is text: the
+translation tables, the vendored assets, the theme registry.
+
 The TUI tests drive the real app through Textual's pilot. Wait on a condition, never on a fixed
 sleep: `settle()` in `tests/test_tui_revision5.py` returns as soon as the app is idle, and
 `wait_for()` in `tests/test_tui_app.py` polls a predicate. A fixed `pilot.pause(0.25)` costs

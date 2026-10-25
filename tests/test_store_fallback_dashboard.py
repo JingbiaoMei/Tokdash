@@ -17,7 +17,6 @@ really produces rather than a hand-written one.
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -26,9 +25,12 @@ import pytest
 import tokdash
 from tokdash import compute
 
+from support.frontend import extract_js_function, needs_node
+
+
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 
-pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+pytestmark = needs_node
 
 # The page's other stand-ins for the two functions under test.
 HARNESS = """
@@ -63,25 +65,10 @@ process.stdout.write(JSON.stringify({
 """
 
 
-def _extract_js_function(src: str, signature: str) -> str:
-    start = src.find(signature)
-    assert start >= 0, f"{signature} not found"
-    depth = 0
-    body_start = start + len(signature) - 1 if signature.endswith("{") else src.find("{", start)
-    for index in range(body_start, len(src)):
-        if src[index] == "{":
-            depth += 1
-        elif src[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return src[start : index + 1]
-    raise AssertionError(f"unterminated function: {signature}")
-
-
 def _reconcile(tmp_path: Path, fresh: dict, stale: dict = None, *, snapshot: bool = True) -> dict:
     source = INDEX_HTML.read_text(encoding="utf-8")
     functions = "\n".join(
-        _extract_js_function(source, signature)
+        extract_js_function(source, signature)
         for signature in (
             "function usageSourceErrors(payload) {",
             "function reconcileUsageRows(rows, windowKey, servers = selectedServers(), cache = lastUsageRowsByServer) {",

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -20,10 +19,13 @@ import pytest
 
 import tokdash
 
+from support.frontend import extract_js_function, needs_node
+
+
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 I18N_LANGS = ("en", "zh", "ja", "ko", "es", "pt")
 
-pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+pytestmark = needs_node
 
 # The header contract: field the click ranks by, and the shared term it prints.
 HEADERS = (
@@ -39,22 +41,6 @@ HEADERS = (
 
 def _source() -> str:
     return INDEX_HTML.read_text(encoding="utf-8")
-
-
-def _extract_js_function(source: str, signature: str) -> str:
-    start = source.find(signature)
-    assert start != -1, f"{signature} not found in index.html"
-    body_start = start + len(signature) - 1
-    assert source[body_start] == "{", f"{signature} must end at the function body"
-    depth = 0
-    for index in range(body_start, len(source)):
-        if source[index] == "{":
-            depth += 1
-        elif source[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return source[start : index + 1]
-    raise AssertionError(f"unterminated JavaScript function: {signature}")
 
 
 def _declaration(source: str, prefix: str) -> str:
@@ -96,7 +82,7 @@ def test_the_tools_table_offers_every_new_column_a_sort_and_a_shared_term() -> N
 
     # Seven columns, and both empty states say so.
     assert 'colspan="7"' in shipped, "the shipped placeholder does not span the table"
-    painter = _extract_js_function(source, "function updateToolsTable(byTool) {")
+    painter = extract_js_function(source, "function updateToolsTable(byTool) {")
     assert 'colspan="7"' in painter, "the no-data row does not span the table"
 
 
@@ -195,7 +181,7 @@ process.stdout.write(JSON.stringify(out));
 
 def _table_body(source: str) -> str:
     parts = [
-        _extract_js_function(source, sig)
+        extract_js_function(source, sig)
         for sig in (
             "function getBreakdownComparator(field, direction) {",
             "function updateToolsTable(byTool) {",
@@ -203,14 +189,14 @@ def _table_body(source: str) -> str:
     ]
     parts.append(_declaration(source, "const BREAKDOWN_NUMERIC_FIELDS"))
     parts.append(_declaration(source, "const OVERVIEW_TABLE_DASH"))
-    parts.append(_extract_js_function(source, "const breakdownSortState = {"))
+    parts.append(extract_js_function(source, "const breakdownSortState = {"))
     parts.append("let lastByTool = {};")
     parts.append("const overviewActiveTimeState = { status: 'idle', data: null, key: null, requestId: 0 };")
     parts.append("const overviewFacetsState = { key: null, rows: [], toolMessages: null, status: 'idle', requestId: 0 };")
     return "\n".join(parts)
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_the_table_prints_the_shared_column_order_and_says_what_it_lacks(tmp_path: Path) -> None:
     source = _source()
     out = _run_node(tmp_path, "tools-table.js", _table_body(source) + FIXTURE)
@@ -242,24 +228,24 @@ def test_the_table_prints_the_shared_column_order_and_says_what_it_lacks(tmp_pat
 def test_the_borrowed_columns_are_repainted_when_they_arrive() -> None:
     """Usage paints first, so the two later responses have to come back for it."""
     source = _source()
-    loader = _extract_js_function(
+    loader = extract_js_function(
         source, "async function loadOverviewFacets(customDays, dateFrom, dateTo, options = {}) {"
     )
     assert "paintToolsTableIfLoaded();" in loader, "the message column never reaches the table"
 
-    active = _extract_js_function(
+    active = extract_js_function(
         source, "async function loadOverviewActiveTime(customDays, dateFrom, dateTo, options = {}) {"
     )
     assert "paintToolsTableIfLoaded();" in active, "sessions and runtime never reach the table"
 
-    guard = _extract_js_function(source, "function paintToolsTableIfLoaded() {")
+    guard = extract_js_function(source, "function paintToolsTableIfLoaded() {")
     assert "Object.keys(lastByTool" in guard, "an empty range must not paint over a loading table"
 
 
 def test_a_failed_facets_request_empties_the_message_column() -> None:
     """Counts from the previous range would print as if they had just been fetched."""
     source = _source()
-    loader = _extract_js_function(
+    loader = extract_js_function(
         source, "async function loadOverviewFacets(customDays, dateFrom, dateTo, options = {}) {"
     )
     handler = loader[loader.index("catch (error)") :]
@@ -269,7 +255,7 @@ def test_a_failed_facets_request_empties_the_message_column() -> None:
 def _loader_body() -> str:
     source = _source()
     functions = "\n".join(
-        _extract_js_function(source, signature)
+        extract_js_function(source, signature)
         for signature in (
             "function windowKeyFor(customDays, dateFrom, dateTo) {",
             "function usageServerKeyFor(servers = selectedServers()) {",

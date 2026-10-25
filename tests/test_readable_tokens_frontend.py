@@ -6,34 +6,16 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
 
 import tokdash  # type: ignore[import-untyped]
 
+from support.frontend import extract_js_function, needs_node
+
+
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
-
-
-def _extract_js_function(source: str, signature: str) -> str:
-    start = source.find(signature)
-    assert start != -1, f"{signature} not found in index.html"
-    depth = 0
-    body_start = (
-        start + len(signature) - 1
-        if signature.endswith("{")
-        else source.find("{", start)
-    )
-    for index in range(body_start, len(source)):
-        if source[index] == "{":
-            depth += 1
-        elif source[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return source[start : index + 1]
-    raise AssertionError(f"unterminated JavaScript function: {signature}")
 
 
 def _run_readable_token_js(
@@ -41,7 +23,7 @@ def _run_readable_token_js(
 ) -> object:
     source = INDEX_HTML.read_text(encoding="utf-8")
     functions = "\n".join(
-        _extract_js_function(source, signature)
+        extract_js_function(source, signature)
         for signature in (
             "function normalizeTokenCount(value) {",
             "function normalizeOverviewTokenCount(value) {",
@@ -82,7 +64,7 @@ def _run_readable_token_js(
     return json.loads(result.stdout)
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_readable_token_formatter_boundaries(tmp_path: Path) -> None:
     # The Overview KPI shows the bare number: its card is already labelled
     # "Total Tokens", and the unit only costs width in a six-card row.
@@ -111,7 +93,7 @@ def test_readable_token_formatter_boundaries(tmp_path: Path) -> None:
     assert result == {str(key): value for key, value in cases.items()}
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_global_token_formatter_respects_readable_preference(tmp_path: Path) -> None:
     expression = """
 (() => {
@@ -133,7 +115,7 @@ def test_global_token_formatter_respects_readable_preference(tmp_path: Path) -> 
     }
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_compact_formatter_reuses_current_locale_and_refreshes_on_language_change(tmp_path):
     expression = """
 (() => {
@@ -156,7 +138,7 @@ def test_compact_formatter_reuses_current_locale_and_refreshes_on_language_chang
     }
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_readable_token_preference_defaults_and_fails_soft(tmp_path: Path) -> None:
     expression = """
 (() => {
@@ -215,16 +197,16 @@ def test_readable_token_switch_markup_and_tooltip_contract() -> None:
 
 def test_readable_token_render_and_toggle_do_not_refetch() -> None:
     source = INDEX_HTML.read_text(encoding="utf-8")
-    renderer = _extract_js_function(
+    renderer = extract_js_function(
         source,
         "function renderOverviewTokenTotal(value = overviewTotalTokensRaw, staticText = null) {",
     )
-    setter = _extract_js_function(
+    setter = extract_js_function(
         source,
         "function setOverviewReadableTokens(enabled) {",
     )
-    overview = _extract_js_function(source, "function renderOverviewTab(data) {")
-    i18n = _extract_js_function(source, "function applyI18n() {")
+    overview = extract_js_function(source, "function renderOverviewTab(data) {")
+    i18n = extract_js_function(source, "function applyI18n() {")
 
     assert "overviewTotalTokensRaw = normalizeOverviewTokenCount(value);" in renderer
     assert "formatCompactTokenCount(overviewTotalTokensRaw)" in renderer
@@ -237,7 +219,7 @@ def test_readable_token_render_and_toggle_do_not_refetch() -> None:
         "setKpiExactReadout('totalTokens', 'totalTokensExact'"
         in renderer
     )
-    readout = _extract_js_function(
+    readout = extract_js_function(
         source, "function setKpiExactReadout(valueId, tooltipId, text, note = '') {"
     )
     assert "aria-describedby" in readout
@@ -291,7 +273,7 @@ def test_readable_token_scope_covers_all_token_views() -> None:
 
 def test_global_token_toggle_rerenders_cached_views_without_fetching() -> None:
     source = INDEX_HTML.read_text(encoding="utf-8")
-    renderer = _extract_js_function(
+    renderer = extract_js_function(
         source,
         "function rerenderTokenPresentation() {",
     )

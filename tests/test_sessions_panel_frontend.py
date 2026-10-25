@@ -13,22 +13,11 @@ import pytest
 
 import tokdash
 
+from support.frontend import extract_js_function
+
+
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 PANELS = ("codex", "claude", "opencode", "pi_agent", "mimo", "kimi", "dsh", "reasonix", "zcode", "kilocode", "omp", "grok", "hermes", "antigravity_cli", "cline", "workbuddy", "qoder", "qwen_code", "openclaw", "qoder_cli", "combined")
-
-
-def _extract_js_function(src: str, signature: str) -> str:
-    start = src.find(signature)
-    assert start != -1, f"{signature} not found in index.html"
-    depth = 0
-    for j in range(start + len(signature) - 1, len(src)):
-        if src[j] == "{":
-            depth += 1
-        elif src[j] == "}":
-            depth -= 1
-            if depth == 0:
-                return src[start : j + 1]
-    raise AssertionError(f"unterminated JS function: {signature}")
 
 
 def _run(fn_src: str, args: list) -> object:
@@ -51,7 +40,7 @@ def _run(fn_src: str, args: list) -> object:
 @pytest.fixture(scope="module")
 def fn_src() -> str:
     source = INDEX_HTML.read_text(encoding="utf-8")
-    return _extract_js_function(source, "function sessionPanelShouldOpen(override, data) {")
+    return extract_js_function(source, "function sessionPanelShouldOpen(override, data) {")
 
 
 def test_default_is_collapsed(fn_src):
@@ -147,7 +136,7 @@ def test_filter_pills_wear_the_harness_marks():
     same identity the Overview and the panel headers use, and keeps the harness
     name as title plus aria-label so a mark-only pill is still identifiable."""
     source = INDEX_HTML.read_text(encoding="utf-8")
-    pills = _extract_js_function(source, "function buildSessionQuickFilterPills() {")
+    pills = extract_js_function(source, "function buildSessionQuickFilterPills() {")
     assert "btn.appendChild(createToolIdentity(tool));" in pills
     assert "btn.title = name;" in pills
     assert "btn.setAttribute('aria-label', name);" in pills
@@ -193,7 +182,7 @@ def test_pill_density_collapses_only_when_the_names_do_not_fit():
     say "these fit now" on the next resize, and one that fits must refuse to
     latch, whichever way the viewport moved."""
     source = INDEX_HTML.read_text(encoding="utf-8")
-    fn = _extract_js_function(source, "function updateSessionPillDensity() {")
+    fn = extract_js_function(source, "function updateSessionPillDensity() {")
     program = """
 const AVAILABLE = 400;
 function makeBar(labelledWidth, preCollapsed) {
@@ -251,7 +240,7 @@ def test_pill_density_runs_on_load_and_on_resize():
     steals width, is a row that collapses never: the measurement needs a trigger
     for each of the three ways it can change."""
     source = INDEX_HTML.read_text(encoding="utf-8")
-    init = _extract_js_function(source, "function initSessionPillDensity() {")
+    init = extract_js_function(source, "function initSessionPillDensity() {")
     assert "new ResizeObserver(scheduleSessionPillDensity).observe(watched)" in init
     assert "window.addEventListener('resize', scheduleSessionPillDensity)" in init
     assert "document.fonts.ready" in init
@@ -259,7 +248,7 @@ def test_pill_density_runs_on_load_and_on_resize():
     # and an observer on the element its own edit resized fires forever.
     assert "getElementById('sessionsPanelToolbar')" in init
     # Every rebuild of the pill row re-measures.
-    pills = _extract_js_function(source, "function buildSessionQuickFilterPills() {")
+    pills = extract_js_function(source, "function buildSessionQuickFilterPills() {")
     assert "scheduleSessionPillDensity();" in pills
     assert "initSessionPillDensity();" in source
 
@@ -286,7 +275,7 @@ def pill_browser_page():
         asset = INDEX_HTML.parent / path.removeprefix("/static/")
         mime = "image/svg+xml" if asset.suffix == ".svg" else "image/png"
         icons[path] = f"data:{mime};base64," + base64.b64encode(asset.read_bytes()).decode()
-    functions = "\n".join(_extract_js_function(source, signature) for signature in (
+    functions = "\n".join(extract_js_function(source, signature) for signature in (
         "function normalizeToolBrandKey(tool) {",
         "function toolBrandMeta(tool) {",
         "function createToolBrandIcon(tool, meta) {",

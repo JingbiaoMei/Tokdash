@@ -6,14 +6,15 @@ labels, reset countdown formatting, and unlimited bucket visibility.
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
 
 import tokdash
 from tokdash.model_normalization import normalize_model_name
+
+from support.frontend import extract_js_function, needs_node
+
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 
@@ -47,25 +48,11 @@ SYNC_CASES = [
 ]
 
 
-def _extract_js_function(src: str, signature: str) -> str:
-    start = src.find(signature)
-    assert start != -1, f"{signature} not found in index.html"
-    depth = 0
-    for j in range(src.find("{", start), len(src)):
-        if src[j] == "{":
-            depth += 1
-        elif src[j] == "}":
-            depth -= 1
-            if depth == 0:
-                return src[start : j + 1]
-    raise AssertionError(f"unterminated JS function: {signature}")
-
-
 def _extract_js_normalize_model_name(src: str) -> str:
-    return _extract_js_function(src, "function normalizeModelName(name) {")
+    return extract_js_function(src, "function normalizeModelName(name) {")
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_frontend_normalize_model_name_matches_backend(tmp_path):
     """The JS twin in index.html must agree with the backend normalizer.
 
@@ -105,10 +92,10 @@ def test_frontend_normalize_model_name_matches_backend(tmp_path):
     assert not mismatches, "frontend/backend normalizer drift:\n  " + "\n  ".join(mismatches)
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_quota_plan_label_does_not_call_detected_providers_undetected(tmp_path):
     src = INDEX_HTML.read_text(encoding="utf-8")
-    js_fn = _extract_js_function(
+    js_fn = extract_js_function(
         # Third argument is a card's own plan decision (Claude, whose card can carry several
         # installs). These cases pass none, which is what every other provider does.
         src, "function quotaProviderPlanLabel(providerKey, provider, planOverride) {"
@@ -154,23 +141,23 @@ def test_quota_plan_label_does_not_call_detected_providers_undetected(tmp_path):
     ]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_minimax_china_region_moves_from_bucket_to_card_title(tmp_path):
     src = INDEX_HTML.read_text(encoding="utf-8")
-    card_fn = _extract_js_function(
+    card_fn = extract_js_function(
         # Third argument is Claude's install view; MiniMax reads its regions off `buckets`.
         src, "function quotaProviderCardLabel(providerKey, provider, claudeView) {"
     )
-    window_fn = _extract_js_function(
+    window_fn = extract_js_function(
         src, "function quotaWindowLabel(provider, bucket) {"
     )
-    series_fn = _extract_js_function(
+    series_fn = extract_js_function(
         src, "function quotaSeriesLabel(item) {"
     )
-    accounts_fn = _extract_js_function(
+    accounts_fn = extract_js_function(
         src, "function miniMaxCardAccounts(buckets, provider) {"
     )
-    groups_fn = _extract_js_function(
+    groups_fn = extract_js_function(
         src, "function miniMaxBucketGroups(buckets, provider) {"
     )
     harness = tmp_path / "minimax-region-label.js"
@@ -225,10 +212,10 @@ def test_minimax_china_region_moves_from_bucket_to_card_title(tmp_path):
     }
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_kimi_legacy_plan_bucket_is_labeled_weekly(tmp_path):
     src = INDEX_HTML.read_text(encoding="utf-8")
-    window_fn = _extract_js_function(
+    window_fn = extract_js_function(
         src, "function quotaWindowLabel(provider, bucket) {"
     )
     harness = tmp_path / "kimi-window-label.js"
@@ -250,7 +237,7 @@ def test_kimi_legacy_plan_bucket_is_labeled_weekly(tmp_path):
     assert result.stdout == "windowWeekly"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_antigravity_window_label_auto_determined_from_reset_time(tmp_path):
     """Antigravity's fetchAvailableModels returns a single quotaInfo per model - whichever
     window (5-hour OR weekly) currently binds the shared pool. The card label must reflect
@@ -259,8 +246,8 @@ def test_antigravity_window_label_auto_determined_from_reset_time(tmp_path):
     weekly. Reproduces the 3d22h weekly case that previously rendered a stale "5-hour" label.
     """
     src = INDEX_HTML.read_text(encoding="utf-8")
-    window_fn = _extract_js_function(src, "function quotaWindowLabel(provider, bucket) {")
-    ag_fn = _extract_js_function(src, "function antigravityWindowLabel(bucket) {")
+    window_fn = extract_js_function(src, "function quotaWindowLabel(provider, bucket) {")
+    ag_fn = extract_js_function(src, "function antigravityWindowLabel(bucket) {")
     harness = tmp_path / "antigravity-window-label.js"
     harness.write_text(
         "function t(key) { return key; }\n"
@@ -301,7 +288,7 @@ def test_antigravity_window_label_auto_determined_from_reset_time(tmp_path):
     ]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_quota_reset_countdown_uses_companion_single_unit_rule(tmp_path):
     """The quota bar sub-line shows a relative countdown using the companion app's rule:
     a single unit only (no combined "3d 22h 43m" noise). >= 1 day -> days, >= 2 hours ->
@@ -314,7 +301,7 @@ def test_quota_reset_countdown_uses_companion_single_unit_rule(tmp_path):
     weekly window read "resets in 3 days" here but "resets in 94 hours" in the flyout.
     """
     src = INDEX_HTML.read_text(encoding="utf-8")
-    fn = _extract_js_function(src, "function formatResetCountdownFromSeconds(remaining) {")
+    fn = extract_js_function(src, "function formatResetCountdownFromSeconds(remaining) {")
     harness = tmp_path / "reset-countdown.js"
     harness.write_text(
         "function t(key) {\n"
@@ -369,10 +356,10 @@ def test_quota_reset_countdown_uses_companion_single_unit_rule(tmp_path):
     ]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_unlimited_quota_bucket_remains_visible_without_numeric_percent(tmp_path):
     src = INDEX_HTML.read_text(encoding="utf-8")
-    usage_fn = _extract_js_function(
+    usage_fn = extract_js_function(
         src, "function isQuotaUsageBucket(bucket) {"
     )
     harness = tmp_path / "quota-usage-bucket.js"

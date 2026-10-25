@@ -6,33 +6,19 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
 import tokdash  # type: ignore[import-untyped]
+
+from support.frontend import extract_js_function, needs_node
+
 
 STATIC_DIR = Path(tokdash.__file__).parent / "static"
 INDEX_HTML = STATIC_DIR / "index.html"
 ICON_DIR = STATIC_DIR / "icons" / "agents"
 PROJECT_ROOT = STATIC_DIR.parents[2]
 DOCS_PILL_DIR = PROJECT_ROOT / "docs" / "assets" / "agents" / "pills"
-
-
-def _extract_js_function(source: str, signature: str) -> str:
-    start = source.find(signature)
-    assert start != -1, f"{signature} not found in index.html"
-    body_start = source.find("{", start)
-    depth = 0
-    for index in range(body_start, len(source)):
-        if source[index] == "{":
-            depth += 1
-        elif source[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return source[start : index + 1]
-    raise AssertionError(f"unterminated JavaScript function: {signature}")
 
 
 def test_supported_tool_brand_icons_are_local_and_small() -> None:
@@ -225,7 +211,7 @@ def test_quota_provider_cards_wear_the_shared_brand_marks() -> None:
         f"{sorted(listed - set(pairs))}"
     )
 
-    helper = _extract_js_function(source, "function createQuotaProviderIdentity(providerKey, label) {")
+    helper = extract_js_function(source, "function createQuotaProviderIdentity(providerKey, label) {")
     # A provider the table does not mention yet resolves on its own key, which is how a
     # card for a brand with no asset in the package still renders, on the shared tile.
     assert "QUOTA_PROVIDER_BRAND_KEYS[providerKey] || providerKey" in helper
@@ -322,7 +308,7 @@ process.stdout.write(JSON.stringify({
 """
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_the_quota_card_heading_keeps_its_name_readable(tmp_path: Path) -> None:
     """The one accessible name a quota card heading has is the text inside the
     identity wrapper, so hiding that wrapper to keep the mark out of the a11y tree
@@ -341,7 +327,7 @@ def test_the_quota_card_heading_keeps_its_name_readable(tmp_path: Path) -> None:
     )
     assert table, "the quota provider -> brand key table is missing"
     functions = "\n".join(
-        _extract_js_function(source, sig) for sig in QUOTA_IDENTITY_SIGNATURES
+        extract_js_function(source, sig) for sig in QUOTA_IDENTITY_SIGNATURES
     )
     harness = tmp_path / "quota-identity.js"
     harness.write_text(
@@ -363,10 +349,10 @@ def test_the_quota_card_heading_keeps_its_name_readable(tmp_path: Path) -> None:
     assert report["darkInvert"] == "true", "the card inherits the brand's dark-mode inversion"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_tool_brand_icon_requests_are_shared_per_asset(tmp_path: Path) -> None:
     source = INDEX_HTML.read_text(encoding="utf-8")
-    function = _extract_js_function(source, "function loadToolBrandIcon(iconPath) {")
+    function = extract_js_function(source, "function loadToolBrandIcon(iconPath) {")
     harness = tmp_path / "tool-brand-icon-cache.js"
     harness.write_text(
         """

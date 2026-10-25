@@ -11,32 +11,18 @@ render functions under node against a stub DOM and a hand-driven idle queue.
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
 
 import tokdash
 
+from support.frontend import extract_js_function, needs_node
+
+
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 
-pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
-
-
-def _extract_js_function(src: str, signature: str) -> str:
-    start = src.find(signature)
-    assert start >= 0, f"{signature} not found"
-    depth = 0
-    body_start = start + len(signature) - 1 if signature.endswith("{") else src.find("{", start)
-    for index in range(body_start, len(src)):
-        if src[index] == "{":
-            depth += 1
-        elif src[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return src[start : index + 1]
-    raise AssertionError(f"unterminated function: {signature}")
+pytestmark = needs_node
 
 
 HARNESS = """
@@ -382,7 +368,7 @@ main();
 def _run(tmp_path: Path, scenario: str) -> dict:
     source = INDEX_HTML.read_text(encoding="utf-8")
     functions = "\n".join(
-        _extract_js_function(source, signature)
+        extract_js_function(source, signature)
         for signature in (
             "function windowKeyFor(customDays, dateFrom, dateTo) {",
             "function usageServerKeyFor(servers = selectedServers()) {",
@@ -547,7 +533,7 @@ def test_re_rendering_the_same_range_does_not_clear(tmp_path):
 def test_the_cleared_markup_matches_the_placeholder_the_page_ships(tmp_path):
     """Clearing reuses the initial markup, so the two cannot drift apart."""
     source = INDEX_HTML.read_text(encoding="utf-8")
-    cleared = _extract_js_function(source, "function clearOverviewBreakdowns() {")
+    cleared = extract_js_function(source, "function clearOverviewBreakdowns() {")
 
     for shipped in (
         (

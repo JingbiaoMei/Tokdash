@@ -7,13 +7,15 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
 import tokdash
+
+from support.frontend import extract_js_function, needs_node
+
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 THEME_CONFIG_JS = Path(tokdash.__file__).parent / "static" / "theme-config.js"
@@ -29,25 +31,6 @@ def _heat_palette_for(theme: str) -> tuple[list[str], list[str]]:
     )
     assert match, f"heat palette not found for {theme}"
     return json.loads(match.group(1)), json.loads(match.group(2))
-
-
-def _extract_js_function(source: str, signature: str) -> str:
-    start = source.find(signature)
-    assert start != -1, f"{signature} not found in index.html"
-    depth = 0
-    body_start = (
-        start + len(signature) - 1
-        if signature.endswith("{")
-        else source.find("{", start)
-    )
-    for index in range(body_start, len(source)):
-        if source[index] == "{":
-            depth += 1
-        elif source[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return source[start : index + 1]
-    raise AssertionError(f"unterminated JavaScript function: {signature}")
 
 
 PROFILE_FUNCTIONS = [
@@ -74,7 +57,7 @@ PROFILE_FUNCTIONS = [
 def _run_profile_js(tmp_path: Path, expression: str, payload: dict) -> object:
     source = INDEX_HTML.read_text(encoding="utf-8")
     functions = "\n".join(
-        _extract_js_function(source, signature) for signature in PROFILE_FUNCTIONS
+        extract_js_function(source, signature) for signature in PROFILE_FUNCTIONS
     )
     harness = tmp_path / "profile-stats.js"
     harness.write_text(
@@ -115,15 +98,15 @@ def _run_profile_tooltip_js(tmp_path: Path, expression: str, payload: dict) -> o
     source = INDEX_HTML.read_text(encoding="utf-8")
     functions = "\n".join(
         [
-            _extract_js_function(source, "function normalizeTokenCount(value) {"),
-            _extract_js_function(source, "function formatCompactTokenCount(value) {"),
-            _extract_js_function(
+            extract_js_function(source, "function normalizeTokenCount(value) {"),
+            extract_js_function(source, "function formatCompactTokenCount(value) {"),
+            extract_js_function(
                 source,
                 "function formatTokenCount(value, includeUnit = false) {",
             ),
-            _extract_js_function(source, "function safeProfileNumber(value) {"),
-            _extract_js_function(source, "function getProfileMilestoneTier(value) {"),
-            _extract_js_function(
+            extract_js_function(source, "function safeProfileNumber(value) {"),
+            extract_js_function(source, "function getProfileMilestoneTier(value) {"),
+            extract_js_function(
                 source,
                 "function formatProfileAggregateTooltip(aggregate, cumulative = false, milestonesEnabled = false) {",
             ),
@@ -152,7 +135,7 @@ def _run_profile_tooltip_position_js(
     tmp_path: Path, expression: str, payload: dict
 ) -> object:
     source = INDEX_HTML.read_text(encoding="utf-8")
-    function = _extract_js_function(
+    function = extract_js_function(
         source,
         "function calculateProfileActivityTooltipPosition(targetRect, tooltipRect, viewport, gap = 8) {",
     )
@@ -188,7 +171,7 @@ def _day(date: str, tokens: int, *, cost: float = 0.0) -> dict:
     }
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_profile_window_is_two_monday_aligned_weeks_and_marks_future(tmp_path: Path):
     payload = {"today": "2026-01-07", "days": [_day("2026-01-06", 20)]}
     result = _run_profile_js(
@@ -205,7 +188,7 @@ def test_profile_window_is_two_monday_aligned_weeks_and_marks_future(tmp_path: P
     ] == 20
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_profile_summary_excludes_future_and_calculates_streaks(tmp_path: Path):
     payload = {
         "today": "2026-01-07",
@@ -233,7 +216,7 @@ def test_profile_summary_excludes_future_and_calculates_streaks(tmp_path: Path):
     assert result["longestStreak"] == 5
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_profile_week_and_cumulative_cells_follow_seven_level_scale(tmp_path: Path):
     payload = {
         "today": "2026-01-11",
@@ -275,7 +258,7 @@ def test_profile_week_and_cumulative_cells_follow_seven_level_scale(tmp_path: Pa
     assert result["levels"] == [0, 1, 1, 2, 3, 4]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_profile_milestones_are_inclusive_and_enrich_each_mode(tmp_path: Path):
     payload = {
         "today": "2026-01-11",
@@ -345,7 +328,7 @@ def test_profile_milestones_are_inclusive_and_enrich_each_mode(tmp_path: Path):
     assert result["previewMode"] == "weekly"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_profile_default_window_is_52_weeks_and_empty_or_zero_data_is_safe(
     tmp_path: Path,
 ):
@@ -381,7 +364,7 @@ def test_profile_default_window_is_52_weeks_and_empty_or_zero_data_is_safe(
         assert not any(cell["active"] for cell in result["daily"]["cells"])
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_overview_profile_preview_uses_daily_52_week_model(tmp_path: Path):
     payload = {
         "today": "2026-07-27",
@@ -406,7 +389,7 @@ def test_overview_profile_preview_uses_daily_52_week_model(tmp_path: Path):
     assert result["cells"][-1]["level"] == 0
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_profile_week_aggregates_breakdown_and_cost_across_year_boundary(
     tmp_path: Path,
 ):
@@ -433,7 +416,7 @@ def test_profile_week_aggregates_breakdown_and_cost_across_year_boundary(
     }
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 @pytest.mark.parametrize("end,cumulative,title,date_calls", [
     ("2026-07-20", False, "2026-07-20", 1),
     ("2026-07-20", True, "Cumulative · 2026-07-20 → 2026-07-20", 2),
@@ -459,7 +442,7 @@ def test_profile_tooltip_formats_only_dates_used_by_its_title(tmp_path, end, cum
     assert all(value.startswith(title + ". Total:") for value in result["accessible"])
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_profile_tooltip_model_has_semantic_rows_and_accessible_text(tmp_path: Path):
     payload = {
         "aggregate": {
@@ -513,7 +496,7 @@ def test_profile_tooltip_model_has_semantic_rows_and_accessible_text(tmp_path: P
     )
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_profile_tooltip_keeps_zero_rows_and_omits_zero_reasoning(tmp_path: Path):
     payload = {
         "aggregate": {
@@ -554,7 +537,7 @@ def test_profile_tooltip_keeps_zero_rows_and_omits_zero_reasoning(tmp_path: Path
     assert "Reasoning" not in result["accessibleText"]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_profile_tooltip_exposes_milestone_badge_tone_and_accessible_text(
     tmp_path: Path,
 ):
@@ -603,15 +586,15 @@ def test_profile_tooltip_exposes_milestone_badge_tone_and_accessible_text(
 def test_profile_milestone_tooltip_and_tier_aura_contract():
     source = INDEX_HTML.read_text(encoding="utf-8")
     compact = re.sub(r"\s+", "", source)
-    formatter = _extract_js_function(
+    formatter = extract_js_function(
         source,
         "function formatProfileAggregateTooltip(aggregate, cumulative = false, milestonesEnabled = false) {",
     )
-    renderer = _extract_js_function(
+    renderer = extract_js_function(
         source,
         "function renderProfileActivityTooltipContent(tooltip, model) {",
     )
-    profile_renderer = _extract_js_function(source, "function renderProfileView() {")
+    profile_renderer = extract_js_function(source, "function renderProfileView() {")
 
     assert "milestone: 'Milestone'" in source
     assert "milestone: '里程碑'" in source
@@ -654,7 +637,7 @@ html.dark[data-ui-theme="paper"] .overview-profile-band {
         "inset0001pxvar(--profile-milestone-keyline)"
     ) >= 8
 
-    palette_sync = _extract_js_function(
+    palette_sync = extract_js_function(
         source,
         "function syncProfileMilestonePalette() {",
     )
@@ -662,8 +645,8 @@ html.dark[data-ui-theme="paper"] .overview-profile-band {
     assert "getProfileActivityColor(level)" in palette_sync
     assert "shell.style.setProperty(`--profile-milestone-${level}`" in palette_sync
 
-    style_setter = _extract_js_function(source, "function applyStyleTheme(theme) {")
-    color_mode_setter = _extract_js_function(source, "function applyTheme(theme) {")
+    style_setter = extract_js_function(source, "function applyStyleTheme(theme) {")
+    color_mode_setter = extract_js_function(source, "function applyTheme(theme) {")
     assert "syncProfileMilestonePalette();" in style_setter
     assert "syncProfileMilestonePalette();" in color_mode_setter
 
@@ -814,7 +797,7 @@ def test_profile_visual_polish_contract():
     assert "button.profile-activity-cell:not(:disabled):is(:hover,:focus-visible)" in source
     assert ".profile-activity-cell{transform:none!important;}" in compact
 
-    renderer = _extract_js_function(
+    renderer = extract_js_function(
         source,
         "function renderProfileActivityTooltipContent(tooltip, model) {",
     )
@@ -823,21 +806,21 @@ def test_profile_visual_polish_contract():
     assert "tooltip.replaceChildren(header, body);" in renderer
     assert ".innerHTML" not in renderer
 
-    binder = _extract_js_function(
+    binder = extract_js_function(
         source,
         "function bindProfileActivityTooltip(target, model) {",
     )
     assert "model.accessibleText" in binder
     assert "content.replaceAll" not in binder
 
-    resolver = _extract_js_function(
+    resolver = extract_js_function(
         source, "function resolveProfileActivityTooltip(target) {"
     )
     assert "dataset.profileTooltipId" in resolver
     assert "profileActivityTooltip" in resolver
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_profile_tooltip_position_handles_zoomed_viewport_and_edges(tmp_path: Path):
     payload = {
         "cases": [
@@ -913,15 +896,15 @@ def test_profile_tooltips_use_viewport_portal_and_reflow_on_zoom():
     assert "max-height:calc(100dvh-16px)" in compact
     assert "contain:layoutpaintstyle" in compact
 
-    viewport = _extract_js_function(
+    viewport = extract_js_function(
         source,
         "function getProfileActivityViewport() {",
     )
-    positioner = _extract_js_function(
+    positioner = extract_js_function(
         source,
         "function positionActiveProfileActivityTooltip() {",
     )
-    shower = _extract_js_function(
+    shower = extract_js_function(
         source,
         "function showProfileActivityTooltip(target, model) {",
     )
@@ -951,7 +934,7 @@ def test_profile_activity_legend_is_safe_localized_and_mode_aware():
     assert ".profile-activity-legend-bars{" in compact
     assert ".profile-activity-legend-badge{" in compact
 
-    renderer = _extract_js_function(
+    renderer = extract_js_function(
         source,
         "function renderProfileActivityLegend(targetId, mode) {",
     )
@@ -965,7 +948,7 @@ def test_profile_activity_legend_is_safe_localized_and_mode_aware():
     assert "glyph.setAttribute('aria-hidden', 'true');" in renderer
     assert ".innerHTML" not in renderer
 
-    profile_renderer = _extract_js_function(
+    profile_renderer = extract_js_function(
         source,
         "function renderProfileView() {",
     )
@@ -991,7 +974,7 @@ def test_profile_milestone_toggle_defaults_off_persists_and_syncs_both_views():
     assert ".profile-milestone-toggle{" in compact
     assert '[data-milestones-enabled="false"]' in source
 
-    setter = _extract_js_function(
+    setter = extract_js_function(
         source,
         "function setProfileMilestonesEnabled(enabled) {",
     )
@@ -1001,7 +984,7 @@ def test_profile_milestone_toggle_defaults_off_persists_and_syncs_both_views():
     assert "renderProfileView();" in setter
     assert "renderOverviewProfilePreview();" in setter
 
-    syncer = _extract_js_function(
+    syncer = extract_js_function(
         source,
         "function syncProfileMilestoneControls() {",
     )
@@ -1009,7 +992,7 @@ def test_profile_milestone_toggle_defaults_off_persists_and_syncs_both_views():
     assert "'aria-pressed'" in syncer
     assert "'data-milestones-enabled'" in syncer
 
-    applier = _extract_js_function(
+    applier = extract_js_function(
         source,
         "function applyProfileMilestone(target, milestone) {",
     )
@@ -1047,7 +1030,7 @@ def test_paper_uses_warm_terracotta_heat_palette():
         "#3B82F6", "#60A5FA", "#93C5FD", "#BFDBFE",
     ]
 
-    activity_color = _extract_js_function(
+    activity_color = extract_js_function(
         INDEX_HTML.read_text(encoding="utf-8"),
         "function getProfileActivityColor(level) {",
     )
@@ -1056,13 +1039,13 @@ def test_paper_uses_warm_terracotta_heat_palette():
 
 def test_overview_profile_renderer_reuses_stats_warm_response():
     source = INDEX_HTML.read_text(encoding="utf-8")
-    warm = _extract_js_function(
+    warm = extract_js_function(
         source, "function scheduleStatsWarm(force = false) {"
     )
-    renderer = _extract_js_function(
+    renderer = extract_js_function(
         source, "function renderOverviewProfilePreview(contributions = statsCache.default) {"
     )
-    resolver = _extract_js_function(
+    resolver = extract_js_function(
         source, "function resolveProfileActivityTooltip(target) {"
     )
 
@@ -1077,15 +1060,15 @@ def test_overview_profile_renderer_reuses_stats_warm_response():
     assert "bindProfileActivityTooltip(cell, tooltip);" in renderer
     assert "shell?.dataset.state !== 'error'" in renderer
     assert "target?.dataset.profileTooltipId || 'profileActivityTooltip'" in resolver
-    assert "renderOverviewProfilePreview();" in _extract_js_function(
+    assert "renderOverviewProfilePreview();" in extract_js_function(
         source, "function renderOverviewTab(data) {"
     )
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_overview_profile_warm_cache_refreshes_only_when_forced(tmp_path: Path):
     source = INDEX_HTML.read_text(encoding="utf-8")
-    scheduler = _extract_js_function(
+    scheduler = extract_js_function(
         source, "function scheduleStatsWarm(force = false) {"
     )
     harness = tmp_path / "profile-warm-cache.js"
@@ -1159,7 +1142,7 @@ async function flushPromises() {
     assert "scheduleStatsWarm(forceRefresh);" in source
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_today_usage_reconciles_the_profile_day_without_mutating_history(tmp_path: Path):
     payload = {
         "contributions": [
@@ -1218,9 +1201,9 @@ def test_today_usage_reconciles_the_profile_day_without_mutating_history(tmp_pat
     assert result[1]["sources"][0]["modelId"] == "gpt-test"
 
     source = INDEX_HTML.read_text(encoding="utf-8")
-    renderer = _extract_js_function(source, "function renderOverviewTab(data) {")
-    loader = _extract_js_function(source, "async function loadStats(options = {}) {")
-    warmer = _extract_js_function(source, "function scheduleStatsWarm(force = false) {")
+    renderer = extract_js_function(source, "function renderOverviewTab(data) {")
+    loader = extract_js_function(source, "async function loadStats(options = {}) {")
+    warmer = extract_js_function(source, "function scheduleStatsWarm(force = false) {")
     assert "reconcileTodayProfileContribution(" in renderer
     assert "reconcileTodayProfileContribution(" in loader
     assert "reconcileTodayProfileContribution(" in warmer
@@ -1307,13 +1290,13 @@ def test_overview_profile_summary_markup_and_style_contract():
 
 def test_overview_profile_modes_share_state_and_render_aggregate_hits_contract():
     source = INDEX_HTML.read_text(encoding="utf-8")
-    overview_renderer = _extract_js_function(
+    overview_renderer = extract_js_function(
         source,
         "function renderOverviewProfilePreview(contributions = statsCache.default) {",
     )
-    profile_renderer = _extract_js_function(source, "function renderProfileView() {")
-    setter = _extract_js_function(source, "function setProfileActivityMode(mode) {")
-    syncer = _extract_js_function(
+    profile_renderer = extract_js_function(source, "function renderProfileView() {")
+    setter = extract_js_function(source, "function setProfileActivityMode(mode) {")
+    syncer = extract_js_function(
         source,
         "function syncProfileActivityModeControls() {",
     )
@@ -1358,7 +1341,7 @@ def test_overview_profile_legend_reuses_mode_and_scroller_contract():
     ) < source.index('id="overviewProfileTooltip"')
     assert ".overview-profile-legend{" in compact
 
-    renderer = _extract_js_function(
+    renderer = extract_js_function(
         source,
         "function renderOverviewProfilePreview(contributions = statsCache.default) {",
     )
@@ -1368,15 +1351,15 @@ def test_overview_profile_legend_reuses_mode_and_scroller_contract():
     )
     assert "fetch(" not in renderer
 
-    i18n = _extract_js_function(source, "function applyI18n() {")
+    i18n = extract_js_function(source, "function applyI18n() {")
     assert "renderProfileActivityLegend('profileActivityLegend', profileActivityMode);" in i18n
     assert "renderProfileActivityLegend('overviewProfileLegend', profileActivityMode);" in i18n
 
 
 def test_overview_profile_navigation_preserves_profile_state_contract():
     source = INDEX_HTML.read_text(encoding="utf-8")
-    activator = _extract_js_function(source, "function activateDashboardTab(tab) {")
-    opener = _extract_js_function(source, "function openOverviewProfile() {")
+    activator = extract_js_function(source, "function activateDashboardTab(tab) {")
+    opener = extract_js_function(source, "function openOverviewProfile() {")
 
     assert "content.classList.add('active');" in activator
     assert "const preserveNavigation = preserveStatsNavigationOnNextActivation;" in activator
@@ -1393,7 +1376,7 @@ def test_overview_profile_navigation_preserves_profile_state_contract():
 
 def test_overview_profile_resize_rearms_initial_scroll_contract():
     source = INDEX_HTML.read_text(encoding="utf-8")
-    helper = _extract_js_function(
+    helper = extract_js_function(
         source, "function ensureOverviewProfileInitialScroll() {"
     )
 
@@ -1431,13 +1414,13 @@ def test_activity_insights_profile_and_overview_markup_contract():
 
 def test_activity_insights_use_one_shared_fetch_and_limit_profile_to_five_tools():
     source = INDEX_HTML.read_text(encoding="utf-8")
-    loader = _extract_js_function(
+    loader = extract_js_function(
         source, "async function loadActivityInsights(options = {}) {"
     )
-    profile = _extract_js_function(
+    profile = extract_js_function(
         source, "function renderProfileActivityInsights() {"
     )
-    overview = _extract_js_function(
+    overview = extract_js_function(
         source, "function renderOverviewActivityInsights() {"
     )
 
@@ -1488,7 +1471,7 @@ def _run_activity_insights_js(
 ) -> object:
     source = INDEX_HTML.read_text(encoding="utf-8")
     functions = "\n".join(
-        _extract_js_function(source, signature)
+        extract_js_function(source, signature)
         for signature in (
             "function safeActivityNumber(value) {",
             "function formatActivityShare(value) {",
@@ -1571,7 +1554,7 @@ def test_activity_insights_display_values_cover_full_partial_and_unknown_effort(
     assert empty["empty"] is True
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_main_inline_script_parses_with_node(tmp_path: Path):
     source = INDEX_HTML.read_text(encoding="utf-8")
     inline_scripts = re.findall(

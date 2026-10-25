@@ -20,57 +20,22 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
 
 import tokdash
 
+from support.frontend import extract_js_function, needs_node
+
+
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 
-needs_node = pytest.mark.skipif(
-    shutil.which("node") is None, reason="node not available"
-)
+needs_node = needs_node
 
 
 def _source() -> str:
     return INDEX_HTML.read_text(encoding="utf-8")
-
-
-def _extract_js_function(source: str, signature: str) -> str:
-    """Slice one complete function declaration out of index.html.
-
-    The parameter list is skipped explicitly: a default such as
-    `options = {}` puts braces inside parentheses, and counting those as the
-    function body truncates the function at the default value.
-    """
-    start = source.find(signature)
-    assert start != -1, f"{signature} not found in index.html"
-
-    parens = 0
-    body_start = -1
-    for index in range(start, len(source)):
-        char = source[index]
-        if char == "(":
-            parens += 1
-        elif char == ")":
-            parens -= 1
-        elif char == "{" and parens == 0:
-            body_start = index
-            break
-    assert body_start != -1, f"no body for {signature}"
-
-    depth = 0
-    for index in range(body_start, len(source)):
-        if source[index] == "{":
-            depth += 1
-        elif source[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return source[start : index + 1]
-    raise AssertionError(f"unterminated function: {signature}")
 
 
 def _run_js(tmp_path: Path, name: str, script: str, arg: str | None = None) -> str:
@@ -209,7 +174,7 @@ def test_every_chart_is_built_through_the_guarded_factory() -> None:
     the CDN is blocked, which is the failure mode this exists to prevent.
     """
     source = _source()
-    factory = _extract_js_function(source, "function createChart(context, config) {")
+    factory = extract_js_function(source, "function createChart(context, config) {")
 
     assert source.count("new Chart(") == 1, (
         "new Chart must appear exactly once, inside createChart()"
@@ -233,7 +198,7 @@ def test_chart_factory_returns_null_when_the_library_is_missing(tmp_path: Path) 
     be visible to a factory defined outside it.
     """
     source = _source()
-    factory = _extract_js_function(source, "function createChart(context, config) {")
+    factory = extract_js_function(source, "function createChart(context, config) {")
 
     without = json.loads(
         _run_js(
@@ -277,9 +242,9 @@ def test_tool_chart_legend_survives_a_missing_chart_library(tmp_path: Path) -> N
         "function t(key) { return key; }\n"
         "let toolChart = null;\n"
         "const document = { getElementById: () => ({ getContext: () => ({}) }) };\n"
-        + _extract_js_function(source, "function createChart(context, config) {")
+        + extract_js_function(source, "function createChart(context, config) {")
         + "\n"
-        + _extract_js_function(source, "function updateToolChart(byTool) {")
+        + extract_js_function(source, "function updateToolChart(byTool) {")
         + "\n"
         + "updateToolChart({ claude: { tokens: 10, cost: 1 }, codex: { tokens: 4, cost: 2 } });\n"
         + "process.stdout.write(JSON.stringify({"
@@ -316,9 +281,9 @@ def test_quota_charts_survive_a_missing_chart_library(tmp_path: Path) -> None:
         "function quotaSeriesLabel(series) { return series.provider; }\n"
         "const canvas = { getContext: () => ({}) };\n"
         "const document = { getElementById: () => null };\n"
-        + _extract_js_function(source, "function createChart(context, config) {")
+        + extract_js_function(source, "function createChart(context, config) {")
         + "\n"
-        + _extract_js_function(source, "function renderQuotaCharts(history, targets = {}) {")
+        + extract_js_function(source, "function renderQuotaCharts(history, targets = {}) {")
         + "\n"
         + "const history = { granularity: 'day', series:"
         " [{ provider: 'anthropic', label: 'Anthropic', points: [] }] };\n"
@@ -372,9 +337,9 @@ def test_quick_ranges_commit_without_flatpickr(tmp_path: Path) -> None:
         "function setQuickRangeMoreOpen() {}\n"
         "function updateDashboardByDateRange(start, end) {"
         " clicks.push([ymd(start), ymd(end)]); }\n"
-        + _extract_js_function(source, "function commitDateSelection(startDate, endDate, options = {}) {")
+        + extract_js_function(source, "function commitDateSelection(startDate, endDate, options = {}) {")
         + "\n"
-        + _extract_js_function(source, "function getQuickRangeDates(range, today = new Date()) {")
+        + extract_js_function(source, "function getQuickRangeDates(range, today = new Date()) {")
         + "\n"
         + handler
         + "\n"
@@ -482,7 +447,7 @@ def test_the_disabled_date_trigger_keeps_its_reason(tmp_path: Path) -> None:
         "const document = { getElementById: (id) => els[id] || null, querySelectorAll: () => [] };\n"
         "let activeQuickRange = 'today', currentStartDate = null, currentEndDate = null;\n"
         "function formatDateRangeTriggerText() { return ''; }\n"
-        + _extract_js_function(source, "function syncDateRangeControl() {")
+        + extract_js_function(source, "function syncDateRangeControl() {")
         + "\n"
         + "syncDateRangeControl();\n"
         + "const enabledTitle = els.dateRangeTrigger.attrs.title;\n"
@@ -508,7 +473,7 @@ def test_date_picker_init_survives_a_missing_flatpickr(tmp_path: Path) -> None:
         "const document = { getElementById: (id) => ({ id,"
         " addEventListener(type, fn) { handlers[id + ':' + type] = fn; } }) };\n"
         "let flatpickrInstance = null;\n"
-        + _extract_js_function(source, "function initDateRangePicker() {")
+        + extract_js_function(source, "function initDateRangePicker() {")
         + "\n"
         + "let threw = null;\n"
         + "try { initDateRangePicker(); handlers['dateRangeTrigger:click'](); }"
@@ -660,7 +625,7 @@ def test_3d_view_survives_a_missing_three(tmp_path: Path) -> None:
         "const els = {};\n"
         "const document = { getElementById: (id) =>"
         " (els[id] = els[id] || { innerHTML: '', textContent: '' }) };\n"
-        + _extract_js_function(source, "function render3DCalendar(contributions) {")
+        + extract_js_function(source, "function render3DCalendar(contributions) {")
         + "\n"
         + "let threw = null;\n"
         + "try { render3DCalendar([{ date: '2026-09-30', tokens: 5, cost: 1 }]); }"

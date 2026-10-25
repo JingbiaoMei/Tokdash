@@ -1,14 +1,15 @@
 """Behavior regressions for interrupted animations and sparse session filters."""
 import json
-import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
 import tokdash
 
+from support.frontend import needs_node
+
+
 STATIC = Path(tokdash.__file__).parent / "static"
-pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node unavailable")
+pytestmark = needs_node
 
 
 def run_js(tmp_path, source):

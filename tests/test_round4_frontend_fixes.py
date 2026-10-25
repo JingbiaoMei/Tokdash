@@ -10,13 +10,14 @@ period silently returned from the token-composition renderer.
 from __future__ import annotations
 
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
 
 import tokdash
+
+from support.frontend import needs_node
+
 
 STATIC = Path(tokdash.__file__).parent / "static"
 INDEX_HTML = (STATIC / "index.html").read_text(encoding="utf-8")
@@ -117,7 +118,7 @@ def test_stop_releases_inline_styles_of_cancelled_animations():
     assert "clearTransitionStyles()" in stop_fn[:600]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_rapid_tab_switching_keeps_exactly_one_active_panel(tmp_path):
     """Drive the real animateTabTransition with anime v4's stop() semantics."""
     body = TRANSITIONS_JS

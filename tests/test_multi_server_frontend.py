@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -15,31 +14,13 @@ import pytest
 
 import tokdash
 
-from test_i18n_languages import _extract_i18n_literal
+from support.frontend import extract_i18n_literal, extract_js_function, needs_node
 
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 
-# loadQuota declares `options = {}`, which this file's brace scan stops on; the sibling
-# module already has an extractor that skips the parameter list.
-from test_usage_db_schema_frontend import _extract_js_function as _extract_js_function_with_params
-
 # localStorage key the dashboard persists per-host provider visibility under.
 QUOTA_VISIBILITY_STORAGE_KEY = "tokdash-quota-visible-by-host"
-
-
-def _extract_js_function(src: str, signature: str) -> str:
-    start = src.find(signature)
-    assert start >= 0, f"{signature} not found"
-    depth = 0
-    for index in range(src.find("{", start), len(src)):
-        if src[index] == "{":
-            depth += 1
-        elif src[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return src[start : index + 1]
-    raise AssertionError(f"unterminated function: {signature}")
 
 
 def _js_binding(source: str, name: str) -> str:
@@ -69,10 +50,10 @@ def _run(tmp_path: Path, name: str, functions: list[str], expression: str, value
     return json.loads(result.stdout)
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_usage_merger_identity_sum_and_missing_previous(tmp_path):
     source = INDEX_HTML.read_text(encoding="utf-8")
-    function = _extract_js_function(source, "function combineUsagePayloads(list) {")
+    function = extract_js_function(source, "function combineUsagePayloads(list) {")
     first = {
         "total_tokens": 10,
         "total_cost": 2,
@@ -140,12 +121,12 @@ def _cache_hit_rate_entries(payload):
         yield key, payload[key][0]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 @pytest.mark.parametrize("reverse_servers", [False, True])
 @pytest.mark.parametrize("full_model_lists", ["all", "partial", "none"])
 def test_usage_merger_recomputes_cache_hit_rates(tmp_path, reverse_servers, full_model_lists):
     source = INDEX_HTML.read_text(encoding="utf-8")
-    function = _extract_js_function(source, "function combineUsagePayloads(list) {")
+    function = extract_js_function(source, "function combineUsagePayloads(list) {")
     payloads = [
         _cache_hit_rate_payload({
             "tokens_in": 90, "tokens_cache": 10, "cache_hit_rate": 0.1,
@@ -179,7 +160,7 @@ def test_usage_merger_recomputes_cache_hit_rates(tmp_path, reverse_servers, full
         assert entry["cache_hit_rate"] == pytest.approx(0.775), path
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 @pytest.mark.parametrize("stats, expected_rate", [
     ({"tokens_in": 0, "tokens_cache": 10}, 1),
     ({"tokens_in": 0, "tokens_cache": 0, "tokens_out": 50}, None),
@@ -188,7 +169,7 @@ def test_usage_merger_recomputes_cache_hit_rates(tmp_path, reverse_servers, full
 ], ids=["cache-only", "zero-denominator", "no-input-breakdown", "no-rate-or-input-breakdown"])
 def test_usage_merger_cache_hit_rate_edge_cases(tmp_path, stats, expected_rate):
     source = INDEX_HTML.read_text(encoding="utf-8")
-    function = _extract_js_function(source, "function combineUsagePayloads(list) {")
+    function = extract_js_function(source, "function combineUsagePayloads(list) {")
     payload = _cache_hit_rate_payload(stats)
     merged = _run(tmp_path, "cache-edge", [function], "combineUsagePayloads(input)", [payload, payload])
 
@@ -198,10 +179,10 @@ def test_usage_merger_cache_hit_rate_edge_cases(tmp_path, stats, expected_rate):
         assert ("tokens_in" in entry) == ("tokens_in" in stats), path
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_usage_merger_preserves_single_server_cache_hit_rates(tmp_path):
     source = INDEX_HTML.read_text(encoding="utf-8")
-    function = _extract_js_function(source, "function combineUsagePayloads(list) {")
+    function = extract_js_function(source, "function combineUsagePayloads(list) {")
     # Keep the server's rounded rate verbatim on the single-server path.
     payload = _cache_hit_rate_payload({
         "tokens_in": 2, "tokens_cache": 1, "cache_hit_rate": 0.3333,
@@ -209,10 +190,10 @@ def test_usage_merger_preserves_single_server_cache_hit_rates(tmp_path):
     assert _run(tmp_path, "cache-identity", [function], "combineUsagePayloads(input)", [payload]) == payload
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_overview_deltas_use_one_decimal_place(tmp_path):
     source = INDEX_HTML.read_text(encoding="utf-8")
-    function = _extract_js_function(source, "function renderDelta(elementId, pctChange) {")
+    function = extract_js_function(source, "function renderDelta(elementId, pctChange) {")
     harness = [
         # renderDelta toggles classes now (inline colors were invisible in dark mode),
         # so the stub element carries a minimal classList.
@@ -243,11 +224,11 @@ def test_overview_deltas_use_one_decimal_place(tmp_path):
     ) == "↑ 12.0% vs prev period"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_stats_and_session_mergers(tmp_path):
     source = INDEX_HTML.read_text(encoding="utf-8")
-    stats_fn = _extract_js_function(source, "function combineStatsPayloads(list) {")
-    sessions_fn = _extract_js_function(source, "function mergeSessionLists(list) {")
+    stats_fn = extract_js_function(source, "function combineStatsPayloads(list) {")
+    sessions_fn = extract_js_function(source, "function mergeSessionLists(list) {")
     stats = _run(
         tmp_path,
         "stats",
@@ -364,14 +345,14 @@ def test_multi_server_contract_is_client_only_and_service_worker_is_same_origin(
     assert "if (!quotaSingleScopeOwner && lastQuotaServerRows.length) {" in source
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_multi_server_quota_hides_single_server_sections(tmp_path):
     source = INDEX_HTML.read_text(encoding="utf-8")
     quota_start = source.index('id="quota-content"')
     quota_end = source.index('id="pricing-content"')
     assert quota_start < source.index('id="quotaSingleServerPanel"') < quota_end
     assert quota_start < source.index('id="quotaSingleServerCharts"') < quota_end
-    function = _extract_js_function(source, "function setQuotaSingleServerLayout(multi) {")
+    function = extract_js_function(source, "function setQuotaSingleServerLayout(multi) {")
     expression = """(() => {
       const sections = {
         quotaSingleServerPanel: { hidden: false, style: { display: '' } },
@@ -484,18 +465,18 @@ def _quota_visibility_pure_functions(source: str) -> list[str]:
         _js_binding(source, "QUOTA_VISIBILITY_GLOBAL_KEY"),
         _js_binding(source, "quotaVisibilityByHost"),
         _js_binding(source, "quotaVisibilityGlobalDefaults"),
-        _extract_js_function(source, "function quotaVisibilityHostKey(hostKey) {"),
-        _extract_js_function(source, "function allQuotaProvidersVisible() {"),
-        _extract_js_function(source, "function quotaPresentProviders(payload) {"),
-        _extract_js_function(source, "function readQuotaVisibilityStorage(key) {"),
-        _extract_js_function(source, "function loadQuotaVisibilityByHost() {"),
-        _extract_js_function(source, "function loadQuotaVisibility(hostKey) {"),
-        _extract_js_function(source, "function quotaProviderLabel(provider) {"),
-        _extract_js_function(source, "function quotaVisibilityLabelText(present, hostKey) {"),
+        extract_js_function(source, "function quotaVisibilityHostKey(hostKey) {"),
+        extract_js_function(source, "function allQuotaProvidersVisible() {"),
+        extract_js_function(source, "function quotaPresentProviders(payload) {"),
+        extract_js_function(source, "function readQuotaVisibilityStorage(key) {"),
+        extract_js_function(source, "function loadQuotaVisibilityByHost() {"),
+        extract_js_function(source, "function loadQuotaVisibility(hostKey) {"),
+        extract_js_function(source, "function quotaProviderLabel(provider) {"),
+        extract_js_function(source, "function quotaVisibilityLabelText(present, hostKey) {"),
     ]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_quota_presence_and_label_are_per_payload(tmp_path):
     source = INDEX_HTML.read_text(encoding="utf-8")
     functions = _quota_visibility_pure_functions(source)
@@ -810,7 +791,7 @@ process.stdout.write(JSON.stringify({
 """
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_quota_visibility_toggle_on_partial_multi_load_updates_the_block(tmp_path):
     source = INDEX_HTML.read_text(encoding="utf-8")
     body = QUOTA_VISIBILITY_DOM_STUBS + "\n" + _quota_visibility_dom_functions(source) + "\n" + QUOTA_VISIBILITY_PARTIAL_SCENARIO
@@ -838,25 +819,25 @@ def _quota_visibility_dom_functions(source: str) -> str:
             "let lastQuotaServerRows = [];",
             "let lastQuotaPayload = null;",
             "let lastQuotaHistory = null;",
-            _extract_js_function(source, "function quotaVisibilityHostKey(hostKey) {"),
-            _extract_js_function(source, "function allQuotaProvidersVisible() {"),
-            _extract_js_function(source, "function quotaPresentProviders(payload) {"),
-            _extract_js_function(source, "function readQuotaVisibilityStorage(key) {"),
-            _extract_js_function(source, "function loadQuotaVisibilityByHost() {"),
-            _extract_js_function(source, "function loadQuotaVisibility(hostKey) {"),
-            _extract_js_function(source, "function persistQuotaVisibility() {"),
-            _extract_js_function(source, "function quotaProviderLabel(provider) {"),
-            _extract_js_function(source, "function quotaVisibilityLabelText(present, hostKey) {"),
-            _extract_js_function(source, "function quotaSingleScopeServer() {"),
-            _extract_js_function(source, "function quotaSingleScopeHostKey() {"),
-            _extract_js_function(source, "function buildQuotaVisibilityRow(provider, hostKey) {"),
-            _extract_js_function(source, "function createQuotaVisibilityControl(present, hostKey) {"),
-            _extract_js_function(source, "function syncQuotaVisibilityControl(control, present, hostKey) {"),
-            _extract_js_function(source, "function syncQuotaVisibilityControlInPlace(control, present) {"),
-            _extract_js_function(source, "function refreshQuotaServerScope(server) {"),
-            _extract_js_function(source, "function refreshQuotaSingleScope() {"),
-            _extract_js_function(source, "function syncQuotaSingleVisibility(payload) {"),
-            _extract_js_function(source, "function refreshQuotaScopeForHost(hostKey) {"),
+            extract_js_function(source, "function quotaVisibilityHostKey(hostKey) {"),
+            extract_js_function(source, "function allQuotaProvidersVisible() {"),
+            extract_js_function(source, "function quotaPresentProviders(payload) {"),
+            extract_js_function(source, "function readQuotaVisibilityStorage(key) {"),
+            extract_js_function(source, "function loadQuotaVisibilityByHost() {"),
+            extract_js_function(source, "function loadQuotaVisibility(hostKey) {"),
+            extract_js_function(source, "function persistQuotaVisibility() {"),
+            extract_js_function(source, "function quotaProviderLabel(provider) {"),
+            extract_js_function(source, "function quotaVisibilityLabelText(present, hostKey) {"),
+            extract_js_function(source, "function quotaSingleScopeServer() {"),
+            extract_js_function(source, "function quotaSingleScopeHostKey() {"),
+            extract_js_function(source, "function buildQuotaVisibilityRow(provider, hostKey) {"),
+            extract_js_function(source, "function createQuotaVisibilityControl(present, hostKey) {"),
+            extract_js_function(source, "function syncQuotaVisibilityControl(control, present, hostKey) {"),
+            extract_js_function(source, "function syncQuotaVisibilityControlInPlace(control, present) {"),
+            extract_js_function(source, "function refreshQuotaServerScope(server) {"),
+            extract_js_function(source, "function refreshQuotaSingleScope() {"),
+            extract_js_function(source, "function syncQuotaSingleVisibility(payload) {"),
+            extract_js_function(source, "function refreshQuotaScopeForHost(hostKey) {"),
         ]
     )
 
@@ -868,7 +849,7 @@ def _run_quota_dom(tmp_path: Path, name: str, body: str) -> dict:
     return json.loads(result.stdout)
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_quota_visibility_menu_name_follows_language_changes(tmp_path):
     source = INDEX_HTML.read_text(encoding="utf-8")
     scenario = r"""
@@ -900,8 +881,8 @@ process.stdout.write(JSON.stringify({initial, expectedInitial: I18N.ja.quotaVisi
 """
     body = "\n".join([
         QUOTA_VISIBILITY_DOM_STUBS,
-        _extract_i18n_literal(source),
-        _extract_js_function(source, "function t(key, vars) {"),
+        extract_i18n_literal(source),
+        extract_js_function(source, "function t(key, vars) {"),
         _quota_visibility_dom_functions(source),
         scenario,
     ])
@@ -915,7 +896,7 @@ process.stdout.write(JSON.stringify({initial, expectedInitial: I18N.ja.quotaVisi
         assert row["codexChecked"] is False
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_quota_visibility_toggle_touches_only_its_own_host(tmp_path):
     source = INDEX_HTML.read_text(encoding="utf-8")
     body = QUOTA_VISIBILITY_DOM_STUBS + "\n" + _quota_visibility_dom_functions(source) + "\n" + QUOTA_VISIBILITY_MULTI_SCENARIO
@@ -949,7 +930,7 @@ def test_quota_visibility_toggle_touches_only_its_own_host(tmp_path):
     assert out["storedKeys"] == [QUOTA_VISIBILITY_STORAGE_KEY]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_quota_visibility_toggle_updates_single_server_scope(tmp_path):
     source = INDEX_HTML.read_text(encoding="utf-8")
     body = QUOTA_VISIBILITY_DOM_STUBS + "\n" + _quota_visibility_dom_functions(source) + "\n" + QUOTA_VISIBILITY_SINGLE_SCENARIO
@@ -962,7 +943,7 @@ def test_quota_visibility_toggle_updates_single_server_scope(tmp_path):
     ]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_quota_visibility_single_scope_follows_the_selected_server(tmp_path):
     """Selecting one remote host instead of several shows that host's own choices, so the
     settings-row dropdown, its cards and its label all read the same host key."""
@@ -982,7 +963,7 @@ def test_quota_visibility_single_scope_follows_the_selected_server(tmp_path):
     assert out["label"] == "quotaVisibilityPrefix Codex"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_quota_visibility_seeds_untouched_hosts_from_the_legacy_global_choice(tmp_path):
     """Pre-per-host builds stored one shared choice. After the upgrade that value seeds
     every host, and a host's own toggle wins over it."""
@@ -1011,7 +992,7 @@ def test_quota_visibility_seeds_untouched_hosts_from_the_legacy_global_choice(tm
     assert out["local"] == "quotaVisibilityPrefix Claude Code"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_quota_visibility_cached_payload_keeps_its_own_host(tmp_path):
     """Load A, then select B and fail to load B: the single-server UI still shows A's cached
     payload, so A's dropdown must repaint A's cards and charts through A's map, not B's."""
@@ -1060,8 +1041,8 @@ def _quota_visibility_load_functions(source: str) -> str:
     return "\n".join(
         [
             _quota_visibility_dom_functions(source),
-            _extract_js_function(source, "function collectServerResults("),
-            _extract_js_function_with_params(source, "async function loadQuota("),
+            extract_js_function(source, "function collectServerResults("),
+            extract_js_function(source, "async function loadQuota("),
         ]
     )
 
@@ -1146,7 +1127,7 @@ async function fetchJsonWithRetry(server, path) {
 """
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_quota_visibility_failed_reload_after_partial_multi_load_keeps_the_block(tmp_path):
     """Multi selection, one host answering, then a refresh that fails completely: the surviving
     server block is what the user sees, so its dropdown must still drive its own block."""
@@ -1193,24 +1174,24 @@ def _route_source(source: str) -> list[str]:
         # The harness has no location, so the page route is a stub; every call below passes
         # its own page address explicitly.
         "const PAGE_ROUTE_URL = '';",
-        _extract_js_function(source, "function newId(prefix) {"),
-        _extract_js_function(source, "function normalizeRouteUrl(value) {"),
-        _extract_js_function(source, "function routeUrlParts(value) {"),
+        extract_js_function(source, "function newId(prefix) {"),
+        extract_js_function(source, "function normalizeRouteUrl(value) {"),
+        extract_js_function(source, "function routeUrlParts(value) {"),
         _js_binding(source, "LOOPBACK_HOSTNAMES"),
-        _extract_js_function(source, "function isLoopbackHostname(hostname) {"),
-        _extract_js_function(source, "function tailnetSuffix(hostname) {"),
-        _extract_js_function(source, "function predictBlocked(pageUrl, routeUrl) {"),
-        _extract_js_function(source, "function routeMedianMs(state) {"),
-        _extract_js_function(source, "function beatsIncumbent(challengerMs, incumbentMs) {"),
-        _extract_js_function_with_params(source, "function rankRoutes("),
-        _extract_js_function(source, "function hostRoutes(host) {"),
-        _extract_js_function(source, "function defaultServerLabel(value) {"),
-        _extract_js_function_with_params(source, "function migrateRegistry("),
-        _extract_js_function_with_params(source, "function localHostFrom("),
-        _extract_js_function_with_params(source, "function loadServerRegistry("),
-        _extract_js_function_with_params(source, "function mergeHostsByIdentity("),
-        _extract_js_function(source, "function tokdashShaped(payload) {"),
-        _extract_js_function(source, "function routeLevelError(error) {"),
+        extract_js_function(source, "function isLoopbackHostname(hostname) {"),
+        extract_js_function(source, "function tailnetSuffix(hostname) {"),
+        extract_js_function(source, "function predictBlocked(pageUrl, routeUrl) {"),
+        extract_js_function(source, "function routeMedianMs(state) {"),
+        extract_js_function(source, "function beatsIncumbent(challengerMs, incumbentMs) {"),
+        extract_js_function(source, "function rankRoutes("),
+        extract_js_function(source, "function hostRoutes(host) {"),
+        extract_js_function(source, "function defaultServerLabel(value) {"),
+        extract_js_function(source, "function migrateRegistry("),
+        extract_js_function(source, "function localHostFrom("),
+        extract_js_function(source, "function loadServerRegistry("),
+        extract_js_function(source, "function mergeHostsByIdentity("),
+        extract_js_function(source, "function tokdashShaped(payload) {"),
+        extract_js_function(source, "function routeLevelError(error) {"),
     ]
 
 
@@ -1230,7 +1211,7 @@ def _run_routes(tmp_path: Path, name: str, expression: str, value, extra: list[s
     return json.loads(result.stdout)
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_route_url_normalisation_is_the_dedupe_key(tmp_path):
     urls = [
         "HTTP://127.0.0.1:55423/",
@@ -1251,7 +1232,7 @@ def test_route_url_normalisation_is_the_dedupe_key(tmp_path):
     assert out[6:] == ["", "", ""], "anything a browser could not fetch is not a route"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_blocked_is_predicted_from_the_two_addresses_not_probed(tmp_path):
     cases = [
         # https page, LAN plain-http route: the page itself refuses it.
@@ -1284,7 +1265,7 @@ def test_blocked_is_predicted_from_the_two_addresses_not_probed(tmp_path):
     assert out[9] == "mixedContent"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_registry_migration_accepts_both_shapes(tmp_path):
     stored = [
         {"id": "old", "label": "Old", "baseUrl": "HTTP://Mac:55423/"},
@@ -1315,7 +1296,7 @@ def test_registry_migration_accepts_both_shapes(tmp_path):
     assert local["choice"] == "auto", "a choice naming a route this host does not own resets"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_local_entry_survives_a_reload_with_its_routes_and_choice(tmp_path):
     stored = [{"id": "local", "label": "WSL box", "choice": "w",
                "routes": [{"id": "w", "url": "https://wsl.tail76535.ts.net/tokdash", "kind": "added"}]},
@@ -1334,7 +1315,7 @@ def test_local_entry_survives_a_reload_with_its_routes_and_choice(tmp_path):
     assert local["instanceId"] == "", "local's identity is re-read each load, never trusted from storage"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_active_route_picks_fastest_then_holds_inside_the_band(tmp_path):
     routes = [{"id": "a", "url": "http://a"}, {"id": "b", "url": "http://b"}]
     fast_then_held = {
@@ -1352,7 +1333,7 @@ def test_active_route_picks_fastest_then_holds_inside_the_band(tmp_path):
     assert taken["activeRouteId"] == "b" and taken["activeReason"] == "fastest"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_route_ranking_rules_pinned_unhealthy_and_all_failed(tmp_path):
     routes = [{"id": "a", "url": "http://a"}, {"id": "b", "url": "http://b"}]
     cases = {
@@ -1389,7 +1370,7 @@ def test_route_ranking_rules_pinned_unhealthy_and_all_failed(tmp_path):
     assert out["marked"]["usableRouteIds"] == ["b"]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_identity_merge_survivor_and_carried_state(tmp_path):
     hosts = [
         {"id": "ws", "label": "workstation", "instanceId": "SAME", "routes": [{"id": "r1", "url": "http://ws"}]},
@@ -1419,7 +1400,7 @@ def test_identity_merge_survivor_and_carried_state(tmp_path):
     assert [h["id"] for h in out2["hosts"]] == ["a", "d", "e"], "earliest row survives; identity-less hosts stay apart"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_503_with_a_tokdash_detail_is_not_a_route_failure(tmp_path):
     cases = {
         "corsOrDeadSocket": {"typeName": "TypeError"},
@@ -1444,7 +1425,7 @@ def test_503_with_a_tokdash_detail_is_not_a_route_failure(tmp_path):
     assert type_case is True
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_two_routes_one_host_still_counts_once(tmp_path):
     """The regression this whole feature exists for.
 
@@ -1454,8 +1435,8 @@ def test_two_routes_one_host_still_counts_once(tmp_path):
     """
     source = INDEX_HTML.read_text(encoding="utf-8")
     functions = _route_source(source) + [
-        _extract_js_function_with_params(source, "function loadServerRegistry("),
-        _extract_js_function(source, "function combineUsagePayloads(list) {"),
+        extract_js_function(source, "function loadServerRegistry("),
+        extract_js_function(source, "function combineUsagePayloads(list) {"),
     ]
     harness = tmp_path / "onecount.js"
     harness.write_text(
@@ -1494,28 +1475,28 @@ def _probing_source(source: str) -> list[str]:
         "const t = (key) => key;",
         "var hosts = [];",
         "const routeRuntime = {};",
-        _extract_js_function(source, "function newId(prefix) {"),
-        _extract_js_function(source, "function normalizeRouteUrl(value) {"),
-        _extract_js_function(source, "function routeUrlParts(value) {"),
+        extract_js_function(source, "function newId(prefix) {"),
+        extract_js_function(source, "function normalizeRouteUrl(value) {"),
+        extract_js_function(source, "function routeUrlParts(value) {"),
         _js_binding(source, "LOOPBACK_HOSTNAMES"),
-        _extract_js_function(source, "function isLoopbackHostname(hostname) {"),
-        _extract_js_function(source, "function tailnetSuffix(hostname) {"),
-        _extract_js_function(source, "function predictBlocked(pageUrl, routeUrl) {"),
-        _extract_js_function(source, "function routeMedianMs(state) {"),
-        _extract_js_function(source, "function routePath(route, path) {"),
-        _extract_js_function(source, "function tokdashShaped(payload) {"),
-        _extract_js_function(source, "function routeLevelError(error) {"),
-        _extract_js_function(source, "function newRouteRuntime() {"),
-        _extract_js_function(source, "function setRouteState(routeId, patch) {"),
-        _extract_js_function(source, "function routeBackoffReady(routeId, now = Date.now()) {"),
-        _extract_js_function(source, "function markRouteBlocked(routeId, url, error) {"),
-        _extract_js_function(source, "function markRouteFailure(routeId, url, error) {"),
-        _extract_js_function(source, "async function probeOnce(route) {"),
-        _extract_js_function_with_params(source, "async function probeRoute("),
-        _extract_js_function(source, "function hostRoutes(host) {"),
-        _extract_js_function(source, "function applyProbeIdentity(host, route, probe) {"),
-        _extract_js_function_with_params(source, "function blockedRuleText(rule) {"),
-        _extract_js_function_with_params(source, "async function validateRouteAddress("),
+        extract_js_function(source, "function isLoopbackHostname(hostname) {"),
+        extract_js_function(source, "function tailnetSuffix(hostname) {"),
+        extract_js_function(source, "function predictBlocked(pageUrl, routeUrl) {"),
+        extract_js_function(source, "function routeMedianMs(state) {"),
+        extract_js_function(source, "function routePath(route, path) {"),
+        extract_js_function(source, "function tokdashShaped(payload) {"),
+        extract_js_function(source, "function routeLevelError(error) {"),
+        extract_js_function(source, "function newRouteRuntime() {"),
+        extract_js_function(source, "function setRouteState(routeId, patch) {"),
+        extract_js_function(source, "function routeBackoffReady(routeId, now = Date.now()) {"),
+        extract_js_function(source, "function markRouteBlocked(routeId, url, error) {"),
+        extract_js_function(source, "function markRouteFailure(routeId, url, error) {"),
+        extract_js_function(source, "async function probeOnce(route) {"),
+        extract_js_function(source, "async function probeRoute("),
+        extract_js_function(source, "function hostRoutes(host) {"),
+        extract_js_function(source, "function applyProbeIdentity(host, route, probe) {"),
+        extract_js_function(source, "function blockedRuleText(rule) {"),
+        extract_js_function(source, "async function validateRouteAddress("),
     ]
 
 
@@ -1527,16 +1508,16 @@ def _fetching_source(source: str) -> list[str]:
         # The harness has no location, so same-origin paths are passed through.
         "const appPath = (path) => path;",
         "const hostActiveRouteId = new Map();",
-        _extract_js_function(source, "function beatsIncumbent(challengerMs, incumbentMs) {"),
-        _extract_js_function_with_params(source, "function rankRoutes("),
-        _extract_js_function(source, "function hostRouteById(server, routeId) {"),
-        _extract_js_function(source, "function activeRouteIdFor(host, runtime = routeRuntime) {"),
-        _extract_js_function(source, "function activeRouteFor(host) {"),
-        _extract_js_function(source, "function serverPath(server, path) {"),
-        _extract_js_function(source, "function viaRoute(server, route) {"),
-        _extract_js_function_with_params(source, "async function fetchJson("),
-        _extract_js_function_with_params(source, "function pickRoute("),
-        _extract_js_function_with_params(source, "async function fetchFromHost("),
+        extract_js_function(source, "function beatsIncumbent(challengerMs, incumbentMs) {"),
+        extract_js_function(source, "function rankRoutes("),
+        extract_js_function(source, "function hostRouteById(server, routeId) {"),
+        extract_js_function(source, "function activeRouteIdFor(host, runtime = routeRuntime) {"),
+        extract_js_function(source, "function activeRouteFor(host) {"),
+        extract_js_function(source, "function serverPath(server, path) {"),
+        extract_js_function(source, "function viaRoute(server, route) {"),
+        extract_js_function(source, "async function fetchJson("),
+        extract_js_function(source, "function pickRoute("),
+        extract_js_function(source, "async function fetchFromHost("),
     ]
 
 
@@ -1575,7 +1556,7 @@ def _run_probing(tmp_path: Path, name: str, body: str, value=None):
     return json.loads(result.stdout)
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_the_placeholder_never_lands_on_a_route_from_another_daemon(tmp_path):
     """The all-failed placeholder exists to keep an unverified host in the combined view.
 
@@ -1607,7 +1588,7 @@ def test_the_placeholder_never_lands_on_a_route_from_another_daemon(tmp_path):
     assert out["nothingProbedYet"]["activeRouteId"] == "stale", "before any probe the first route still stands in"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_a_route_in_backoff_is_not_dialled_between_probes(tmp_path):
     """The backoff has to cover ordinary reads, not just the probe loop.
 
@@ -1646,7 +1627,7 @@ def test_a_route_in_backoff_is_not_dialled_between_probes(tmp_path):
     assert out["blockedThenIdle"]["activeRouteId"] == "quiet", "the unprobed address carries the host instead"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_a_backed_off_route_receives_no_request_at_all(tmp_path):
     """Ranking is the only door a read goes through, so the count is the proof.
 
@@ -1677,7 +1658,7 @@ def test_a_backed_off_route_receives_no_request_at_all(tmp_path):
     assert out["a"] == "fail" and out["b"] == "fail"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_locals_identity_comes_only_from_the_page_route(tmp_path):
     """Local is whatever daemon served this page, so only that address may say which one."""
     body = """{
@@ -1701,7 +1682,7 @@ def test_locals_identity_comes_only_from_the_page_route(tmp_path):
     assert out["lateIdentity"] == "", "and an added address cannot name Local before the page route does"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_a_route_that_goes_quiet_mid_probe_is_not_left_healthy(tmp_path):
     """Stopping the round is only half the rule; the round has to end in a failure."""
     body = """{
@@ -1729,7 +1710,7 @@ def test_a_route_that_goes_quiet_mid_probe_is_not_left_healthy(tmp_path):
     assert out["quiet"]["samples"] == 0 and out["quietCalls"] == 2, "the round stops at the first failure"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_an_address_is_judged_before_it_is_stored(tmp_path):
     """An address has to prove it belongs before it can sit on a host's row.
 
@@ -1789,7 +1770,7 @@ def test_an_address_is_judged_before_it_is_stored(tmp_path):
     assert out["hostWithoutIdentityOnEdit"] is None, "an old daemon can still be repointed"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_a_rejected_address_leaves_no_trace_in_the_live_state(tmp_path):
     """Validation probes under a probe-only id.
 
@@ -1810,7 +1791,7 @@ def test_a_rejected_address_leaves_no_trace_in_the_live_state(tmp_path):
     assert out["storedInFile"] is False, "the stored route's id never reaches the network"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_a_failover_target_that_also_fails_is_demoted_too(tmp_path):
     """The retry has to record its own failure.
 
@@ -1834,7 +1815,7 @@ def test_a_failover_target_that_also_fails_is_demoted_too(tmp_path):
     assert out["bBackoff"], "and the second one is off the rotation for a while"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 @pytest.mark.parametrize("phase", ["fetch", "body", "failover"])
 def test_canceled_speed_read_does_not_demote_routes_or_block_session_read(tmp_path, phase):
     body = """{
@@ -1873,7 +1854,7 @@ def test_canceled_speed_read_does_not_demote_routes_or_block_session_read(tmp_pa
     assert len(out["hits"]) == (3 if phase == "failover" else 2)
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_a_read_moves_to_the_next_route_within_the_same_call(tmp_path):
     body = """{
       let hits = [];
@@ -1895,7 +1876,7 @@ def test_a_read_moves_to_the_next_route_within_the_same_call(tmp_path):
     assert len(out["hits"]) == 2
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_an_identified_host_ranks_only_routes_that_named_themselves(tmp_path):
     """A route that answers without an id has proven reachability, not belonging.
 
@@ -1940,12 +1921,12 @@ def test_session_detail_reads_through_the_route_system() -> None:
     bare fetch.
     """
     source = INDEX_HTML.read_text(encoding="utf-8")
-    body = _extract_js_function(source, "async function openSessionModal(tool, sessionId, ownerServer")
+    body = extract_js_function(source, "async function openSessionModal(tool, sessionId, ownerServer")
     assert "fetchFromHost(" in body, "the modal has to read through the route system"
     assert "await fetch(" not in body, "a fixed-address fetch cannot fail over to the next route"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 @pytest.mark.parametrize("address,available,expected,hits", [
     ("box.ts.net/tokdash/", ["https://box.ts.net/tokdash"], "https://box.ts.net/tokdash", 1),
     ("127.0.0.1:55423", ["http://127.0.0.1:55423"], "http://127.0.0.1:55423", 2),
@@ -1961,8 +1942,8 @@ def test_user_address_protocol_discovery(tmp_path, address, available, expected,
     source = INDEX_HTML.read_text(encoding="utf-8")
     harness = tmp_path / "protocol.js"
     harness.write_text("\n".join([
-        _extract_js_function(source, "function normalizeRouteUrl(value) {"),
-        _extract_js_function(source, "async function resolveRouteInput(value) {"),
+        extract_js_function(source, "function normalizeRouteUrl(value) {"),
+        extract_js_function(source, "async function resolveRouteInput(value) {"),
         "const t = key => key; const calls = [];",
         f"const available = {json.dumps(available)};",
         "async function probeServer(url) { calls.push(url); if (!available.includes(url)) throw new Error('unreachable'); }",
@@ -1975,7 +1956,7 @@ def test_user_address_protocol_discovery(tmp_path, address, available, expected,
         assert out["result"]["error"]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 @pytest.mark.parametrize("confirm", [False, True])
 def test_last_route_removal_preserves_host_when_cancelled(tmp_path, confirm):
     source = INDEX_HTML.read_text(encoding="utf-8")
@@ -1989,8 +1970,8 @@ def test_last_route_removal_preserves_host_when_cancelled(tmp_path, confirm):
         "const saveServerRegistry = () => saves++; const saveServerSelection = () => {};",
         "const renderServerSettings = () => {}; const refreshCurrentView = () => {};",
         f"const window = {{confirm: () => {str(confirm).lower()}}};",
-        _extract_js_function(source, "function removeHost(host) {"),
-        _extract_js_function(source, "function removeRoute(host, route) {"),
+        extract_js_function(source, "function removeHost(host) {"),
+        extract_js_function(source, "function removeRoute(host, route) {"),
     ]
     out = _run(tmp_path, "remove_last_route", functions,
                "(() => { removeRoute(host, route); return {count: hosts.length, routes: host.routes.length, state: !!routeRuntime.route, saves, selection: serverSelection.mode}; })()", None)

@@ -582,15 +582,15 @@ def test_the_notice_does_not_cover_the_header_controls() -> None:
 def test_every_locale_carries_the_cdn_keys() -> None:
     """The notice is translated, not English-only.
 
-    Covered structurally here because the parity test in
-    test_i18n_languages.py already checks the key sets match across languages;
-    this guards against the keys being dropped from the object entirely.
+    The banner looks these keys up through a variable (and the date trigger's
+    title through a ternary), so the parity test in test_i18n_languages.py,
+    which only sees literal t('...') calls, cannot tell if one is dropped from
+    the dictionary. cdnThreeFailed is called literally, so parity has it.
     """
     source = _source()
     for key in (
         "cdnTailwindFailed",
         "cdnChartFailed",
-        "cdnThreeFailed",
         "cdnFlatpickrFailed",
         "cdnFontsFailed",
     ):

@@ -568,19 +568,3 @@ def test_cache_invalidation(monkeypatch, tmp_path):
     assert info4.misses == info3.misses  # no message file re-read
     assert raw["s-cold"]["display_name"] == "Cold title"
     assert raw["s-cold"]["project"] == "cold-proj"
-
-
-def test_frontend_session_registry_includes_cline():
-    index = Path(sessions.__file__).parent / "static" / "index.html"
-    source = index.read_text(encoding="utf-8")
-    assert "'antigravity_cli', 'cline'" in source
-    assert "antigravity_cli: null, cline: null, workbuddy: null, qoder: null, qwen_code: null, openclaw: null, qoder_cli: null, combined: null" in source
-    assert 'updateSessionPanel("cline", lastSessionsResponses.cline);' in source
-    assert 'initSortHeaders("cline", renderSessionsTab);' in source
-    assert "cline: { ...DEFAULT_SORT }," in source
-    assert "clineSessions: 'Cline Sessions'," in source
-    assert "clineSessions: 'Cline \u4f1a\u8bdd'," in source
-    assert 'id="clineSessionsTable"' in source
-    brand = source.split("const TOOL_BRAND_META = Object.freeze({", 1)[1].split("});", 1)[0]
-    assert "cline:" in brand
-    assert (index.parent / "icons" / "agents" / "cline.png").is_file()

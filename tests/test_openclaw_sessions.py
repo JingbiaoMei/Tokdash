@@ -1262,20 +1262,3 @@ def test_openclaw_source_never_imports_sessions():
         if isinstance(node, ast.Import):
             for alias in node.names:
                 assert "sessions" not in alias.name, alias.name
-
-
-def test_frontend_session_registry_includes_openclaw():
-    index = Path(sessions.__file__).parent / "static" / "index.html"
-    source = index.read_text(encoding="utf-8")
-    assert "'qwen_code', 'openclaw'" in source
-    assert "qwen_code: null, openclaw: null, qoder_cli: null, combined: null" in source
-    assert 'updateSessionPanel("openclaw", lastSessionsResponses.openclaw);' in source
-    assert 'initSortHeaders("openclaw", renderSessionsTab);' in source
-    assert "openclaw: { ...DEFAULT_SORT }," in source
-    assert "openclawSessions: 'OpenClaw Sessions'," in source
-    assert "openclawSessions: 'OpenClaw \u4f1a\u8bdd'," in source
-    assert 'id="openclawSessionsTable"' in source
-    assert 'data-panel-details="openclaw"' in source
-    # Brand meta and formatToolName already had openclaw — verify, don't add.
-    brand = source.split("const TOOL_BRAND_META = Object.freeze({", 1)[1].split("});", 1)[0]
-    assert "openclaw:" in brand

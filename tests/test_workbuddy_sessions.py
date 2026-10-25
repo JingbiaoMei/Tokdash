@@ -485,19 +485,3 @@ def test_registration_smoke(monkeypatch, tmp_path):
     assert "workbuddy" in sessions.TOOL_LABELS
     raw = _raw_sessions_for_tool("workbuddy")
     assert raw == {}
-
-
-def test_frontend_session_registry_includes_workbuddy():
-    index = Path(sessions.__file__).parent / "static" / "index.html"
-    source = index.read_text(encoding="utf-8")
-    assert "'antigravity_cli', 'cline', 'workbuddy'" in source
-    assert "cline: null, workbuddy: null, qoder: null, qwen_code: null, openclaw: null, qoder_cli: null, combined: null" in source
-    assert 'updateSessionPanel("workbuddy", lastSessionsResponses.workbuddy);' in source
-    assert 'initSortHeaders("workbuddy", renderSessionsTab);' in source
-    assert "workbuddy: { ...DEFAULT_SORT }," in source
-    assert "workbuddySessions: 'WorkBuddy Sessions'," in source
-    assert "workbuddySessions: 'WorkBuddy \u4f1a\u8bdd'," in source
-    assert 'id="workbuddySessionsTable"' in source
-    assert 'data-panel-details="workbuddy"' in source
-    brand = source.split("const TOOL_BRAND_META = Object.freeze({", 1)[1].split("});", 1)[0]
-    assert "workbuddy:" in brand

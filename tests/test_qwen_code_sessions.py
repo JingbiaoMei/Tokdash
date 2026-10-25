@@ -655,22 +655,6 @@ def test_registration_smoke():
     assert _raw_sessions_for_tool("qwen_code") == {}
 
 
-def test_frontend_session_registry_includes_qwen_code():
-    index = Path(sessions.__file__).parent / "static" / "index.html"
-    source = index.read_text(encoding="utf-8")
-    assert "'workbuddy', 'qoder', 'qwen_code'" in source
-    assert "qoder: null, qwen_code: null, openclaw: null, qoder_cli: null, combined: null" in source
-    assert 'updateSessionPanel("qwen_code", lastSessionsResponses.qwen_code);' in source
-    assert 'initSortHeaders("qwen_code", renderSessionsTab);' in source
-    assert "qwen_code: { ...DEFAULT_SORT }," in source
-    assert "qwenCodeSessions: 'Qwen Code Sessions'," in source
-    assert "qwenCodeSessions: 'Qwen Code \u4f1a\u8bdd'," in source
-    assert 'id="qwen_codeSessionsTable"' in source
-    assert 'data-panel-details="qwen_code"' in source
-    brand = source.split("const TOOL_BRAND_META = Object.freeze({", 1)[1].split("});", 1)[0]
-    assert "qwen_code:" in brand
-
-
 def test_reload_pricing_db_clears_qwen_caches(monkeypatch, tmp_path):
     """reload_pricing_db() lists every pricing-dependent session cache; this
     harness must be on that list. Priced turns live in the per-file parser

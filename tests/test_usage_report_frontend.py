@@ -178,36 +178,6 @@ def test_report_renders_data_text_without_inner_html() -> None:
     assert "innerHTML" not in _report_block(_source())
 
 
-def test_report_names_every_degradation_state() -> None:
-    block = _report_block(_source())
-    for marker in (
-        "usageReportUnreachable",  # neither totals source answered
-        "usageReportFacetsMissing",  # server predates the facets
-        "usageReportTotalsFallback",  # /api/usage missing, the analytics total stands in
-        "usageReportInsightsMissing",  # /api/insights missing
-        "usageReportActiveMissing",  # /api/active-time missing
-        "usageReportPartial",  # source_errors present
-        "usageReportActiveUnavailable",  # active-time served, but not for these tools
-        "usageReportEmptyPeriod",  # no rows in the window
-    ):
-        assert marker in block, marker
-
-
-def test_every_notice_the_model_records_reaches_the_banner() -> None:
-    """A flag the model sets and the banner never reads is a silent zero.
-
-    Each of the three requests can fail on its own, and the banner is the only
-    surface that says which one did.
-    """
-    block = _report_block(_source())
-    model = extract_js_function(block, BUILD_MODEL_SIGNATURE)
-    banner = extract_js_function(block, "function usageReportRenderBanner(model) {")
-    notices = set(re.findall(r"\b(\w+Missing),?$", model[model.index("notices: {"):], re.M))
-    assert notices == {"insightsMissing", "usageMissing", "activeTimeMissing"}
-    for notice in notices:
-        assert f"model.notices.{notice}" in banner, notice
-
-
 # --- window math, executed for real under node ------------------------------
 
 
@@ -446,15 +416,6 @@ process.stdout.write(JSON.stringify({
     for tab in ("overview", "stats"):
         assert (out[tab]["rangesHidden"], out[tab]["chipsHidden"]) == (False, True), (tab, out[tab])
         assert "renderPeriodChips" not in out[tab]["log"]
-
-    source = _source()
-    defs = extract_js_function(source, "function usageReportChipDefs() {")
-    assert "getMonthLabels()" in defs, "month chips must be named from real dates"
-    assert "usageReportChipWeeksAgo" in defs
-    render = extract_js_function(source, "function usageReportRenderPeriodChips() {")
-    assert "usageReportState.pendingBack = def.back" in render, "a mid-load chip click must queue, not drop"
-    controls = extract_js_function(source, "function usageReportRenderControls() {")
-    assert "usageReportRenderPeriodChips()" in controls
 
 
 def test_a_past_window_names_itself() -> None:
@@ -988,6 +949,12 @@ const notice = noticeRow.children[0];
 out.notice = { cells: noticeRow.children.length, colSpan: notice.colSpan, text: notice.textContent };
 out.projectsNotice = bodies.usageReportProjectsBody.children[0].children[0].textContent;
 
+// A facet that answered with nothing for this window: one notice row, not a
+// header over an empty grid, and not the "never served" notice either.
+usageReportRenderModels({ models: [], modelRows: [], facetTotal: 0 });
+const emptyRow = bodies.usageReportModelsBody.children[0].children[0];
+out.emptyModels = { cells: emptyRow.children.length, colSpan: emptyRow.children[0].colSpan, text: emptyRow.children[0].textContent };
+
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -1028,6 +995,7 @@ def test_the_model_and_project_tables_rank_on_the_column_the_header_names(
         "text": 'usageReportFacetsMissing:{"facets":"models"}',
     }
     assert out["projectsNotice"] == 'usageReportFacetsMissing:{"facets":"projects"}'
+    assert out["emptyModels"] == {"cells": 1, "colSpan": 5, "text": "usageReportEmptyPeriod"}
 
 
 def test_the_server_warms_the_exact_facet_string_the_tab_asks_for() -> None:
@@ -1783,22 +1751,6 @@ def test_the_version_stamp_waits_for_the_full_paint() -> None:
     assert version.index("notices.pending") < version.index("usageReportRenderShare")
 
 
-def test_a_source_not_asked_for_yet_is_not_reported_as_unavailable() -> None:
-    """`pending` is the difference between "not here yet" and "refused".
-
-    Without it the first paint flashes "analytics unavailable" a moment before
-    the analytics land, which is a false claim about the server.
-    """
-    block = _report_block(_source())
-    banner = extract_js_function(block, "function usageReportRenderBanner(model) {")
-    assert "const pending = !!model.notices.pending;" in banner
-    assert "model.notices.insightsMissing && !pending" in banner
-    assert "model.notices.activeTimeMissing && !pending" in banner
-    # Usage is the request the first paint is made of: by then it has either
-    # landed or failed, so its notice is never suppressed.
-    assert "model.notices.usageMissing && !pending" not in banner
-
-
 def test_the_first_paint_renders_only_what_usage_answers() -> None:
     """Anything else would print an em dash it has to take back a moment later.
 
@@ -1831,21 +1783,6 @@ def test_the_first_paint_renders_only_what_usage_answers() -> None:
     assert "usageReportRenderHead(model)" in full
 
 
-def test_an_unknown_count_prints_a_dash_everywhere_it_is_read() -> None:
-    """`model.sessions` and `model.streaks` are read in four places. A single
-    formatNumber(null) among them puts "0 sessions" back on the page."""
-    block = _report_block(_source())
-    # The activity half of the hero: split out so the first paint can render the
-    # totals half from /api/usage alone, without these two tiles.
-    hero = extract_js_function(block, "function usageReportRenderHeroActivity(model) {")
-    assert "empty || !model.streaks" in hero
-    assert "String(model.streaks.active_days)" in hero, "the zero fallback is gone"
-    assert "usageReportFigure(model.sessions, formatNumber)" in hero
-    card = extract_js_function(block, "function usageReportCardModel(model, tier, mode, overrides) {")
-    assert "sessions: usageReportFigure(model.sessions, formatNumber)" in card
-    assert "const streaks = model.streaks || null;" in card, "a zero-filled streak block prints 0 of N"
-
-
 # --- delta honesty ----------------------------------------------------------
 
 
@@ -1872,6 +1809,629 @@ process.stdout.write(JSON.stringify(cases.map(usageReportShowDelta)));
     assert result == [False, False, True, True, False, False]
 
 
+# --- the page itself, painted onto a stub DOM -------------------------------
+
+
+REPORT_DOM_PRELUDE = r"""
+// `t` prints a key with its values, or the real copy for keys a test hands in.
+const COPY = __COPY__;
+function t(key, vars) {
+  if (Object.prototype.hasOwnProperty.call(COPY, key)) {
+    let text = COPY[key];
+    Object.entries(vars || {}).forEach(([name, value]) => { text = text.split(`{${name}}`).join(String(value)); });
+    return text;
+  }
+  return vars ? `${key}${JSON.stringify(vars)}` : key;
+}
+function textNode(value) { return { tag: '#text', textContent: String(value) }; }
+function makeNode(tag, id) {
+  const classes = new Set();
+  return {
+    tag, id, children: [], hidden: false, title: '', dataset: {}, attrs: {}, style: {}, listeners: {},
+    value: '', placeholder: '', checked: false, options: [], colSpan: null, _text: '',
+    classList: {
+      add: (...names) => names.forEach((name) => classes.add(name)),
+      remove: (...names) => names.forEach((name) => classes.delete(name)),
+      contains: (name) => classes.has(name),
+      toggle: (name, on) => {
+        const want = on === undefined ? !classes.has(name) : !!on;
+        if (want) classes.add(name); else classes.delete(name);
+        return want;
+      },
+    },
+    get className() { return [...classes].join(' '); },
+    set className(value) {
+      classes.clear();
+      String(value).split(/\s+/).filter(Boolean).forEach((name) => classes.add(name));
+    },
+    get textContent() { return this._text + this.children.map((child) => child.textContent).join(''); },
+    set textContent(value) { this._text = String(value); this.children = []; },
+    append(...kids) { kids.forEach((kid) => this.children.push(typeof kid === 'string' ? textNode(kid) : kid)); },
+    appendChild(kid) { this.children.push(kid); return kid; },
+    replaceChildren(...kids) { this._text = ''; this.children = []; this.append(...kids); },
+    setAttribute(name, value) { this.attrs[name] = String(value); },
+    getAttribute(name) { return name in this.attrs ? this.attrs[name] : null; },
+    addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); },
+    fire(type, event = {}) { (this.listeners[type] || []).forEach((fn) => fn(event)); },
+    click() { this.fire('click'); },
+    remove() {},
+    querySelector() { return null; },
+  };
+}
+// Any id resolves, so a section a renderer writes to is always there to read.
+const elements = {};
+const document = {
+  hidden: false,
+  body: makeNode('body'),
+  documentElement: makeNode('html'),
+  getElementById: (id) => elements[id] || (elements[id] = makeNode('div', id)),
+  createElement: (tag) => makeNode(tag),
+  createDocumentFragment: () => makeNode('#fragment'),
+  createTextNode: textNode,
+  querySelectorAll: () => [],
+  addEventListener() {},
+};
+const window = { addEventListener() {} };
+const HEAT_COLORS = ['#h0', '#h1', '#h2', '#h3', '#h4', '#h5', '#h6', '#h7'];
+function heatColor(level) { return HEAT_COLORS[Math.max(0, Math.min(HEAT_COLORS.length - 1, level))]; }
+function formatNumber(value) { return String(value); }
+function formatTokenCount(value) { return `${value}t`; }
+function formatCurrency(value) { return `$${value}`; }
+function formatDurationUnits(ms) { return `${ms}ms`; }
+function formatShortDate(value, includeYear) {
+  return `${value instanceof Date ? formatDateKey(value) : value}${includeYear ? '+y' : ''}`;
+}
+function formatToolName(tool) { return `tool:${tool}`; }
+function getDayLabels() { return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']; }
+function createToolIdentity(tool) { const node = makeNode('span'); node.textContent = `identity:${tool}`; return node; }
+let TODAY = new Date(2026, 8, 9);
+function usageReportToday() { return new Date(TODAY.getTime()); }
+let SERVERS = [{ id: 'local', label: 'Local' }];
+function usageReportServers() { return SERVERS; }
+"""
+
+# Small pieces nearly every renderer reaches for, shipped real rather than stubbed.
+REPORT_DOM_HELPERS = (
+    "function formatDateKey(date) {",
+    "function parseDateKey(value) {",
+    "function startOfWeekMonday(date) {",
+    "function getMonthLabels() {",
+    "function renderLoadingPlaceholder(element, label = t('loading')) {",
+    "function usageReportWindows(period, back = 0) {",
+    "function usageReportServer() {",
+    "function usageReportToolLabel(tool) {",
+    "function usageReportFigure(value, format) {",
+    "function usageReportShare(fraction) {",
+    "function usageReportHours(ms) {",
+    "function usageReportHourLabel(hour) {",
+    "function usageReportPeakHour(hour) {",
+    "function usageReportHourWindow(hours) {",
+    "function usageReportMachineName() {",
+    "function usageReportText(el, value) {",
+    "function usageReportFillNote(el, entries) {",
+    "function usageReportStatLine(label, value) {",
+)
+
+
+def _const_line(source: str, name: str) -> str:
+    """One single-line page constant, as declared."""
+    return next(
+        line.strip() for line in source.splitlines() if line.strip().startswith(f"const {name} = ")
+    )
+
+
+def _report_dom(scenario: str, *signatures: str, copy: dict[str, str] | None = None) -> str:
+    """The real report renderers named by ``signatures`` over the stub DOM.
+
+    The page's own state literal and constants come along, so a default that
+    changes is a changed result. ``copy`` maps keys to real dictionary text for
+    the tests that read a sentence rather than a key.
+    """
+    source = _source()
+    return "\n".join([
+        REPORT_DOM_PRELUDE.replace("__COPY__", json.dumps(copy or {}, ensure_ascii=False)),
+        _em_constant(source),
+        *(_const_line(source, name) for name in (
+            "USAGE_REPORT_HEAT_FACETS", "USAGE_REPORT_PERIODS", "USAGE_REPORT_PREFS_KEY",
+        )),
+        extract_js_function(source, "const usageReportState = {"),
+        *(extract_js_function(source, signature) for signature in REPORT_DOM_HELPERS + signatures),
+        scenario,
+    ])
+
+
+BANNER_SCENARIO = """
+const FLAGS = __FLAGS__;
+const banner = document.getElementById('usageReportBanner');
+const paint = (notices, extra = {}) => {
+  usageReportRenderBanner({ notices, sourceErrors: [], unavailableTools: [], ...extra });
+  return { hidden: banner.hidden, text: banner.textContent };
+};
+const none = Object.fromEntries(FLAGS.map((flag) => [flag, false]));
+const out = { clean: paint(none), each: {}, pending: {} };
+FLAGS.forEach((flag) => {
+  out.each[flag] = paint({ ...none, [flag]: true });
+  // The first paint: the two slow requests have not been asked for yet.
+  out.pending[flag] = paint({ ...none, [flag]: true, pending: true });
+});
+out.partial = paint(none, { sourceErrors: ['codex', 'kimi'] });
+out.unavailable = paint(none, { unavailableTools: ['cline'] });
+out.everything = paint(Object.fromEntries(FLAGS.map((flag) => [flag, true])),
+  { sourceErrors: ['codex'], unavailableTools: ['cline'] });
+
+// Neither totals source answered: the state panel names the server instead.
+const statePanel = () => ({
+  panel: document.getElementById('usageReportStatePanel').hidden,
+  stack: document.getElementById('usageReportStack').hidden,
+  retry: document.getElementById('usageReportRetry').hidden,
+  body: document.getElementById('usageReportStateBody').textContent,
+});
+document.getElementById('usageReportRetry').hidden = true;
+usageReportState.error = { server: { id: 'mac', label: 'Studio' }, detail: 'connection refused' };
+usageReportRenderState();
+out.unreachable = statePanel();
+usageReportState.error = null;
+usageReportRenderState();
+out.recovered = statePanel();
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@needs_node
+def test_report_names_every_degradation_state(tmp_path: Path) -> None:
+    """Each of the three requests can fail on its own, and the banner is the only
+    surface that says which one did.
+
+    The flags are read off a model the real builder made, so a notice the model
+    starts recording and the banner never reads is a failure here rather than a
+    silent zero. On the first paint the slow two are absent without having failed:
+    `pending` keeps them out of the banner, which would otherwise flash
+    "unavailable" a moment before the data lands. Usage is the request the first
+    paint is made of, so its notice is never held back.
+    """
+    source = _source()
+    body = "\n".join(extract_js_function(source, sig) for sig in MODEL_SIGNATURES) + MODEL_FIXTURE
+    notices = json.loads(_run_node(tmp_path, "usage-report-notices.js", body))["whole"]["notices"]
+    flags = sorted(set(notices) - {"pending"})
+    assert {"insightsMissing", "usageMissing", "activeTimeMissing"} <= set(flags), flags
+
+    program = _report_dom(
+        BANNER_SCENARIO.replace("__FLAGS__", json.dumps(flags)),
+        "function usageReportRenderBanner(model) {",
+        "function usageReportRenderState() {",
+    )
+    out = json.loads(_run_node(tmp_path, "usage-report-banner.js", program))
+
+    assert out["clean"] == {"hidden": True, "text": ""}
+    for flag in flags:
+        assert out["each"][flag]["hidden"] is False and out["each"][flag]["text"], (
+            f"the model records {flag} and the banner never says so"
+        )
+    assert out["each"]["insightsMissing"]["text"] == "usageReportInsightsMissing"
+    assert out["each"]["usageMissing"]["text"] == "usageReportTotalsFallback"
+    assert out["each"]["activeTimeMissing"]["text"] == "usageReportActiveMissing"
+    assert out["pending"]["insightsMissing"] == {"hidden": True, "text": ""}
+    assert out["pending"]["activeTimeMissing"] == {"hidden": True, "text": ""}
+    assert out["pending"]["usageMissing"]["text"] == "usageReportTotalsFallback"
+    assert out["partial"]["text"] == 'usageReportPartial{"tools":"tool:codex, tool:kimi"}'
+    assert out["unavailable"]["text"] == 'usageReportActiveUnavailable{"tools":"tool:cline"}'
+    assert out["everything"]["text"] == " ".join([
+        "usageReportInsightsMissing",
+        "usageReportTotalsFallback",
+        "usageReportActiveMissing",
+        'usageReportPartial{"tools":"tool:codex"}',
+        'usageReportActiveUnavailable{"tools":"tool:cline"}',
+    ])
+    assert out["unreachable"] == {
+        "panel": False, "stack": True, "retry": False,
+        "body": 'usageReportUnreachable{"server":"Studio","error":"connection refused"}',
+    }
+    assert out["recovered"]["panel"] is True and out["recovered"]["stack"] is False
+
+
+@needs_node
+def test_every_line_that_names_a_machine_names_the_selected_one(tmp_path: Path) -> None:
+    """The report is single-server, and the footer's source line used to be a
+    fixed string about "this machine": read from a remote server, it described
+    the wrong box. It names the selected server, the local box by the translated
+    fallback, and an owned nickname over both; the version is the one that
+    server reported, or a dash.
+    """
+    english = _i18n_english_copy(_source())
+    copy = {key: english[key] for key in ("usageReportFooterSrc", "usageReportCardNicknameFallback")}
+    program = _report_dom("""
+const footer = document.getElementById('usageReportFooter');
+const model = { coverage: { stored_sources: ['codex', 'claude'], live_sources: ['kimi'] } };
+const lines = () => footer.children.map((row) => row.textContent);
+const out = {};
+SERVERS = [{ id: 'local', label: 'Local' }, { id: 'mac', label: 'mac-studio' }];
+usageReportState.version = '2.6.0';
+usageReportState.serverId = 'mac';
+usageReportRenderFooter(model);
+out.remote = lines();
+usageReportState.serverId = 'local';
+usageReportRenderFooter(model);
+out.local = lines();
+usageReportState.nickname = 'desk';
+usageReportRenderFooter(model);
+out.nickname = lines();
+usageReportState.version = null;
+usageReportRenderFooter(model);
+out.noVersion = lines();
+usageReportRenderFooter({ coverage: null });
+out.noCoverage = lines();
+process.stdout.write(JSON.stringify(out));
+""", "function usageReportRenderFooter(model) {", copy=copy)
+    out = json.loads(_run_node(tmp_path, "usage-report-footer.js", program))
+
+    def line(machine: str, version: str) -> list[str]:
+        text = copy["usageReportFooterSrc"]
+        for name, value in (("n", "3"), ("machine", machine), ("version", version)):
+            text = text.replace("{" + name + "}", value)
+        return [text]
+
+    assert "mac-studio" in out["remote"][0], out["remote"]
+    assert out["remote"] == line("mac-studio", "2.6.0")
+    assert out["local"] == line(copy["usageReportCardNicknameFallback"], "2.6.0")
+    assert out["nickname"] == line("desk", "2.6.0")
+    assert out["noVersion"] == line("desk", "\u2014")
+    assert out["noCoverage"] == []
+
+
+WHEN_SCENARIO = """
+const host = document.getElementById('usageReportWhen');
+const when = (over) => ({
+  period: 'week', range: { from: '2026-09-07', to: '2026-09-09' }, timezone: 'Europe/London',
+  hourly: {
+    buckets: Array.from({ length: 24 }, (_, hour) => ({ hour, tokens: hour === 3 ? 50 : 10 })),
+    peak_hour: 3, night_share: 0.25, night_hours: [1, 2],
+  },
+  weekday: {
+    buckets: Array.from({ length: 7 }, (_, weekday) => ({ weekday, tokens: (weekday + 1) * 100 })),
+    peak_weekday: 2,
+  },
+  // Monday to Wednesday: the window is three days old.
+  elapsedWeekdays: new Set([0, 1, 2]),
+  ...over,
+});
+const hoursWith = (bars, name) => bars
+  .map((bar, hour) => (bar.className.split(' ').includes(name) ? hour : null))
+  .filter((hour) => hour !== null);
+const out = {};
+usageReportRenderWhen(when({}));
+const [hours, side] = host.children;
+const bars = hours.children[0].children;
+out.week = {
+  night: hoursWith(bars, 'is-night'),
+  peak: hoursWith(bars, 'is-peak'),
+  notes: side.children.filter((node) => node.className === 'usage-report-notice').map((node) => node.textContent),
+  rows: side.children
+    .filter((node) => node.className.split(' ').includes('usage-report-wk-row'))
+    .map((row) => [row.children[0].textContent, row.children[1].children[0].style.width, row.children[2].textContent]),
+  tz: document.getElementById('usageReportTz').textContent,
+};
+usageReportRenderWhen(when({ hourly: null }));
+out.noHourly = { children: host.children.length, text: host.textContent };
+usageReportRenderWhen(when({ weekday: null }));
+out.noWeekday = { children: host.children.length, text: host.textContent };
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@needs_node
+def test_weekday_rows_that_have_not_happened_print_no_figure(tmp_path: Path) -> None:
+    """A three-day window has not met Thursday; that is not a zero-usage Thursday.
+
+    The same paint marks the night hours the server served (spec 5.7: the window
+    is never spelled out in the page), and with the rhythm facets absent only
+    this section collapses, naming the two facets it is missing rather than the
+    whole request list.
+    """
+    program = _report_dom(WHEN_SCENARIO, "function usageReportRenderWhen(model) {")
+    out = json.loads(_run_node(tmp_path, "usage-report-when.js", program))
+
+    rows = out["week"]["rows"]
+    assert [row[0] for row in rows] == ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    assert [row[2] for row in rows] == ["100t", "200t", "300t"] + ["\u2014"] * 4, rows
+    assert all(row[1] == "0%" for row in rows[3:]), "an unreached weekday drew a bar"
+    assert all(row[1] != "0%" for row in rows[:3]), rows
+    assert out["week"]["night"] == [1, 2], "the night bars must follow the served hours"
+    assert out["week"]["peak"] == [3]
+    assert out["week"]["notes"] == [
+        'usageReportNightNote{"window":"01:00\u201303:00"}',
+        "usageReportPeakDay: Wed",
+    ]
+    assert out["week"]["tz"] == 'usageReportWhenTz{"tz":"Europe/London"}'
+    missing = 'usageReportFacetsMissing{"facets":"hourly,weekday"}'
+    assert out["noHourly"] == {"children": 1, "text": missing}
+    assert out["noWeekday"] == {"children": 1, "text": missing}
+
+
+HEAT_SCENARIO = """
+const host = document.getElementById('usageReportHeat');
+const legend = document.getElementById('usageReportLegend');
+const streak = document.getElementById('usageReportStreak');
+const month = (over) => ({
+  period: 'month', dailyAvailable: true, streaks: null, firsts: null, elapsed: 9,
+  cells: Array.from({ length: 30 }, (_, i) => ({
+    date: `2026-09-${String(i + 1).padStart(2, '0')}`, tokens: i, messages: 1,
+    level: i % 8, future: i > 8, inWindow: i <= 8,
+  })),
+  ...over,
+});
+// Whatever the previous window left behind.
+const prefill = () => {
+  legend.replaceChildren(makeNode('i'));
+  streak.textContent = 'a stale streak';
+  host.replaceChildren(makeNode('div'));
+};
+const read = () => ({
+  host: host.children.length, text: host.textContent,
+  legend: legend.children.length, streak: streak.textContent,
+});
+const out = {};
+for (const period of ['day', 'week']) {
+  prefill();
+  usageReportRenderHeat(month({ period }));
+  out[period] = read();
+}
+prefill();
+usageReportRenderHeat(month({ dailyAvailable: false }));
+out.missing = read();
+prefill();
+usageReportRenderHeat(month({}));
+const grid = host.children.find((node) => node.className === 'usage-report-month');
+out.month = {
+  ...read(),
+  cells: grid ? grid.children.length : null,
+  blanks: grid ? grid.children.filter((cell) => cell.className.split(' ').includes('is-blank')).length : null,
+};
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@needs_node
+def test_the_day_map_steps_aside_for_short_windows_and_names_its_own_facets(tmp_path: Path) -> None:
+    """A day or a week has no daily card: the map, its legend and its streak line
+    are cleared rather than left over from the previous window. A month draws a
+    grid that opens on its first weekday. With the daily facets absent, the notice
+    names the three facets the map is made of, not the whole request list.
+    """
+    program = _report_dom(
+        HEAT_SCENARIO,
+        "function usageReportCell(day) {",
+        "function usageReportRenderLegend() {",
+        "function usageReportRenderStreak(model) {",
+        "function usageReportFitYearCells(wrap, cols) {",
+        "function usageReportRenderHeat(model) {",
+    )
+    out = json.loads(_run_node(tmp_path, "usage-report-heat.js", program))
+
+    for period in ("day", "week"):
+        assert out[period] == {"host": 0, "text": "", "legend": 0, "streak": ""}, (period, out[period])
+    heat_facets = _const_line(_source(), "USAGE_REPORT_HEAT_FACETS").split("'")[1]
+    assert set(heat_facets.split(",")) == {"daily", "streaks", "firsts"}
+    assert out["missing"]["text"] == f'usageReportFacetsMissing{{"facets":"{heat_facets}"}}'
+    assert out["missing"]["streak"] == ""
+    lead = date(2026, 9, 1).weekday()
+    assert out["month"]["cells"] == lead + 30, out["month"]
+    assert out["month"]["blanks"] == lead
+    assert out["month"]["legend"] == len(["less"]) + 8 + len(["more"])
+
+
+CONTROLS_SCENARIO = """
+TODAY = new Date(2026, 1, 10);
+const chipHost = document.getElementById('reportPeriodChips');
+const out = { daysHidden: {}, chips: {} };
+for (const period of ['day', 'week', 'month', 'year']) {
+  usageReportState.period = period;
+  usageReportRenderControls();
+  out.daysHidden[period] = document.getElementById('usageReportDaysPanel').hidden;
+  out.chips[period] = chipHost.children.map((chip) => [chip.textContent, chip.attrs['aria-pressed']]);
+}
+out.serverPicker = document.getElementById('usageReportServerWrap').hidden;
+
+// A chip clicked while a load is in flight waits for it, rather than vanishing.
+const loads = [];
+function loadUsageReport(options) { loads.push(options === undefined ? 'plain' : options); }
+usageReportState.period = 'month';
+usageReportRenderControls();
+usageReportState.loading = true;
+chipHost.children[2].fire('click');
+out.midLoad = { back: usageReportState.back, pendingBack: usageReportState.pendingBack, loads: loads.length };
+usageReportState.loading = false;
+chipHost.children[2].fire('click');
+out.atRest = { back: usageReportState.back, pendingBack: usageReportState.pendingBack, loads: loads.slice() };
+chipHost.children[2].fire('click');
+out.sameWindowLoads = loads.length;
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@needs_node
+def test_the_period_chips_are_named_from_real_dates_and_queue_mid_load(tmp_path: Path) -> None:
+    """The chips walk the report's period back, named from the calendar rather
+    than "last month, whatever that was", so a month across a year turn names its
+    year. A chip clicked during a load describes data not on screen yet, so it is
+    held and applied when the load lands. The day and week windows have no
+    daily card, so the controls hide its panel.
+    """
+    program = _report_dom(
+        CONTROLS_SCENARIO,
+        "function usageReportChipDefs() {",
+        "function usageReportRenderPeriodChips() {",
+        "function usageReportRenderControls() {",
+    )
+    out = json.loads(_run_node(tmp_path, "usage-report-controls.js", program))
+
+    assert out["daysHidden"] == {"day": True, "week": True, "month": False, "year": False}
+    labels = {period: [label for label, _ in chips] for period, chips in out["chips"].items()}
+    assert labels["month"] == ["feb", "jan", "dec 2025", "nov 2025", "oct 2025", "sep 2025"]
+    assert labels["week"] == [
+        "usageReportChipThisWeek", "usageReportChipLastWeek",
+        'usageReportChipWeeksAgo{"n":2}', 'usageReportChipWeeksAgo{"n":3}',
+    ]
+    assert labels["year"] == ["2026", "2025", "2024", "2023"]
+    assert labels["day"] == [
+        "usageReportTitleDay", "usageReportChipYesterday",
+        "2026-02-08", "2026-02-07", "2026-02-06", "2026-02-05", "2026-02-04",
+    ]
+    for chips in out["chips"].values():
+        assert [pressed for _, pressed in chips] == ["true"] + ["false"] * (len(chips) - 1)
+    assert out["serverPicker"] is True, "one server offers no picker"
+
+    assert out["midLoad"] == {"back": 0, "pendingBack": 2, "loads": 0}, "a mid-load chip click was dropped"
+    assert out["atRest"] == {"back": 2, "pendingBack": None, "loads": ["plain"]}
+    assert out["sameWindowLoads"] == 1, "the window already on screen was asked for again"
+
+
+LOADING_SCENARIO = """
+const SECTIONS = __SECTIONS__;
+const KPIS = ['usageReportKTokens', 'usageReportKCost', 'usageReportKMessages',
+  'usageReportKSessions', 'usageReportKActive', 'usageReportKDays'];
+[...SECTIONS, ...KPIS].forEach((id) => {
+  const stale = makeNode('span');
+  stale.textContent = `the last window's ${id}`;
+  document.getElementById(id).replaceChildren(stale);
+});
+['usageReportGreenCards', 'usageReportAmberCards'].forEach((id) => {
+  document.getElementById(id).replaceChildren(makeNode('canvas'));
+});
+const status = document.getElementById('usageReportExportStatus');
+status.hidden = false;
+status.textContent = 'Exported 4 files';
+usageReportState.previews = { 'green:light': {}, 'green:dark': {} };
+usageReportState.period = 'week';
+usageReportRenderLoading();
+const node = (id) => document.getElementById(id);
+process.stdout.write(JSON.stringify({
+  sections: Object.fromEntries(SECTIONS.map((id) => [id, node(id).textContent])),
+  kpis: Object.fromEntries(KPIS.map((id) => [id, [node(id).textContent, node(id).classList.contains('tokdash-loading-placeholder')]])),
+  title: node('usageReportTitle').textContent,
+  banner: node('usageReportBanner').hidden,
+  statePanel: node('usageReportStatePanel').hidden,
+  cards: ['usageReportGreenCards', 'usageReportAmberCards'].map((id) => node(id).children.length),
+  status: [status.hidden, status.textContent],
+  previews: Object.keys(usageReportState.previews),
+}));
+"""
+
+
+@needs_node
+def test_the_share_panel_is_cleared_before_the_next_load(tmp_path: Path) -> None:
+    """A stale podium under a fresh hero is a report that lies about the period,
+    and a stale preview would export a period the header no longer names.
+
+    Every section the next load fills is blanked as it starts, the hero tiles
+    turn back into loading placeholders, and the share cards, their previews and
+    the export status line are cleared with them.
+    """
+    sections = [
+        "usageReportKTokensSub", "usageReportKDaysSub", "usageReportHeat", "usageReportStreak",
+        "usageReportLegend", "usageReportRange", "usageReportProgress", "usageReportPodium",
+        "usageReportGroupNote", "usageReportWhen", "usageReportTz", "usageReportAgentsBody",
+        "usageReportAgentsNote", "usageReportModelsBody", "usageReportModelsNote",
+        "usageReportProjectsBody", "usageReportProjectsNote", "usageReportFooter",
+    ]
+    program = _report_dom(
+        LOADING_SCENARIO.replace("__SECTIONS__", json.dumps(sections)),
+        "function usageReportClearShare() {",
+        "function usageReportRenderLoading() {",
+    )
+    out = json.loads(_run_node(tmp_path, "usage-report-loading.js", program))
+
+    stale = {section: text for section, text in out["sections"].items() if text}
+    assert not stale, f"sections kept the last window's content: {sorted(stale)}"
+    for kpi, (text, placeholder) in out["kpis"].items():
+        assert placeholder and text == "loading", (kpi, text)
+    assert out["title"] == "usageReportTitleWeek"
+    assert out["banner"] is True and out["statePanel"] is True
+    assert out["cards"] == [0, 0], "the previous window's cards are still up"
+    assert out["status"] == [True, ""]
+    assert out["previews"] == [], "the export would still write the previous window's previews"
+
+
+@needs_node
+def test_an_unknown_count_prints_a_dash_where_the_hero_reads_it(tmp_path: Path) -> None:
+    """`model.sessions` and `model.streaks` are absent when their request failed.
+
+    A single formatNumber(null) puts "0 sessions" back on the page, and a
+    zero-filled streak block prints "0/30", a month nobody worked. (The share
+    card reads the same two figures; a card from an older server is checked by
+    the card harness below.)
+    """
+    program = _report_dom("""
+const read = () => Object.fromEntries(['usageReportKSessions', 'usageReportKActive', 'usageReportKDays', 'usageReportKDaysSub']
+  .map((id) => [id, document.getElementById(id).textContent]));
+const base = { isEmpty: false, elapsed: 30, period: 'month' };
+const out = {};
+usageReportRenderHeroActivity({ ...base, sessions: null, streaks: null, agentMs: 0 });
+out.unknown = read();
+usageReportRenderHeroActivity({ ...base, sessions: 4, streaks: { active_days: 12 }, agentMs: 7200000 });
+out.known = read();
+usageReportRenderHeroActivity({ ...base, isEmpty: true, sessions: 0, streaks: { active_days: 0 }, agentMs: 5 });
+out.empty = read();
+process.stdout.write(JSON.stringify(out));
+""", "function usageReportRenderHeroActivity(model) {")
+    out = json.loads(_run_node(tmp_path, "usage-report-hero-activity.js", program))
+
+    sub = 'usageReportDaysSub{"n":30}'
+    assert out["unknown"] == {
+        "usageReportKSessions": "\u2014", "usageReportKActive": "\u2014",
+        "usageReportKDays": "\u2014", "usageReportKDaysSub": sub,
+    }
+    # One figure for active time, and it is the agent total.
+    assert out["known"] == {
+        "usageReportKSessions": "4", "usageReportKActive": "7200000ms",
+        "usageReportKDays": "12/30", "usageReportKDaysSub": sub,
+    }
+    assert out["empty"] == {
+        "usageReportKSessions": "0", "usageReportKActive": "\u2014",
+        "usageReportKDays": "\u2014", "usageReportKDaysSub": "",
+    }
+
+
+@needs_node
+def test_the_podium_keeps_its_missing_data_notices(tmp_path: Path) -> None:
+    """With no project facet the podium says so under the tiles, and a facet scan
+    that covers visibly less than the period total says how much it covers. The
+    ranking keeps those notices; it has no decorative footnotes to print.
+    """
+    program = _report_dom("""
+const host = document.getElementById('usageReportPodium');
+const note = document.getElementById('usageReportGroupNote');
+const read = () => ({
+  tiles: host.children.map((tile) => tile.textContent),
+  note: note.textContent, hidden: note.hidden,
+  faint: note.children.flatMap((fragment) => fragment.children || [])
+    .filter((span) => span.className === 'usage-report-note-faint').length,
+});
+const bare = { tools: null, models: null, projectRows: [], projectsAvailable: false, facetTotal: 0, tokens: 100, atByTool: {} };
+const out = {};
+usageReportRenderPodium(bare);
+out.bare = read();
+usageReportRenderPodium({
+  ...bare, projectsAvailable: true, facetTotal: 50,
+  tools: [{ tool: 'codex', tokens: 50 }], models: [{ model: 'm', tokens: 50, cost: 2 }],
+  projectRows: [{ project: 'p', tokens: 40, cost: 1 }],
+  atByTool: { codex: { session_count: 3, active_ms_sum: 3600000 } },
+});
+out.narrow = read();
+process.stdout.write(JSON.stringify(out));
+""", "function usageReportPlainName(label) {",
+        "function usageReportPodiumTile(kindLabel, nameNode, valueText, shareText, subText) {",
+        "function usageReportShowFacetCoverage(model) {",
+        "function usageReportRenderPodium(model) {")
+    out = json.loads(_run_node(tmp_path, "usage-report-podium.js", program))
+
+    assert out["bare"]["note"] == "usageReportMissingProjects" and out["bare"]["hidden"] is False
+    assert len(out["bare"]["tiles"]) == 3
+    assert all("\u2014" in tile for tile in out["bare"]["tiles"]), out["bare"]["tiles"]
+    assert out["narrow"]["note"] == 'usageReportFacetCovers{"pct":"50%"}', out["narrow"]
+    assert out["narrow"]["faint"] == 1 and out["narrow"]["hidden"] is False
+    assert "identity:codex" in out["narrow"]["tiles"][0]
+
+
 # --- copy deck --------------------------------------------------------------
 
 
@@ -1884,24 +2444,6 @@ def test_report_translations_keep_the_same_placeholders() -> None:
             expected = set(re.findall(r"\{(\w+)\}", value))
             actual = set(re.findall(r"\{(\w+)\}", copy[key]))
             assert actual == expected, f"{language}.{key}: {actual} != {expected}"
-
-
-def test_every_line_that_names_a_machine_names_the_selected_one() -> None:
-    """The report is single-server, and these lines used to be fixed strings
-    about "this machine": read from a remote server, the footer and the exported
-    card described the wrong box.
-    """
-    source = _source()
-    block = _report_block(source)
-    assert "t('usageReportFooterSrc', { n: sources, machine," in block
-    footer = extract_js_function(block, "function usageReportRenderFooter(model) {")
-    assert "const machine = usageReportMachineName();" in footer
-    # Only the nickname fallback may still spell the phrase out.
-    for lang in I18N_LANGS:
-        copy = _i18n_report_copy(source, lang)
-        for key in MACHINE_KEYS:
-            assert "{machine}" in copy[key], f"{lang}.{key} lost the placeholder"
-        assert copy["usageReportCardNicknameFallback"]
 
 
 def test_the_machine_placeholder_does_not_split_a_cjk_phrase() -> None:
@@ -1934,18 +2476,6 @@ def test_the_version_stamp_is_read_from_the_server_the_report_reads() -> None:
 # --- PR-B: podium, rhythm, agent table, caveats ------------------------------
 
 
-def test_the_day_map_notice_names_only_the_facets_it_is_missing() -> None:
-    """The wide request list must not leak into a notice about a narrow gap."""
-    block = _report_block(_source())
-    heat = [
-        line for line in block.splitlines() if line.strip().startswith("const USAGE_REPORT_HEAT_FACETS")
-    ][0]
-    assert "hourly" not in heat and "projects" not in heat
-    assert "t('usageReportFacetsMissing', { facets: USAGE_REPORT_HEAT_FACETS })" in block
-    # The hour strip names its own two facets instead.
-    assert "t('usageReportFacetsMissing', { facets: 'hourly,weekday' })" in block
-
-
 def test_the_new_sections_render_after_the_day_map() -> None:
     block = _report_block(_source())
     render = extract_js_function(block, "function usageReportRender() {")
@@ -1960,41 +2490,6 @@ def test_the_new_sections_render_after_the_day_map() -> None:
     ]
     positions = [render.index(call) for call in order]
     assert positions == sorted(positions), "the sections fell out of the spec's order"
-
-
-def test_the_new_sections_are_cleared_before_the_next_load() -> None:
-    """A stale podium under a fresh hero is a report that lies about the period."""
-    block = _report_block(_source())
-    loading = extract_js_function(block, "function usageReportRenderLoading() {")
-    for element in (
-        "usageReportPodium",
-        "usageReportGroupNote",
-        "usageReportWhen",
-        "usageReportAgentsBody",
-        "usageReportModelsBody",
-        "usageReportModelsNote",
-        "usageReportProjectsBody",
-        "usageReportProjectsNote",
-        "usageReportFooter",
-    ):
-        assert f"'{element}'" in loading, element
-
-
-def test_the_report_removes_the_repeated_project_and_footer_copy() -> None:
-    """The ranking keeps missing-data notices without the decorative footnotes."""
-    block = _report_block(_source())
-    for key in ("usageReportPodiumProjectNote", "usageReportProjectGroupNote", "usageReportFooterDays", "usageReportFooterCost", "usageReportFooterActive", "usageReportSentence"):
-        assert key not in _source()
-    assert "usageReportMissingProjects" in block
-
-
-def test_weekday_rows_that_have_not_happened_print_no_figure() -> None:
-    """A three-day window has not met Thursday; that is not a zero-usage Thursday."""
-    block = _report_block(_source())
-    assert "elapsedWeekdays" in block
-    when = extract_js_function(block, "function usageReportRenderWhen(model) {")
-    assert "reached ? formatTokenCount(row.tokens) : USAGE_REPORT_EM" in when
-    assert "'0%'" in when
 
 
 @needs_node
@@ -2577,18 +3072,12 @@ process.stdout.write(JSON.stringify(out));
     assert report["year"]["rightEdge"] == pytest.approx(336, abs=0.01), "the year map no longer reaches the content edge"
 
 
-def test_the_page_hides_the_day_and_week_card_and_centres_the_month() -> None:
-    """Short windows hide the whole daily card; months retain the square grid."""
+def test_the_month_grid_rule_draws_fixed_squares_at_their_own_width() -> None:
+    """The month keeps the square grid: seven fixed columns at their own width,
+    not columns stretched across the panel. Layout only shows in a browser, so
+    the rule itself is what is read here; the grid it styles is built by the day
+    map test above."""
     source = _source()
-    heat = extract_js_function(source, "function usageReportRenderHeat(model) {")
-    week = heat[heat.index("model.period === 'week'") :]
-    assert "usageReportLegend').replaceChildren()" in week
-    assert "usageReportStreak'), ''" in week
-    assert week.index("return;") < heat.index("model.period !== 'year'") - heat.index("model.period === 'week'"), (
-        "the week branch must return before the month/year grids are built"
-    )
-    controls = extract_js_function(source, "function usageReportRenderControls() {")
-    assert "getElementById('usageReportDaysPanel').hidden = ['day', 'week'].includes(usageReportState.period)" in controls
     month_rule = next(line for line in source.splitlines() if line.strip().startswith(".usage-report-month {"))
     assert "repeat(7, 24px)" in month_rule
     assert "width: max-content" in month_rule and "margin: 0 auto" in month_rule
@@ -2714,9 +3203,3 @@ def test_a_control_changed_mid_flight_is_applied_late_not_dropped() -> None:
     assert "usageReportWritePrefs()" in applied, "a queued choice that lands is the stored choice"
 
 
-def test_the_share_panel_is_cleared_before_the_next_load() -> None:
-    """Stale previews would export a period the header no longer names."""
-    block = _report_block(_source())
-    loading = extract_js_function(block, "function usageReportRenderLoading() {")
-    assert "usageReportClearShare()" in loading
-    assert "usageReportState.previews = {}" in block

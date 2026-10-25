@@ -158,6 +158,27 @@ def test_activity_strip_reports_the_buckets_the_payload_carries(api):
     run(api, body)
 
 
+@pytest.mark.parametrize("size", [(120, 36), (120, 38), (120, 40), (120, 42)])
+def test_the_activity_band_box_holds_every_line_written_into_it(api, size):
+    """A height is the outside of the box, and the band's padding is not content.
+
+    The rows the band may spend are counted INSIDE its padding. The box was then
+    given exactly that many rows, so whenever the picture filled them the
+    caption's last row sat under the band's own bottom lip. Which terminal
+    heights make the picture fill its rows exactly depends on the frame, so
+    several are checked.
+    """
+    async def body(app, pilot):
+        await settle(pilot)
+        band = app.query_one("#ov-activity")
+        written = str(band.content).splitlines()
+        assert band.content_region.height >= len(written), (
+            size, band.region, band.content_region, written)
+        assert "server local time" in visible(app, "#ov-activity"), size
+
+    run(api, body, size=size)
+
+
 def test_long_range_omits_the_chart_instead_of_inventing_one(api):
     async def body(app, pilot):
         api.usage = {**USAGE, "sparkline": None}

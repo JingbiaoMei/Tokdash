@@ -4850,7 +4850,8 @@ class TokdashApp(App):
                 # One row is not an assembly; it is a heading. Say which band this
                 # is and leave the geometry stable -- hiding it here would make the
                 # next measurement disagree, and the picture would flicker.
-                widget.styles.height = "1"
+                # The box is the row PLUS the band's own padding (see below).
+                widget.styles.height = str(1 + self._vertical_inset(widget))
                 widget.update(emit_markup([[Run(title, "bold")]]))
                 self.call_after_refresh(self._refit_activity)
                 return
@@ -4868,7 +4869,13 @@ class TokdashApp(App):
         # rows the picture happened to need. A surface that stops where its text
         # stops leaves a hole of page background under the chart, and the page
         # reads as a strip of content floating above an empty terminal.
-        widget.styles.height = str(max(len(lines), given))
+        #
+        # ``given`` counts the rows INSIDE the band's padding, and a height is the
+        # outside of the box. Set to ``given`` alone, the bottom padding came out
+        # of the content: whenever the picture filled its rows exactly, which is
+        # what the loop above aims for, the caption's last row -- the one with the
+        # full bucket keys and "server local time" -- was drawn under the lip.
+        widget.styles.height = str(max(len(lines), given) + self._vertical_inset(widget))
         # The rows this was sized against are the ones the PREVIOUS paint left
         # behind; once the frame settles, redraw for the rows there really are.
         self.call_after_refresh(self._refit_activity)
@@ -4926,11 +4933,20 @@ class TokdashApp(App):
         # buys a scrollbar, and a scrollbar takes a column off every table on the
         # page. Measured from the widget rather than assumed, because the surfaces
         # do not all carry the same padding.
-        inset = max(0, widget.content_region.y - widget.region.y) + max(
-            0, widget.region.bottom - widget.content_region.bottom
-        )
+        inset = self._vertical_inset(widget)
         # One row in hand: the pane ends the row BEFORE the strip begins.
         return max(0, limit - top - 1 - inset)
+
+    @staticmethod
+    def _vertical_inset(widget) -> int:
+        """Rows a widget's own top and bottom padding take out of its box.
+
+        The other half of _rows_above_strip: that number is what the ASSEMBLY
+        may spend, so a box sized from it has to be given these rows back.
+        """
+        return max(0, widget.content_region.y - widget.region.y) + max(
+            0, widget.region.bottom - widget.content_region.bottom
+        )
 
     def _sessions_grouped(self, rows: list[dict]) -> bool:
         """Whether the list has more than one tool in it, and so is grouped."""

@@ -14,6 +14,7 @@ import json
 import re
 from datetime import date, timedelta
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -172,23 +173,6 @@ def test_report_renders_on_a_language_switch() -> None:
 # --- data access ------------------------------------------------------------
 
 
-def test_report_fetches_three_endpoints_with_explicit_dates() -> None:
-    block = _report_block(_source())
-    for path in ("/api/insights", "/api/usage", "/api/active-time"):
-        assert path in block, path
-    assert "date_from=" in block and "date_to=" in block
-    assert "facets=${USAGE_REPORT_FACETS}" in block
-
-
-def test_report_never_asks_for_a_trailing_window_alias() -> None:
-    """Spec 3: `period=week` is a trailing seven days, not this calendar week.
-
-    The report labels its window with calendar words, so an alias here would
-    put those words around a rolling window.
-    """
-    assert "period=" not in _report_block(_source())
-
-
 def test_day_map_reuses_the_dashboard_quantile_rule_not_the_served_intensity() -> None:
     """Spec D3: one shading rule for the product, and it is the Stats tab's."""
     block = _report_block(_source())
@@ -231,16 +215,6 @@ def test_every_notice_the_model_records_reaches_the_banner() -> None:
     assert notices == {"insightsMissing", "usageMissing", "activeTimeMissing"}
     for notice in notices:
         assert f"model.notices.{notice}" in banner, notice
-
-
-def test_report_counts_every_codex_session_whatever_overview_shows() -> None:
-    """The scope line claims all agent activity on the machine, so the report
-    pins the review-session filter open instead of inheriting the server default
-    or the Overview toggle -- either would make the two tabs disagree silently."""
-    block = _report_block(_source())
-    loader = extract_js_function(block, "async function loadUsageReport(options = {}) {")
-    assert "/api/active-time?include_review_sessions=true" in loader
-    assert "includeCodexReviewSessions" not in loader, "the Overview toggle is not this tab's input"
 
 
 # --- window math, executed for real under node ------------------------------
@@ -1036,13 +1010,23 @@ def test_the_server_warms_the_exact_facet_string_the_tab_asks_for() -> None:
     assert match.group(1) == api.REPORT_FACETS
 
 
+def _facets_line(block: str) -> str:
+    """The tab's facet constant as the page declares it."""
+    return next(
+        line.strip() for line in block.splitlines()
+        if line.strip().startswith("const USAGE_REPORT_FACETS = ")
+    )
+
+
 def _loader_program(block: str) -> str:
     """The loader as the page defines it, with the one helper it now asks first.
 
     `usageReportSummaryWanted` is not stubbed: whether the two slow requests are
     owed is exactly what these tests are about, so a stub would be the assertion.
+    The facet constant is the page's own, so the URLs it builds are the real ones.
     """
     return (LOADER_HARNESS
+            .replace("__FACETS__", _facets_line(block))
             .replace("__SUMMARY_WANTED__", extract_js_function(
                 block, "function usageReportSummaryWanted() {"))
             .replace("__LOADER__", extract_js_function(
@@ -1054,9 +1038,17 @@ const usageReportState = {
   loading: false, loaded: false, error: null, model: null,
   period: 'month', back: 0, serverId: 'local', staleReread: false,
   active: true, summaryKey: '', summaryLoading: false, usagePayload: null,
+  loadToken: 0, summaryToken: 0, staleTimer: null,
 };
 const calls = [];
+const urls = [];
+const scheduled = [];
+const cleared = [];
+clearTimeout = (id) => { cleared.push(id); };
 let responder = () => null;
+// The Overview tab's review-session toggle, switched off. The report pins the
+// filter open, so it must never be what the request carries.
+let includeCodexReviewSessions = false;
 function usageReportWire() {}
 function usageReportRenderControls() {}
 function usageReportRenderLoading() { calls.push('renderLoading'); }
@@ -1067,7 +1059,10 @@ function usageReportSummaryKey() { return 'local|2026-09-01|2026-09-05'; }
 function usageReportBuildModel(args) { return { notices: {}, args }; }
 function usageReportRenderPartial() { calls.push('partial'); }
 function usageReportRender() { calls.push('render'); }
-function usageReportScheduleStaleReread() { calls.push('scheduleStale'); }
+function usageReportScheduleStaleReread(payloads) {
+  calls.push('scheduleStale');
+  scheduled.push(payloads.map((payload) => (payload && payload.path) || null));
+}
 // The speed view rides the same window, so the loader invalidates it. These stubs
 // keep this harness about the loader's own control flow; the speed table is tested in
 // tests/test_output_speed_frontend.py.
@@ -1078,12 +1073,13 @@ function usageReportSpeedInvalidate() { calls.push('speedInvalidate'); }
 // page, whatever that page's gate would have done with the call.
 function usageReportLoadSpeed() { calls.push('loadSpeed'); }
 function usageReportEnsureSummary() { calls.push('ensureSummary'); }
-function usageReportApplyPendingChoice() {}
+function usageReportApplyPendingChoice() { calls.push('applyPending'); }
 function fetchJsonWithRetry(server, url) {
   calls.push('fetch:' + String(url).split('?')[0]);
-  return Promise.resolve(responder());
+  urls.push(String(url));
+  return Promise.resolve(responder(url));
 }
-const USAGE_REPORT_FACETS = 'daily';
+__FACETS__
 __SUMMARY_WANTED__
 __LOADER__
 (async () => {
@@ -1120,6 +1116,33 @@ __LOADER__
   usageReportState.active = false;
   await loadUsageReport();
   out.leftMidFlightCalls = calls.slice();
+
+  // One whole load with the page on screen, then the same window refreshed:
+  // every URL it sends, the payloads it hands the stale check, and the re-read
+  // timer it retires on the way in.
+  calls.length = 0;
+  urls.length = 0;
+  usageReportState.active = true;
+  usageReportState.staleTimer = 41;
+  const tokenBefore = usageReportState.loadToken;
+  responder = (url) => ({ path: String(url).split('?')[0] });
+  await loadUsageReport();
+  out.whole = {
+    urls: urls.slice(), calls: calls.slice(), scheduled: scheduled.slice(),
+    cleared: cleared.slice(), staleTimer: usageReportState.staleTimer,
+    tokenStep: usageReportState.loadToken - tokenBefore,
+  };
+  urls.length = 0;
+  await loadUsageReport({ refresh: true });
+  out.refreshedUrls = urls.slice();
+
+  // A load that throws part-way still settles a queued choice, and only once.
+  calls.length = 0;
+  responder = () => { throw new Error('a model bug'); };
+  await loadUsageReport();
+  out.thrown = {
+    calls: calls.slice(), loading: usageReportState.loading, error: !!usageReportState.error,
+  };
   process.stdout.write(JSON.stringify(out));
 })();
 """
@@ -1285,12 +1308,14 @@ const usageReportState = {
 let mode = 'ok';
 let onRequest = null;
 const renders = [];
+const asked = [];
 function usageReportServer() { return { id: 'local' }; }
 function usageReportWindows() { return { date_from: '2026-09-01', date_to: '2026-09-05' }; }
 function usageReportBuildModel() { return { tag: 'reread' }; }
 function usageReportRender() { renders.push(usageReportState.model.tag); }
-const USAGE_REPORT_FACETS = 'daily';
-function fetchJsonWithRetry() {
+__FACETS__
+function fetchJsonWithRetry(server, url) {
+  asked.push(String(url));
   if (onRequest) onRequest();
   if (mode === 'throw') return Promise.reject(new Error('network'));
   if (mode === 'null') return Promise.resolve(null);
@@ -1324,6 +1349,7 @@ const snap = () => ({ model: usageReportState.model.tag, renders: renders.length
   // Nothing changed: it commits.
   await usageReportSilentReread(7, 'month', 0, 'local');
   out.afterSuccess = snap();
+  out.asked = asked;
   process.stdout.write(JSON.stringify(out));
 })();
 """
@@ -1341,6 +1367,7 @@ def test_a_silent_reread_never_damages_the_report_on_screen(tmp_path: Path) -> N
     block = _report_block(_source())
     body = (
         REREAD_HARNESS
+        .replace("__FACETS__", _facets_line(block))
         .replace("__REREAD__", extract_js_function(
             block, "async function usageReportSilentReread(token, period, back, serverId) {"))
         .replace("__WANTS__", extract_js_function(
@@ -1357,8 +1384,21 @@ def test_a_silent_reread_never_damages_the_report_on_screen(tmp_path: Path) -> N
 
     # It must never take the loading flag: that is what swallowed period clicks and
     # made Retry a no-op during a refresh the reader could not see.
+    asked = out.pop("asked")
     for case in out.values():
         assert case["loading"] is False
+
+    # The server is already recomputing a stale entry, so the re-read reads it
+    # again rather than forcing a second recompute with refresh=1. And it asks for
+    # the whole facet set: the facets are folded out of one scan on the server.
+    facets = _facets_line(block).split("'")[1]
+    assert asked, "the re-read never asked for anything"
+    for url in asked:
+        query = parse_qs(urlsplit(url).query)
+        assert "refresh" not in query and "period" not in query, url
+        assert query["date_from"] == ["2026-09-01"] and query["date_to"] == ["2026-09-05"], url
+        if url.startswith("/api/insights"):
+            assert query["facets"] == [facets], url
 
 
 @needs_node
@@ -1378,6 +1418,65 @@ def test_an_empty_200_does_not_wedge_the_report_tab(tmp_path: Path) -> None:
     assert out["afterNull"]["loaded"] is True
     assert out["recovered"] is True, "the tab refused every load after the first failure"
     assert out["loadingAtRest"] is False
+
+
+@needs_node
+def test_a_load_asks_three_endpoints_for_its_own_calendar_window(tmp_path: Path) -> None:
+    """What one load sends, read off the requests it makes.
+
+    Each of the three endpoints is asked for the window by explicit dates, never
+    by `period=`: the server's `period=week` is a trailing seven days, and the
+    report labels its window with calendar words (spec 3). The active-time
+    request pins the Codex review-session filter open rather than inheriting the
+    Overview tab's toggle, since the scope line claims every agent session. The
+    insights request names the whole facet set, once: the server folds every
+    facet out of one scan, so a second request for a subset buys that scan again.
+
+    /api/usage alone fills the hero, so it is awaited and painted before the slow
+    two are issued: fired together they contend for the server's GIL and a 2 s
+    request became a 13 s one. (That the slow two still overlap each other is the
+    summary-race test's control.) The stale check then sees all three payloads,
+    because the slow pair is the one most often served stale.
+    """
+    block = _report_block(_source())
+    out = json.loads(_run_node(tmp_path, "usage-report-requests.js", _loader_program(block)))
+    whole = out["whole"]
+    facets = _facets_line(block).split("'")[1]
+
+    paths = [urlsplit(url).path for url in whole["urls"]]
+    assert paths == ["/api/usage", "/api/insights", "/api/active-time"], whole["urls"]
+    for url in whole["urls"]:
+        query = parse_qs(urlsplit(url).query)
+        assert query["date_from"] == ["2026-09-01"] and query["date_to"] == ["2026-09-05"], url
+        assert "period" not in query, f"a trailing-window alias reached the server: {url}"
+        assert "refresh" not in query, url
+    insights = parse_qs(urlsplit(whole["urls"][1]).query)
+    assert insights["facets"] == [facets], whole["urls"][1]
+    assert {"hourly", "weekday", "tools", "models", "projects"} <= set(facets.split(",")), (
+        "the sections below the day map are facet-fed; a missing facet is a hole"
+    )
+    active = parse_qs(urlsplit(whole["urls"][2]).query)
+    assert active["include_review_sessions"] == ["true"], whole["urls"][2]
+
+    calls = whole["calls"]
+    assert calls.index("fetch:/api/usage") < calls.index("partial") < calls.index("fetch:/api/insights"), calls
+    assert calls.index("partial") < calls.index("fetch:/api/active-time"), calls
+    assert whole["scheduled"][-1] == ["/api/usage", "/api/insights", "/api/active-time"], (
+        "the stale check must see the slow pair, not just the fastest request"
+    )
+    # An explicit load retires a silent re-read still queued: its timer is
+    # cleared, and the token a late answer is checked against moves on.
+    assert whole["cleared"][-1] == 41 and whole["staleTimer"] is None, whole
+    assert whole["tokenStep"] == 1
+    assert calls.count("applyPending") == 1
+
+    refreshed = [parse_qs(urlsplit(url).query) for url in out["refreshedUrls"]]
+    assert len(refreshed) == 3 and all(query["refresh"] == ["1"] for query in refreshed), out["refreshedUrls"]
+
+    # Every exit settles a choice queued mid-flight, the throwing one included.
+    thrown = out["thrown"]
+    assert thrown["loading"] is False and thrown["error"] is True, thrown
+    assert thrown["calls"].count("applyPending") == 1, thrown["calls"]
 
 
 @needs_node
@@ -1634,48 +1733,6 @@ def test_a_deferred_summary_cannot_answer_for_a_window_that_moved(tmp_path: Path
     assert out["afterStalePair"]["summaryLoading"] is False, out
 
 
-def test_a_report_served_from_a_stale_entry_reads_again_once() -> None:
-    """The morning's first visit is answered out of the 00:05 warm.
-
-    Past its TTL the server hands the cached value over instantly AND recomputes
-    it in the background, so the figures are hours old and nothing on the page
-    says so. The tab reads again once when it sees that status -- and must not
-    send refresh=1, which would start a second full recompute of the work the
-    daemon is already doing.
-    """
-    block = _report_block(_source())
-    schedule = extract_js_function(
-        block, "function usageReportScheduleStaleReread(payloads, period, back, server) {"
-    )
-    reread = extract_js_function(
-        block, "async function usageReportSilentReread(token, period, back, serverId) {"
-    )
-    loader = extract_js_function(block, "async function loadUsageReport(options = {}) {")
-
-    # Any of the three, not just the fastest one.
-    assert "payloads.some(usageReportServedStale)" in schedule
-    assert "usageReportScheduleStaleReread([usage, insights, activeTime], period, back, server)" in loader
-
-    # The server is already recomputing these keys; forcing doubles the work.
-    assert "refresh=1" not in reread
-    assert "loadUsageReport" not in reread, (
-        "the silent path must not reuse the loader: that one owns `loading`, the "
-        "partial model and the blanking paint"
-    )
-
-    # A queued re-read describes the window an explicit load is replacing.
-    arm = extract_js_function(block, "function usageReportArmStaleReread() {")
-    assert "clearTimeout(usageReportState.staleTimer)" in arm
-    assert "usageReportArmStaleReread()" in schedule
-    assert "clearTimeout(usageReportState.staleTimer)" in loader
-    assert "usageReportState.loadToken += 1" in loader
-
-    # Guarded on both sides of the round trip.
-    assert reread.count("usageReportStillWants(token, period, back, serverId)") == 2
-    # A failed re-read must leave the report on screen alone.
-    assert "return;" in reread.split("catch (_error) {")[1]
-
-
 def test_the_version_stamp_waits_for_the_full_paint() -> None:
     """/api/version is fired first and answers instantly, so it can land between
     the two paints. Stamping the partial model would render the footer and the
@@ -1703,26 +1760,6 @@ def test_a_source_not_asked_for_yet_is_not_reported_as_unavailable() -> None:
     # Usage is the request the first paint is made of: by then it has either
     # landed or failed, so its notice is never suppressed.
     assert "model.notices.usageMissing && !pending" not in banner
-
-
-def test_the_report_paints_the_hero_before_asking_for_the_slow_two() -> None:
-    """The three requests contend for the server's GIL instead of overlapping.
-
-    Fired as one Promise.all, a 2s /api/usage became a 13s one and the paint
-    waited on the slowest of the set either way. Usage alone fills the hero, so
-    it is awaited and painted before the other two are issued.
-    """
-    block = _report_block(_source())
-    loader = extract_js_function(block, "async function loadUsageReport(options = {}) {")
-    usage_at = loader.index("await settle(request('/api/usage'))")
-    paint_at = loader.index("usageReportRenderPartial(")
-    insights_at = loader.index("/api/insights?facets=")
-    active_at = loader.index("/api/active-time?include_review_sessions=true")
-    assert usage_at < paint_at < insights_at, "the hero must paint before the slow two start"
-    assert usage_at < paint_at < active_at
-    # The slow two still overlap each other -- sequencing them as well would add
-    # their times rather than trading a little wall clock for a much earlier paint.
-    assert loader.count("await Promise.all([") == 1
 
 
 def test_the_first_paint_renders_only_what_usage_answers() -> None:
@@ -1858,24 +1895,6 @@ def test_the_version_stamp_is_read_from_the_server_the_report_reads() -> None:
 
 
 # --- PR-B: podium, rhythm, agent table, caveats ------------------------------
-
-
-def test_report_asks_for_the_facets_the_new_sections_need() -> None:
-    """The sections below the day map are facet-fed; a missing facet is a hole."""
-    block = _report_block(_source())
-    facets_line = [
-        line for line in block.splitlines() if line.strip().startswith("const USAGE_REPORT_FACETS")
-    ][0]
-    served = facets_line.split("'")[1].split(",")
-    for facet in ("hourly", "weekday", "tools", "models", "projects"):
-        assert facet in served, facet
-    # One request for all of them: the server folds every facet out of one scan, so
-    # asking twice costs the machine the scan again for nothing. Both callers -- the
-    # explicit load and the silent re-read -- must therefore ask for the WHOLE set.
-    # What must never appear is an insights request for a subset.
-    asked = re.findall(r"/api/insights\?facets=\$\{(\w+)\}", block)
-    assert asked, "no insights request found"
-    assert set(asked) == {"USAGE_REPORT_FACETS"}, asked
 
 
 def test_the_day_map_notice_names_only_the_facets_it_is_missing() -> None:

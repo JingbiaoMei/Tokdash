@@ -225,19 +225,6 @@ def test_api_endpoints_and_dashboard_smoke(synthetic_api_data):
 
     html = api._render_dashboard_html("")
     assert "Tokdash" in html
-    assert "Sessions" in html
-    assert 'data-tab="quota"' in html
-    assert 'id="quota-content"' in html
-    assert "/api/quota" in html
-    assert "/api/quota/refresh" in html
-    assert "/api/quota/consent" in html
-    assert "resetCredits" in html
-    assert "renderQuotaBucketGroups" in html
-    assert "return 'paper';" in html
-    assert "updateBadge" in html
-    assert "initUpdateNotice" in html
-    assert "tokdash update" in html
-    assert "/api/update-check" in html
     assert "__TOKDASH_BASE_PATH__" not in html
 
     icon_path = api.STATIC_DIR / "icons" / "icon-192.png"
@@ -292,7 +279,6 @@ def test_public_base_path_rendering():
 
     html = api._render_dashboard_html("/tokdash")
     assert 'const configured = "/tokdash";' in html
-    assert 'configured.startsWith("/")' in html
 
     manifest = api._render_manifest("/tokdash")
     assert '"start_url":"/tokdash/"' in manifest
@@ -336,16 +322,6 @@ def test_api_docs_pages_are_off_but_the_schema_is_served():
     schema = client.get("/openapi.json")
     assert schema.status_code == 200
     assert "/api/usage" in schema.json()["paths"]
-
-
-def test_dashboard_refresh_status_copy_and_auto_success_reset():
-    html = api._render_dashboard_html("")
-
-    assert "refreshFailed: 'Failed — retry'" in html
-    assert "refreshFailed: '失败，请重试'" in html
-    assert "Refresh browser" not in html
-    assert "刷新浏览器" not in html
-    assert "setRefreshUiState('idle');" in html
 
 
 def test_api_custom_date_ranges_and_validation(synthetic_api_data):

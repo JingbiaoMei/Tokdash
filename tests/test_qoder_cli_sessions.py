@@ -724,20 +724,6 @@ def test_no_500_on_transient_read(monkeypatch, tmp_path):
     assert list(_raw_sessions_for_tool("qoder_cli")) == [SID_A]
 
 
-def test_frontend_session_registry_includes_qoder_cli():
-    html = (Path(__file__).resolve().parent.parent / "src" / "tokdash" / "static" / "index.html").read_text(encoding="utf-8")
-    assert "'qoder_cli'" in html
-    # the JS looks the tbody up as `${panel}SessionsTable`, raw key
-    assert 'id="qoder_cliSessionsTable"' in html
-    assert html.count("qoderCliSessions:") == 6  # six i18n dicts
-    # the panel tail pins every tool key in load order
-    assert "qoder_cli: null, combined: null" in html
-    # icon + label for qoder_cli already existed before this harness: verify
-    # they were not duplicated (a repeated object key parses and silently
-    # keeps the last value, which is how a wrong label ships).
-    assert html.count("qoderCliSessions:") == 6
-
-
 def test_window_table_reaches_both_views(monkeypatch, tmp_path):
     """Run-log window evidence must move the Overview AND the Sessions panel,
     and must invalidate the per-file candidate cache, not just the aggregate.

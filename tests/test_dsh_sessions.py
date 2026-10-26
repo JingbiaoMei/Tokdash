@@ -278,23 +278,6 @@ def test_cli_sync_primes_dsh_session_records(_isolated_dsh_home, monkeypatch):
     assert called == ["codex", "claude", "kimi", "dsh", "reasonix"]
 
 
-def test_frontend_session_registry_includes_dsh():
-    index = Path(sessions.__file__).parent / "static" / "index.html"
-    source = index.read_text(encoding="utf-8")
-    assert "'codex', 'claude', 'opencode', 'pi_agent', 'mimo', 'kimi', 'dsh', 'reasonix'" in source
-    assert "kimi: null, dsh: null, reasonix: null, zcode: null, kilocode: null, omp: null, grok: null, hermes: null, antigravity_cli: null, cline: null, workbuddy: null, qoder: null, qwen_code: null, openclaw: null, qoder_cli: null, combined: null" in source
-    assert 'updateSessionPanel("dsh", lastSessionsResponses.dsh);' in source
-    assert 'initSortHeaders("dsh", renderSessionsTab);' in source
-    assert "dsh: { ...DEFAULT_SORT }," in source
-    assert "dsh: 'DeepSeek Harness'," in source
-    assert "dshSessions: 'DeepSeek Harness Sessions'," in source
-    assert 'id="dshSessionsTable"' in source
-    brand = source.split("const TOOL_BRAND_META = Object.freeze({", 1)[1].split("});", 1)[0]
-    assert "dsh:" in brand and "fallback: 'D'" in brand
-    assert "dsh: { icon: '/static/icons/agents/dsh.svg'" in brand
-    assert (index.parent / "icons" / "agents" / "dsh.svg").is_file()
-
-
 # --- issue #148: Overview and Sessions must resolve identity to one winner -------
 # The invariant is the one SUPPORTED_CLIENTS.md already promises for Qoder CLI and
 # OpenClaw: the two surfaces consume one corpus and cannot disagree about it. DSH

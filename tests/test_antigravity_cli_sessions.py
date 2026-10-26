@@ -611,19 +611,3 @@ def test_api_surface(monkeypatch, tmp_path):
     assert "timestamp" in turns[0] and "timestamp_ms" not in turns[0]
     with pytest.raises(FileNotFoundError):
         get_session_detail("antigravity_cli", "does-not-exist")
-
-
-def test_frontend_session_registry_includes_antigravity_cli():
-    index = Path(sessions.__file__).parent / "static" / "index.html"
-    source = index.read_text(encoding="utf-8")
-    assert "'hermes', 'antigravity_cli'" in source
-    assert "hermes: null, antigravity_cli: null, cline: null, workbuddy: null, qoder: null, qwen_code: null, openclaw: null, qoder_cli: null, combined: null" in source
-    assert 'updateSessionPanel("antigravity_cli", lastSessionsResponses.antigravity_cli);' in source
-    assert 'initSortHeaders("antigravity_cli", renderSessionsTab);' in source
-    assert "antigravity_cli: { ...DEFAULT_SORT }," in source
-    assert "antigravityCliSessions: 'Antigravity Sessions'," in source
-    assert "antigravityCliSessions: 'Antigravity 会话'," in source
-    assert 'id="antigravity_cliSessionsTable"' in source
-    brand = source.split("const TOOL_BRAND_META = Object.freeze({", 1)[1].split("});", 1)[0]
-    assert "antigravity_cli:" in brand
-    assert (index.parent / "icons" / "agents" / "antigravity.png").is_file()

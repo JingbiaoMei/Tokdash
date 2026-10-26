@@ -625,15 +625,6 @@ def test_tracker_registers_qoder_sources():
     assert tracker.parsers["qoder"].persistent_parser_version is None
 
 
-def test_qoder_frontend_source_labels_distinguish_ide_and_cli():
-    source = (
-        Path(__file__).parents[1] / "src" / "tokdash" / "static" / "index.html"
-    ).read_text(encoding="utf-8")
-
-    assert "qoder: 'Qoder IDE'" in source
-    assert "qoder_cli: 'Qoder CLI'" in source
-
-
 # ------------------------------------------------- per-model context windows
 #
 # Shapes below are captured from Qoder CLI 1.1.28 and 1.1.63 on Linux/WSL.

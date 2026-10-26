@@ -475,17 +475,3 @@ def test_registration_and_api(monkeypatch, tmp_path):
     detail_api = api.get_session(tool="qoder", session_id="s1")
     assert detail_api["turns"][0]["model"] == "auto"
     assert "_bill" not in detail_api["turns"][0]
-
-
-def test_frontend_session_registry_includes_qoder():
-    index = Path(sessions.__file__).parent / "static" / "index.html"
-    source = index.read_text(encoding="utf-8")
-    assert "'workbuddy', 'qoder'" in source
-    assert "workbuddy: null, qoder: null, qwen_code: null, openclaw: null, qoder_cli: null, combined: null" in source
-    assert 'updateSessionPanel("qoder", lastSessionsResponses.qoder);' in source
-    assert 'initSortHeaders("qoder", renderSessionsTab);' in source
-    assert "qoder: { ...DEFAULT_SORT }," in source
-    assert "qoderSessions: 'Qoder IDE Sessions'," in source
-    assert "qoderSessions: 'Qoder IDE \u4f1a\u8bdd'," in source
-    assert 'id="qoderSessionsTable"' in source
-    assert 'data-panel-details="qoder"' in source

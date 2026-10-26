@@ -313,13 +313,16 @@ def test_summary_reports_the_estimate_contract():
 # The Active column and its labels live in index.html; these guard the parts that
 # a Python-only test would otherwise miss.
 
+import json  # noqa: E402
 import re  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 import tokdash  # noqa: E402
 
+from support.frontend import extract_js_function, index_source, needs_node, run_node  # noqa: E402
+
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
-SESSION_PANELS = ("codex", "claude", "opencode", "pi_agent", "mimo", "kimi", "combined")
+SESSION_PANELS = (*sessions.SESSION_TOOLS, "combined")
 
 
 def test_every_session_table_has_a_sortable_active_column():
@@ -340,35 +343,70 @@ def test_combined_panel_does_not_claim_cross_tool_dedup():
     assert "agentTimePanelHint" not in combined_header
 
 
-def test_active_time_labels_exist_in_both_languages():
+def test_active_time_keys_the_parity_test_cannot_see_exist_in_every_language():
+    """The parity test only finds keys written as t('key') or data-i18n="key".
+    These four are not: three go through t("key") with double quotes, and the
+    multi-server hint is picked at run time. The rest of the active-time
+    labels are data-i18n literals that the parity test already covers."""
     source = INDEX_HTML.read_text(encoding="utf-8")
-    for key in (
-        "activeTime",
-        "activeTimeColumn",
-        "agentTime",
-        "idleCap",
-        "span",
-        "activeTimeHint",
-        "activeTimeGroupHint",
-        "agentTimePanelHint",
-        "activeTimeCombinedHint",
-        "activeTimeMultiServerHint",
-        "sessionsEmptyRange",
-    ):
+    for key in ("activeTime", "span", "activeTimeGroupHint", "activeTimeMultiServerHint"):
         assert len(re.findall(rf"^\s+{key}: ", source, re.MULTILINE)) == 6, key
 
 
-def test_multi_server_totals_are_relabelled_as_sums():
-    """Per-server actives are added up, so the per-tool hint must not be reused."""
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    for panel in SESSION_PANELS:
-        assert f'id="{panel}ActiveLabel"' in source, panel
+ACTIVE_LABEL_HARNESS = """
+// Only the agent-time label exists, so the panel stops at its missing table.
+const labels = {};
+function makeLabel() {
+  return { attrs: {}, title: '', setAttribute(name, value) { this.attrs[name] = String(value); } };
+}
+const document = {
+  getElementById: (id) => (id.endsWith('ActiveLabel') ? labels[id] : null),
+  querySelector: () => null,
+};
+let servers = [];
+function selectedServers() { return servers; }
+function t(key) { return `T:${key}`; }
+const sessionCollapseOverrides = {};
+function sessionPanelShouldOpen() { return false; }
+function sessionPanelSetOpen() {}
 
-    panel_fn = source.split("function updateSessionPanel(", 1)[1].split("\n    function ", 1)[0]
-    assert "selectedServers().length > 1" in panel_fn
-    assert "activeTimeMultiServerHint" in panel_fn
-    # The attributes must be updated too, or applyI18n() restores the old wording.
-    assert 'setAttribute("data-i18n-title", hintKey)' in panel_fn
+__FUNCTION__
+
+const out = {};
+for (const count of [1, 2]) {
+  servers = Array.from({ length: count }, (_, index) => ({ id: `server-${index}` }));
+  for (const prefix of ['codex', 'combined']) {
+    const label = makeLabel();
+    labels[`${prefix}ActiveLabel`] = label;
+    updateSessionPanel(prefix, { sessions: [], summary: {} }, { showTool: prefix === 'combined' });
+    out[`${prefix} on ${count}`] = { hint: label.attrs['data-i18n-title'] || null, title: label.title };
+  }
+}
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@needs_node
+def test_multi_server_totals_are_relabelled_as_sums(tmp_path):
+    """Per-server actives are added up, so the per-tool hint must not be reused.
+    The hint has to land in the attribute as well as the title, or applyI18n()
+    restores the single-server wording on the next language switch."""
+    function = extract_js_function(
+        index_source(), "function updateSessionPanel(prefix, data, options = {}) {"
+    )
+    harness = tmp_path / "active-label.js"
+    harness.write_text(ACTIVE_LABEL_HARNESS.replace("__FUNCTION__", function), encoding="utf-8")
+    out = json.loads(run_node(harness))
+
+    def label(key):
+        return {"hint": key, "title": f"T:{key}"}
+
+    assert out == {
+        "codex on 1": label("agentTimePanelHint"),
+        "combined on 1": label("activeTimeCombinedHint"),
+        "codex on 2": label("activeTimeMultiServerHint"),
+        "combined on 2": label("activeTimeMultiServerHint"),
+    }
 
 
 def test_panel_kpi_shows_agent_time_only():

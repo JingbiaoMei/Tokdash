@@ -437,20 +437,3 @@ def test_parity_with_usage_parser(monkeypatch, tmp_path):
     assert totals3["cache"] == parser3["cacheRead"]
     assert totals3["output"] == parser3["output"]
     assert totals3["cost"] == pytest.approx(parser3["cost"], abs=1e-12)
-
-
-def test_frontend_session_registry_includes_omp():
-    index = Path(sessions.__file__).parent / "static" / "index.html"
-    source = index.read_text(encoding="utf-8")
-    assert "'zcode', 'kilocode', 'omp'" in source
-    assert "kilocode: null, omp: null, grok: null, hermes: null, antigravity_cli: null, cline: null, workbuddy: null, qoder: null, qwen_code: null, openclaw: null, qoder_cli: null, combined: null" in source
-    assert 'updateSessionPanel("omp", lastSessionsResponses.omp);' in source
-    assert 'initSortHeaders("omp", renderSessionsTab);' in source
-    assert "omp: { ...DEFAULT_SORT }," in source
-    assert "omp: 'omp'," in source
-    assert "ompSessions: 'OMP Sessions'," in source
-    assert "ompSessions: 'OMP 会话'," in source
-    assert 'id="ompSessionsTable"' in source
-    assert 'data-panel-details="omp"' in source
-    assert 'id="ompPanelCount"' in source
-    assert (index.parent / "icons" / "agents" / "omp.png").is_file()

@@ -1,93 +1,271 @@
 """Tests for the sessions panel frontend.
 
-Covers per-tool collapsible session panels: open/collapse rules, markup,
-i18n keys, tool brand logos, and hiding empty panels.
+Covers the per-tool session registry (every tool the server serves is listed,
+rendered, sortable, named and branded by the page), the collapsible panels'
+open/collapse rules and markup, tool brand logos, and hiding empty panels.
 """
 from __future__ import annotations
 
+import itertools
+import json
 import re
-import subprocess
 from pathlib import Path
 
 import pytest
 
 import tokdash
+from tokdash.sessions import SESSION_TOOLS
 
-from support.frontend import extract_js_function
+from support.frontend import STATIC_DIR, extract_js_function, index_source, needs_node, run_node
 
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
-PANELS = ("codex", "claude", "opencode", "pi_agent", "mimo", "kimi", "dsh", "reasonix", "zcode", "kilocode", "omp", "grok", "hermes", "antigravity_cli", "cline", "workbuddy", "qoder", "qwen_code", "openclaw", "qoder_cli", "combined")
-
-
-def _run(fn_src: str, args: list) -> object:
-    import json as _json
-    program = (
-        f"{fn_src}\n"
-        "const out = sessionPanelShouldOpen("
-        + ", ".join(_json.dumps(a) for a in args)
-        + ");\nconsole.log(JSON.stringify(out));\n"
-    )
-    result = subprocess.run(
-        ["node", "--input-type=module", "-e", program],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return __import__("json").loads(result.stdout.strip())
+# The combined panel is built in the page from the per-tool responses, so it has
+# a panel but no entry in the server's tool list.
+SESSION_PANELS = (*SESSION_TOOLS, "combined")
 
 
 @pytest.fixture(scope="module")
-def fn_src() -> str:
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    return extract_js_function(source, "function sessionPanelShouldOpen(override, data) {")
+def should_open(tmp_path_factory):
+    """Call the real sessionPanelShouldOpen(override, data) in Node."""
+    fn = extract_js_function(index_source(), "function sessionPanelShouldOpen(override, data) {")
+    folder = tmp_path_factory.mktemp("panel-open")
+    calls = itertools.count()
+
+    def run(override, data):
+        script = folder / f"should-open-{next(calls)}.js"
+        script.write_text(
+            f"{fn}\nprocess.stdout.write(JSON.stringify("
+            f"sessionPanelShouldOpen({json.dumps(override)}, {json.dumps(data)})));\n",
+            encoding="utf-8",
+        )
+        return json.loads(run_node(script))
+
+    return run
 
 
-def test_default_is_collapsed(fn_src):
+@needs_node
+def test_default_is_collapsed(should_open):
     # Howard, 2026-08-24: every section starts collapsed, even with data.
-    assert _run(fn_src, [None, {"sessions": [{"session_id": "1"}], "error": None}]) is False
-    assert _run(fn_src, [None, {"sessions": [], "error": None}]) is False
-    assert _run(fn_src, [None, None]) is False
+    assert should_open(None, {"sessions": [{"session_id": "1"}], "error": None}) is False
+    assert should_open(None, {"sessions": [], "error": None}) is False
+    assert should_open(None, None) is False
 
 
-def test_fetch_error_without_sessions_stays_open(fn_src):
+@needs_node
+def test_fetch_error_without_sessions_stays_open(should_open):
     # Failures must stay visible: an errored panel with no sessions defaults open.
-    assert _run(fn_src, [None, {"sessions": [], "error": "boom"}]) is True
+    assert should_open(None, {"sessions": [], "error": "boom"}) is True
 
 
-def test_error_with_sessions_is_collapsed(fn_src):
+@needs_node
+def test_error_with_sessions_is_collapsed(should_open):
     # Stale-but-present data is the normal degraded path; collapse it like data.
-    assert _run(fn_src, [None, {"sessions": [{"session_id": "1"}], "error": "boom"}]) is False
+    assert should_open(None, {"sessions": [{"session_id": "1"}], "error": "boom"}) is False
 
 
-def test_user_override_wins(fn_src):
+@needs_node
+def test_user_override_wins(should_open):
     # True = user collapsed; false = user expanded. Either beats the default.
-    assert _run(fn_src, [True, {"sessions": [{"session_id": "1"}]}]) is False
-    assert _run(fn_src, [False, {"sessions": [{"session_id": "1"}]}]) is True
-    assert _run(fn_src, [True, {"sessions": []}]) is False
-    assert _run(fn_src, [False, {"sessions": []}]) is True
+    assert should_open(True, {"sessions": [{"session_id": "1"}]}) is False
+    assert should_open(False, {"sessions": [{"session_id": "1"}]}) is True
+    assert should_open(True, {"sessions": []}) is False
+    assert should_open(False, {"sessions": []}) is True
 
 
 def test_every_panel_has_collapsible_markup():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    for panel in PANELS:
+    """updateSessionPanel finds a panel's elements by `${prefix}…` templates,
+    which the generic id check cannot read, so each registered panel's set is
+    checked here."""
+    source = index_source()
+    for panel in SESSION_PANELS:
         assert f'data-panel-details="{panel}"' in source, panel
+        # The table initSortHeaders binds and the body updateSessionPanel fills.
+        assert f'data-panel="{panel}"' in source, panel
+        assert f'<tbody id="{panel}SessionsTable">' in source, panel
+        assert f'id="{panel}LatestSession"' in source, panel
         assert f'id="{panel}PanelCount"' in source, panel
         assert f'id="{panel}PanelKpis"' in source, panel
         assert f'id="{panel}PanelTokens"' in source, panel
         assert f'id="{panel}PanelCost"' in source, panel
         assert f'id="{panel}PanelLast"' in source, panel
     # Panels start collapsed: no static `open` attribute on any of them.
-    for m in __import__("re").finditer(r"<details class=\"session-panel\" data-panel-details=\"\w+\">", source):
-        assert "open" not in source[m.end() : m.end() + 40]
-    assert source.count('id="sessionsExpandAll"') == 1
-    assert source.count('id="sessionsCollapseAll"') == 1
+    tags = re.findall(r"<details\b[^>]*\bdata-panel-details=[^>]*>", source)
+    assert len(tags) == len(SESSION_PANELS), tags
+    for tag in tags:
+        assert not re.search(r"\sopen\b", tag), tag
 
 
-def test_i18n_keys_in_both_languages():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    for key in ("panelTokens", "panelLast", "sessionsExpandAll", "sessionsCollapseAll"):
-        assert len(re.findall(rf"^\s+{key}: ", source, re.MULTILINE)) == 6, key
+# ---------------------------------------------------------------------------
+# Session tool registry: one check per tool the server serves
+# ---------------------------------------------------------------------------
+
+# zcode has no entry in sessionSortState. Its rows still sort by DEFAULT_SORT
+# through the fallback in updateSessionPanel, but updateSortArrows finds no state
+# and its header draws no sort arrow until a column is clicked. Kept explicit so
+# the gap is visible, and so the fix shows up here as a test to update.
+SORT_STATE_MISSING = {"zcode"}
+
+REGISTRY_HARNESS = """
+// --- what renderSessionsTab hands each panel ----------------------------------
+const rendered = [];
+const sortHeaders = [];
+function updateSessionPanel(prefix, data, options) {
+  rendered.push({ prefix, owner: data ? data.owner : null, showTool: Boolean(options && options.showTool) });
+}
+function initSortHeaders(panel, rerender) {
+  sortHeaders.push({ panel, rerendersTheTab: rerender === renderSessionsTab });
+}
+function hasLoadedSessionResponses() { return true; }
+function buildCombinedSessionsData() { return { owner: 'combined, built by the page' }; }
+function observeSessionSpeedRows() {}
+function scheduleSessionSpeedList() {}
+function buildSessionQuickFilterPills() {}
+function filterSessionsBySearch() {}
+function syncCodexReviewToggle() {}
+let codexReviewDefault = null;
+let includeCodexReviewSessions = null;
+const document = { getElementById: () => null };
+
+// --- the page's own registry and the code under test --------------------------
+__REGISTRY__
+__FUNCTIONS__
+
+const TOOLS = __TOOLS__;
+const initialResponses = { ...lastSessionsResponses };
+const initialSortState = JSON.parse(JSON.stringify(sessionSortState));
+// Every slot gets a response naming its owner, so a panel fed its neighbour's
+// data shows up as the wrong owner rather than as a pass.
+for (const key of Object.keys(lastSessionsResponses)) {
+  lastSessionsResponses[key] = { sessions: [], owner: key };
+}
+renderSessionsTab();
+
+// formatToolName looks its table up case-insensitively but builds the fallback
+// by title-casing the raw text, so only a key in the table reads the same when
+// it arrives shouted. The unknown key is the control that keeps this honest.
+const labels = {};
+for (const tool of [...TOOLS, 'not_a_session_tool']) {
+  labels[tool] = { label: formatToolName(tool), shouted: formatToolName(` ${tool.toUpperCase()} `) };
+}
+const icons = Object.fromEntries(TOOLS.map((tool) => [tool, toolBrandMeta(tool).icon]));
+
+process.stdout.write(JSON.stringify({
+  keys: SESSION_TOOL_KEYS,
+  initialResponses,
+  defaultSort: DEFAULT_SORT,
+  sortState: initialSortState,
+  rendered,
+  sortHeaders,
+  labels,
+  icons,
+}));
+"""
+
+
+def _registry_declarations(source: str) -> str:
+    pieces = []
+    for pattern in (
+        r"const SESSION_TOOL_KEYS = \[.*?\];",
+        r"let lastSessionsResponses = \{.*?\};",
+        r"const DEFAULT_SORT = \{.*?\};",
+        r"const TOOL_BRAND_META = Object\.freeze\(\{.*?\n    \}\);",
+    ):
+        match = re.search(pattern, source, re.S)
+        assert match, f"{pattern} not found in index.html"
+        pieces.append(match.group(0))
+    pieces.append(extract_js_function(source, "const sessionSortState = {") + ";")
+    return "\n".join(pieces)
+
+
+@pytest.fixture(scope="module")
+def registry(tmp_path_factory) -> dict:
+    """Run the real registry declarations, renderSessionsTab, formatToolName and
+    toolBrandMeta once, and hand back what each of them says about every tool."""
+    source = index_source()
+    functions = "\n".join(
+        extract_js_function(source, signature)
+        for signature in (
+            "function renderSessionsTab() {",
+            "function formatToolName(tool) {",
+            "function normalizeToolBrandKey(tool) {",
+            "function toolBrandMeta(tool) {",
+        )
+    )
+    script = tmp_path_factory.mktemp("session-registry") / "registry.js"
+    script.write_text(
+        REGISTRY_HARNESS.replace("__REGISTRY__", _registry_declarations(source))
+        .replace("__FUNCTIONS__", functions)
+        .replace("__TOOLS__", json.dumps(list(SESSION_TOOLS))),
+        encoding="utf-8",
+    )
+    return json.loads(run_node(script))
+
+
+@needs_node
+@pytest.mark.parametrize("tool", SESSION_TOOLS)
+def test_every_session_tool_is_wired_into_the_sessions_tab(registry, tool):
+    """A tool the server serves but the page forgets is a panel that never
+    fetches, never fills, never sorts, or shows up nameless."""
+    assert tool in registry["keys"], f"{tool} is not in SESSION_TOOL_KEYS, so its sessions are never fetched"
+    # Present and empty: a non-null slot would count as loaded before any fetch.
+    assert tool in registry["initialResponses"], f"{tool} has no slot in lastSessionsResponses"
+    assert registry["initialResponses"][tool] is None, registry["initialResponses"][tool]
+    if tool in SORT_STATE_MISSING:
+        assert tool not in registry["sortState"], (
+            f"{tool} has a sort state now; take it out of SORT_STATE_MISSING"
+        )
+    else:
+        assert registry["sortState"].get(tool) == registry["defaultSort"], (
+            f"{tool} does not start on the default sort"
+        )
+
+    # Rendered exactly once, from its own response, without the Tool column.
+    assert [row for row in registry["rendered"] if row["prefix"] == tool] == [
+        {"prefix": tool, "owner": tool, "showTool": False}
+    ]
+    assert {"panel": tool, "rerendersTheTab": True} in registry["sortHeaders"], (
+        f"{tool}'s column headers never get their sort handlers"
+    )
+
+    label = registry["labels"][tool]
+    assert label["label"] == label["shouted"], (
+        f"{tool} is missing from formatToolName and shows as the fallback {label['label']!r}"
+    )
+    icon = registry["icons"][tool]
+    assert icon, f"{tool} has no brand mark, so it shows a letter tile"
+    assert (STATIC_DIR / icon.removeprefix("/static/")).is_file(), f"{tool}'s mark {icon} is not packaged"
+
+
+@needs_node
+def test_the_page_lists_exactly_the_server_session_tools(registry):
+    keys = registry["keys"]
+    assert len(keys) == len(set(keys)), f"a tool is listed twice: {keys}"
+    assert set(keys) == set(SESSION_TOOLS), "SESSION_TOOL_KEYS and sessions.SESSION_TOOLS disagree"
+    # The combined panel is the one page-only entry: a response slot and a sort
+    # state, filled from buildCombinedSessionsData and rendered last with the
+    # Tool column, but never fetched.
+    assert set(registry["initialResponses"]) == set(SESSION_PANELS)
+    assert set(registry["sortState"]) == set(SESSION_PANELS) - SORT_STATE_MISSING
+    assert registry["rendered"][-1] == {
+        "prefix": "combined",
+        "owner": "combined, built by the page",
+        "showTool": True,
+    }
+    assert [row["prefix"] for row in registry["rendered"]].count("combined") == 1
+    assert {"panel": "combined", "rerendersTheTab": True} in registry["sortHeaders"]
+
+    unknown = registry["labels"]["not_a_session_tool"]
+    assert unknown["label"] != unknown["shouted"], (
+        "the label check can no longer tell a formatToolName entry from its fallback"
+    )
+
+
+@needs_node
+def test_qoder_ide_and_cli_read_as_two_tools(registry):
+    """Both harnesses share one brand mark, so the name is all that tells them apart."""
+    assert registry["labels"]["qoder"]["label"] == "Qoder IDE"
+    assert registry["labels"]["qoder_cli"]["label"] == "Qoder CLI"
 
 
 def test_sessions_panels_have_logos_and_hide_when_empty():
@@ -109,9 +287,7 @@ def test_sessions_panels_have_logos_and_hide_when_empty():
     assert "!data?.error" in hide_line, hide_line
     assert '"none"' in hide_line, hide_line
     # Tab-level empty state and the expand/collapse row share the same gate.
-    assert 'id="sessionsEmptyState"' in source
     assert 'data-i18n="sessionsEmptyRange"' in source
-    assert 'id="sessionsPanelToolbar"' in source
     # `hidden` alone is beaten by Tailwind's display utilities on the flex row;
     # the inline display is what actually hides it, and both must gate on
     # showEmpty.
@@ -176,7 +352,8 @@ def test_collapsed_pill_row_css_drops_only_the_names():
     assert "#sessionsQuickFilterBar.is-icon-only .modern-tool-pill-icon" in css
 
 
-def test_pill_density_collapses_only_when_the_names_do_not_fit():
+@needs_node
+def test_pill_density_collapses_only_when_the_names_do_not_fit(tmp_path):
     """The decision must come from the labelled measurement, never from the class
     the previous pass left behind. A row that already collapsed has to be able to
     say "these fit now" on the next resize, and one that fits must refuse to
@@ -217,12 +394,9 @@ console.log(JSON.stringify({
   twoPixelsOver: check(403, false, 1),
 }));
 """.replace("%SOURCE%", fn)
-    result = __import__("json").loads(
-        subprocess.run(
-            ["node", "--input-type=module", "-e", program],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-    )
+    script = tmp_path / "pill-density.js"
+    script.write_text(program, encoding="utf-8")
+    result = json.loads(run_node(script))
     assert result == {
         "tight": True,
         "tightStaysCollapsed": True,

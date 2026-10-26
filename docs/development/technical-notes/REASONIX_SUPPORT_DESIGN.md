@@ -47,7 +47,7 @@ The source key is `reasonix`. The display label is `Reasonix`.
 | `src/tokdash/sessions.py` | ✅ `SESSION_TOOLS` / `TOOL_LABELS` / parser version v2 / signatures (sidecar `.meta` included) / `lru_cache` loaders and their `reload_pricing_db` teardown / persistent-store branch. Turns are zero-token by design (F6) |
 | `src/tokdash/cli.py` | ✅ `_sync_usage_database()` warm-up |
 | `src/tokdash/static/index.html` | ✅ full brand registration plus the known-limitation note (en/zh) under the panel header |
-| `tests/test_reasonix_parser.py`, `tests/test_reasonix_sessions.py` | ✅ present, untracked |
+| `tests/parsers/test_reasonix_parser.py`, `tests/parsers/test_reasonix_sessions.py` | ✅ present, untracked |
 | `src/tokdash/static/icons/agents/reasonix.svg` | ✅ present, mirrored to `docs/assets/agents/` with a generated pill |
 | README / README_CN / SUPPORTED_CLIENTS / pill / changelog | ✅ landed |
 | this design doc | ✅ |

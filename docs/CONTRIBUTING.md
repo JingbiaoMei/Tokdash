@@ -60,9 +60,17 @@ without ever reading your history.
 
 Run tests:
 ```bash
-pytest -q -n auto --dist loadgroup                     # every core, as CI runs it
-pytest tests/test_pricing_normalization.py -k lookup   # one file, filtered by test name
+pytest -q -n auto --dist loadgroup                             # every core, as CI runs it
+pytest tests/tui -n auto                                       # one area
+pytest tests/pricing/test_pricing_normalization.py -k lookup   # one file, filtered by test name
 ```
+
+The tests are filed by area, one folder each: `web/` (the dashboard page), `tui/`, `parsers/`
+(one tool's log reader and its session source), `usage/` (the usage store, its caches and date
+windows), `speed/`, `quota/`, `pricing/`, `api/`, `onboard/` (setup, services, the CLI and
+update), `release/` and `companion/`. Shared helpers live in `tests/support/` and data files in
+`tests/fixtures/`. The folders are not packages, so pytest imports each test module by its bare
+file name: keep file names unique across folders.
 
 `-n` comes from `pytest-xdist`. `--dist loadgroup` keeps the tests that share a resource on
 one worker; mark a new test that builds from the repo root or holds a fixed port with the same

@@ -69,6 +69,9 @@ tokdash = ["static/vendor/fonts/*", "static/vendor/fonts/**/*"]
 # Keep only failed tests' tmp dirs (dead per-test Chrome profiles used to
 # accumulate gigabytes under /tmp/pytest-of-<user>).
 tmp_path_retention_policy = "failed"
+# The tests sit in one folder per area; `tests` itself goes on the path so every
+# folder imports the shared helpers as `support.*`.
+pythonpath = ["tests"]
 markers = [
     "opens_browser: test legitimately exercises a browser-open sink; the no_browser_open backstop is suspended for it",
     "xdist_group(name): run every test of the group on one pytest-xdist worker (CI uses --dist loadgroup)",

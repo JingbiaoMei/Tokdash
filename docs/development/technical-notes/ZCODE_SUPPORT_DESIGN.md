@@ -82,7 +82,7 @@ source's own numbers:
    `cache_creation_input_tokens`, `reasoning_tokens` is non-zero.
 
 Unverified assumptions, each pinned to a first-row check in
-`tests/test_zcode_parser.py` or the field notes below:
+`tests/parsers/test_zcode_parser.py` or the field notes below:
 
 - `reasoning_tokens ⊆ output_tokens` is documented by third-party adapters but
   the evidence row has `reasoning_tokens = 0`. If a row with

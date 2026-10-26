@@ -16986,7 +16986,7 @@
     }
 
     // Pure state machine, kept top-level so tests can extract it
-    // (pattern: tests/test_frontend_normalizer_sync.py).
+    // (pattern: tests/web/test_frontend_normalizer_sync.py).
     function sessionPanelShouldOpen(override, data) {
       if (typeof override === "boolean") return !override;
       const sessions = data && Array.isArray(data.sessions) ? data.sessions.length : 0;

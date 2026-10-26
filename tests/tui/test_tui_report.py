@@ -717,7 +717,7 @@ def test_agents_table_keeps_measured_zero_seconds():
     # The report side of the round-3 split: the null-vs-zero law STAYS here
     # — a measured 0 of agent time renders "0s", never a dash. (The Overview
     # tools table dashes its 0 per the user's explicit ask, locked by
-    # tests/test_tui_app.py::test_tools_table_time_zero_and_missing_are_dashes.
+    # tests/tui/test_tui_app.py::test_tools_table_time_zero_and_missing_are_dashes.
     # The two surfaces diverge DELIBERATELY — do not "unify" them.)
     many = copy.deepcopy(INSIGHTS_PAYLOAD)
     many["tools"]["ranked"] = [

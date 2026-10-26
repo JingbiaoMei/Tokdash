@@ -3,7 +3,7 @@
 The reconciliation and report builders run under node over plain payloads; the
 panel is run over a stub DOM with the real dictionary, in every language. When
 a refresh reports at all is run with updateDashboard's queue in
-tests/test_dashboard_queue_frontend.py.
+tests/web/test_dashboard_queue_frontend.py.
 """
 from __future__ import annotations
 
@@ -153,7 +153,7 @@ def test_refresh_report_is_accessible_and_the_scan_stays_incremental() -> None:
     """The markup half: the panel announces itself politely, and both ways out
     of it (the close button and Escape) dismiss it for the range. When it opens,
     and the forced request it reports on, are run in
-    tests/test_dashboard_queue_frontend.py::test_every_same_range_refresh_reports_but_initial_and_range_loads_do_not.
+    tests/web/test_dashboard_queue_frontend.py::test_every_same_range_refresh_reports_but_initial_and_range_loads_do_not.
     """
     html = INDEX_HTML.read_text(encoding="utf-8")
     start = html.index('<section id="refreshReport"')

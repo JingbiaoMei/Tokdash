@@ -9,7 +9,7 @@ import sys
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "vendor_cjk_fonts.sh"
 FONT_PATH = Path("src/tokdash/static/vendor/fonts/noto-sans-sc-v41")
 UPSTREAM_CSS = """@font-face {font-family: 'Noto Sans SC'; font-weight: 400; src: url(https://fonts.gstatic.com/s/notosanssc/v41/a.woff2);}

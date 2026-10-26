@@ -1044,7 +1044,7 @@ function usageReportScheduleStaleReread(payloads) {
 // The speed page shares the dashboard's range, but the report's load must neither
 // invalidate it nor ask it for anything. These stubs record such a call so the tests
 // can say it never happens; the speed page itself is tested in
-// tests/test_output_speed_frontend.py.
+// tests/web/test_output_speed_frontend.py.
 const document = { hidden: false };
 const usageReportSpeedState = { subtab: 'summary' };
 function usageReportSpeedInvalidate() { calls.push('speedInvalidate'); }

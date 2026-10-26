@@ -30,7 +30,7 @@ from support.i18n_profile import (
 
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 EXPECTED_LANGUAGES = ("en", "zh", "ja", "ko", "es", "pt")
 README_FILES = (

@@ -52,11 +52,11 @@ src/tokdash/cli.py               # EDIT: 2 choices + 2 lazy dispatch branches + 
 pyproject.toml                   # EDIT: add "textual>=8.0.0"
 docs/development/CHANGELOG.md    # EDIT: Unreleased → Added entries
 README.md + README_CN/ES/JA/KO/PT.md  # EDIT in the SAME PR: document both commands (RELEASING.md "README sync": six READMEs are one document)
-tests/test_tui_data.py           # cache-key parity + window mapping + retry + preflight no-op
-tests/test_tui_formatting.py     # pure formatting rules, null-vs-zero law, delta-color split, emitters
-tests/test_tui_report.py         # one-shot render + --json contract + parser guards + non-mutation
-tests/test_tui_import_discipline.py  # textual blocked via sys.meta_path; report path must still work
-tests/test_tui_app.py            # Textual pilot tests (pytest.importorskip("textual"))
+tests/tui/test_tui_data.py           # cache-key parity + window mapping + retry + preflight no-op
+tests/tui/test_tui_formatting.py     # pure formatting rules, null-vs-zero law, delta-color split, emitters
+tests/tui/test_tui_report.py         # one-shot render + --json contract + parser guards + non-mutation
+tests/tui/test_tui_import_discipline.py  # textual blocked via sys.meta_path; report path must still work
+tests/tui/test_tui_app.py            # Textual pilot tests (pytest.importorskip("textual"))
 ```
 
 Import boundaries (hard rules, each has a test):
@@ -753,7 +753,7 @@ previous-usage helpers directly.
 
 ## 10. Test plan
 
-`tests/test_tui_data.py` (no textual; runs in the plain suite):
+`tests/tui/test_tui_data.py` (no textual; runs in the plain suite):
 - Key parity: monkeypatch `tokdash.tui.data.get_cached_or_fetch` recorder;
   `fetch_usage("today", d, d)` yields the key `== _usage_cache_key("today", d, d)`
   computed via the api helpers; same for insights (facets verbatim identity
@@ -773,7 +773,7 @@ previous-usage helpers directly.
   raises; `time.sleep` monkeypatched and delay formula asserted (450 ms·(n+1)+jitter,
   jitter < 250 ms).
 
-`tests/test_tui_formatting.py`:
+`tests/tui/test_tui_formatting.py`:
 - Number/cost/duration table (999 / 1_000 / 12_400 / 1e12; None cost headline →
   em-dash, $0.00 prints; row cost 0.0 → em-dash; durations "42s","7m","5h 03m",
   "1 day 1 hour","1 week 2 days","3 months 12 days").
@@ -790,7 +790,7 @@ previous-usage helpers directly.
 - day_spark thresholds/empty; text_bar width/glyphs; window_line unrecognized
   warning branch.
 
-`tests/test_tui_report.py`:
+`tests/tui/test_tui_report.py`:
 - Canned fixtures (deepcopy'd) for usage/insights/active_time (importorskip
   nothing — pure python). Monkeypatch `tokdash.tui.report`'s imported fetch
   names + `_local_today`. Human path assertions: window line, "Top agent",
@@ -812,14 +812,14 @@ previous-usage helpers directly.
   run; deep-compare after (compute payloads share nested rows —
   `top_models` rows are `combined_models` slices, compute.py:989).
 
-`tests/test_tui_import_discipline.py`:
+`tests/tui/test_tui_import_discipline.py`:
 - Install a `sys.meta_path` finder that raises `ImportError("textual blocked")`
   for `textual*`; inside it: `import tokdash.tui.data, tokdash.tui.formatting,
   tokdash.tui.report` succeed, `run_report` (fetchers monkeypatched) returns 0;
   `"textual" not in sys.modules` after. Removing the finder, `import
   tokdash.tui.app` works.
 
-`tests/test_tui_app.py` (textual installed via `-e .`; keep the whole module on
+`tests/tui/test_tui_app.py` (textual installed via `-e .`; keep the whole module on
 `pytest.importorskip("textual", reason=...)` so a stripped env stays green):
 - Canned FetchOutcomes monkeypatched at `tokdash.tui.app` fetch names;
   `async with TokdashApp("today").run_test() as pilot:` — `ov-kpis` text contains

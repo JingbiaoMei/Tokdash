@@ -1,7 +1,7 @@
 """Pure string rules for the TUI and the one-shot ``tokdash report`` (spec §4).
 
 NO textual and NO rich import in this module — the import-discipline test
-(tests/test_tui_import_discipline.py) proves the whole report path imports on a
+(tests/tui/test_tui_import_discipline.py) proves the whole report path imports on a
 stripped install that lacks both. The ANSI gate is re-exported from the onboard
 engine (engine.py:1611-1646, the ONLY existing terminal-styling helpers in the
 repo — NO_COLOR / TERM=dumb / isatty all honored there) so report output and

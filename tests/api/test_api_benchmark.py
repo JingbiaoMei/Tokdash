@@ -12,7 +12,7 @@ import pytest
 
 
 def _load_benchmark_module():
-    script = Path(__file__).resolve().parent.parent / "scripts" / "benchmark_api_latency.py"
+    script = Path(__file__).resolve().parents[2] / "scripts" / "benchmark_api_latency.py"
     spec = importlib.util.spec_from_file_location("benchmark_api_latency", script)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)

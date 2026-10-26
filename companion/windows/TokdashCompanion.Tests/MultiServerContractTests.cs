@@ -207,7 +207,7 @@ public class MultiServerContractTests
     /// <para>
     /// The fixture is a healthy <c>~/.claude</c> beside a permanently broken
     /// <c>~/.claude-academic</c>, generated from the server's own payload
-    /// (<c>tests/test_companion_contract_accounts.py</c> regenerates and diffs it), so
+    /// (<c>tests/companion/test_companion_contract_accounts.py</c> regenerates and diffs it), so
     /// decoding drift shows up here rather than in the field. <c>weekly_scoped_opus</c> is
     /// the row that matters: Claude reports it only once Opus has been used, so it carries
     /// an older captured_at than the cycle the sibling's failure landed in. Judged against

@@ -221,7 +221,7 @@ Stepper buttons are icon-only chevrons; they need accessible names from
 Fixture: `fixtures/quota.json` (enabled, multi-provider), `fixtures/quota-disabled.json` (disabled), `fixtures/quota-provider-error.json` (one provider failed refresh), `fixtures/quota-multi-account.json` (one card, two credentials, one of them broken — see [Accounts](#accounts)).
 
 `fixtures/quota-multi-account.json` is regenerated from the server's own
-`quota_state()` and diffed against it by `tests/test_companion_contract_accounts.py`,
+`quota_state()` and diffed against it by `tests/companion/test_companion_contract_accounts.py`,
 so it cannot drift from the payload; both companions decode that same file and must
 reach the same per-row verdicts. A rule documented here without a fixture and a test
 on both sides is a rule the apps do not have.

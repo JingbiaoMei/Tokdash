@@ -22,7 +22,7 @@ from tokdash.usage_store import (
     usage_billing_pricing,
 )
 
-FIXTURES = Path(__file__).parent / "fixtures" / "qoder"
+FIXTURES = Path(__file__).parents[1] / "fixtures" / "qoder"
 RATE = 0.01  # default QODER_USD_PER_CREDIT estimate
 
 

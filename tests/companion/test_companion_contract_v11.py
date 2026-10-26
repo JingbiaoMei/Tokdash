@@ -9,7 +9,7 @@ asserting it reproduces exactly what the expected files pin - so a fixture edit
 that silently changes a display, or a doc edit that changes a rule, fails here
 before it diverges in two app codebases.
 
-The server side of these shapes is already pinned by tests/test_insights_api.py,
+The server side of these shapes is already pinned by tests/api/test_insights_api.py,
 test_overview_active_time.py, test_api_quota.py and test_version_surfaces.py;
 this file pins the contract's own layer, the way test_companion_contract_accounts.py
 pins the account-row rule.
@@ -21,7 +21,7 @@ import math
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1] / "companion" / "contract"
+ROOT = Path(__file__).resolve().parents[2] / "companion" / "contract"
 FIX = ROOT / "fixtures"
 EXP = ROOT / "expected"
 

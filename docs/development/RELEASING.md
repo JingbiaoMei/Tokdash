@@ -77,7 +77,7 @@ Rules worth keeping:
 - The newest release is always translated. The in-app view opens on it, and an English entry there
   is the Chinese view failing exactly when someone looks.
 - Keep at least ten releases translated (`MIN_TRANSLATED_RELEASES` in
-  `tests/test_changelog_localization.py`); backfill older ones when there is time.
+  `tests/release/test_changelog_localization.py`); backfill older ones when there is time.
 - Never hand-edit `docs/development/CHANGELOG_CN.md`. It is generated from the sidecar plus the PR
   refs pulled out of the English section, so the app and the page cannot drift.
 - `zh` means Simplified for every Chinese reader. `detectBrowserLang()` matches on prefix, so

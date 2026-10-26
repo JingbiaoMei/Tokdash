@@ -140,7 +140,7 @@ def test_update_check_consent_persists(monkeypatch):
 
 def test_python_dash_m_version_runs():
     """`python -m tokdash --version` must work (collision-proof runtime entrypoint)."""
-    repo_root = Path(__file__).resolve().parent.parent
+    repo_root = Path(__file__).resolve().parents[2]
     env = dict(os.environ)
     env["PYTHONPATH"] = str(repo_root / "src") + os.pathsep + env.get("PYTHONPATH", "")
     res = subprocess.run(

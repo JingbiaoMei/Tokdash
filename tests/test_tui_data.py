@@ -437,23 +437,6 @@ def test_db_summary_enabled(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Import discipline (data.py must stay headless)
-# ---------------------------------------------------------------------------
-
-def test_data_module_imports_no_textual_or_rich():
-    # Headless-safe boundary: the report path imports data.py and must never
-    # pull Textual/rich transitively (full meta_path lock: test_tui_import_discipline.py).
-    import pathlib
-
-    source = (
-        pathlib.Path(__file__).resolve().parents[1] / "src" / "tokdash" / "tui" / "data.py"
-    ).read_text(encoding="utf-8")
-    for line in source.splitlines():
-        stripped = line.strip()
-        assert not stripped.startswith(("import textual", "import rich", "from textual", "from rich"))
-
-
-# ---------------------------------------------------------------------------
 # Round 2 — resolve_overview_period: calendar windows pinned to fixed dates
 # ---------------------------------------------------------------------------
 

@@ -1,10 +1,13 @@
 """Tests for tokdash/tui/charts.py — the pure period-visual renderers.
 
-Pure-python (no textual, no rich, no DB, no sockets). Calendar-locked cases
-are deliberate: 2026-01-01 is a Thursday (so the 2026 heatmap column 0 is
-Monday 2025-12-29) and 2026-09-01 is a Tuesday (so the month grid's first
-row carries one blank pad cell) — a grid that naively starts the window at
-its first day or at Jan 1 fails these, which is the point.
+Pure-python (no textual, no rich, no DB, no sockets), with one exception: the
+quota_detail_rows cases borrow the pilot suite's quota payload from support.tui,
+which needs textual, so they import it in their bodies and skip without it.
+
+Calendar-locked cases are deliberate: 2026-01-01 is a Thursday (so the 2026
+heatmap column 0 is Monday 2025-12-29) and 2026-09-01 is a Tuesday (so the month
+grid's first row carries one blank pad cell) — a grid that naively starts the
+window at its first day or at Jan 1 fails these, which is the point.
 """
 
 from __future__ import annotations
@@ -12,10 +15,15 @@ from __future__ import annotations
 import copy
 import datetime as dt
 
+import pytest
+
 from tokdash.tui.charts import (
+    column_chart,
+    column_chart_needs,
     day_bars,
     heatmap_origin,
     month_grid,
+    quota_detail_rows,
     quota_table,
     tool_model_detail,
     year_heatmap,
@@ -901,3 +909,104 @@ class TestQuotaTable:
         s_before, h_before = copy.deepcopy(state), copy.deepcopy(history)
         quota_table(state, history, now_ts=NOW)
         assert state == s_before and history == h_before
+
+
+# ---------------------------------------------------------------------------
+# column_chart: the Speed picture's columns are the buckets the route returned.
+# It may not merge, drop or re-bucket them, so the WIDTH they need is a fact
+# about the response. The renderer spends no more cells than it is given, says
+# what it needs before it is asked, and a squeezed axis still names both ends.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("count", [2, 7, 24, 30, 31, 45, 168])
+def test_the_picture_spends_no_more_cells_than_it_is_given(count):
+    for width in (20, 48, 60, 116):
+        chart = column_chart(
+            [{"label": f"b{i}", "value": float(i + 1), "text": ""} for i in range(count)],
+            width=width, height=5,
+        )
+        if chart["available"]:
+            assert chart["used_width"] <= width, (count, width, chart["used_width"])
+            # Never a merged bucket, never a dropped one.
+            assert chart["columns"] == count, (count, width, chart["columns"])
+        else:
+            # It refuses ONLY when one cell per bucket will not fit: that is the
+            # point where a picture would have to lie about the series.
+            assert count > width, (count, width)
+
+
+def test_the_picture_says_what_it_needs_before_it_is_asked():
+    """The arrangement and the renderer agree on one cell each plus the air."""
+    assert column_chart_needs(0) == 0
+    assert column_chart_needs(1) == 1
+    assert column_chart_needs(2) == 3
+    assert column_chart_needs(30) == 59
+    assert column_chart_needs(31) == 61
+
+
+def test_a_squeezed_chart_still_names_the_ends_of_its_axis():
+    """Twenty-four hours at eighty columns leaves two cells per column.
+
+    Keys that do not fit their own column are dropped rather than cut, which is
+    right -- "00:" is not a shortened hour -- but a series with no ends at all is
+    a shape the reader cannot place in time. The first and last key get the whole
+    row instead.
+    """
+    from tokdash.tui.charts import column_chart
+
+    entries = [{"label": f"{h:02d}:00", "value": float(h % 5 + 1), "text": ""}
+               for h in range(24)]
+    drawn = column_chart(entries, width=76, height=3, style="series", unit="tok/s")
+    axis = drawn["lines"][-1]
+    painted = "".join(run.text for run in axis)
+    assert painted.strip().startswith("00:00"), repr(painted)
+    assert painted.strip().endswith("23:00"), repr(painted)
+
+
+# ---------------------------------------------------------------------------
+# quota_detail_rows: the card's plan names the DEFAULT install, and a second
+# account speaks for itself. The payload is the pilot suite's QUOTA_STATE, and
+# support.tui needs textual, so each case imports it in its body and is skipped
+# rather than failed where textual is missing.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("account", "bucket", "expected", "forbidden"),
+    [
+        ("academic", "academic_session", "plan Pro", "plan Max 5x"),
+        ("default", "session", "plan Max 5x", "plan Pro"),
+    ],
+)
+def test_the_quota_detail_names_the_selected_account_own_plan(
+    account, bucket, expected, forbidden
+):
+    from support.tui import QUOTA_NOW, QUOTA_STATE
+
+    rows = quota_detail_rows(
+        QUOTA_STATE,
+        {"provider": "claude", "account": account, "bucket": bucket},
+        now_ts=QUOTA_NOW,
+    )
+    text = "\n".join("".join(part.text for part in row) for row in rows)
+    assert f"account {account}" in text, text
+    assert expected in text, text
+    assert forbidden not in text, text
+
+
+def test_an_account_that_never_reported_a_plan_borrows_none():
+    from support.tui import QUOTA_NOW, QUOTA_STATE
+
+    state = copy.deepcopy(QUOTA_STATE)
+    for entry in state["providers"]["claude"]["accounts"]:
+        if entry["account"] == "academic":
+            entry.pop("plan")
+    rows = quota_detail_rows(
+        state,
+        {"provider": "claude", "account": "academic", "bucket": "academic_session"},
+        now_ts=QUOTA_NOW,
+    )
+    text = "\n".join("".join(part.text for part in row) for row in rows)
+    assert "plan" not in text, text
+    assert "account academic" in text, text

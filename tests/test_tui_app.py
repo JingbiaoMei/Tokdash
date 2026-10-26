@@ -29,7 +29,8 @@ from rich.console import Console  # noqa: E402
 from rich.markup import escape  # noqa: E402
 from rich.text import Text  # noqa: E402  (round-4 cells: right-aligned digits, pills)
 from textual import events  # noqa: E402  (wheel events for the scroll test)
-from textual.widgets import Button, DataTable, Static  # noqa: E402
+from textual.color import Color  # noqa: E402
+from textual.widgets import Button, DataTable, Input, Static, Tab  # noqa: E402
 
 import tokdash.tui.app as app_mod  # noqa: E402  (import lives after the skip)
 from tokdash.tui.app import (  # noqa: E402
@@ -41,6 +42,7 @@ from tokdash.tui.app import (  # noqa: E402
 from tokdash.tui.data import FetchOutcome  # noqa: E402
 from tokdash.tui.formatting import EM_DASH  # noqa: E402
 from tokdash.usage_store import UsageDatabaseSchemaTooNewError  # noqa: E402
+from support.tui import wait_for  # noqa: E402  (polls a predicate; shared)
 
 TODAY = datetime.date(2026, 9, 20)
 WINDOWS = [
@@ -304,26 +306,13 @@ def drive(app, steps, size=(80, 24)):
     asyncio.run(main())
 
 
-async def wait_for(app, pilot, predicate, timeout=10.0):
-    """Thread jobs + chained awaits need more than one pause to settle.
+def style_words(text_style):
+    """The words of a resolved text-style, e.g. {"bold", "underline"}.
 
-    The timeout is patience, not a cost: a predicate that holds returns at once,
-    and a CI runner shared by four workers has taken more than the two seconds
-    this used to allow to run one thread job.
+    Textual hands back the CSS string for a rule it parsed and a rich Style for
+    one set in code; both print as the same words.
     """
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        await pilot.pause(0.02)
-    return predicate()
-
-
-def css_rule(selector):
-    """One rule body from TokdashApp.CSS, whitespace-normalised."""
-    css = TokdashApp.CSS
-    at = css.index(selector)
-    return " ".join(css[at : css.index("}", at)].split())
+    return set(str(text_style).split())
 
 
 def screen_text(app):
@@ -630,27 +619,74 @@ def test_quota_credits_are_provider_labeled(monkeypatch):
 
 
 
-def test_the_surface_keeps_its_layout_laws_in_css():
+def test_the_surface_keeps_its_layout_laws_in_css(monkeypatch):
     # Revision 5's approved look is carried by a handful of stylesheet rules.
     # A dropped rule collapses the sections or brings the outlines back, so the
-    # laws are pinned here rather than trusted to a screenshot.
-    # 1. Sections separate by SPACING, not by a rule above each one.
-    assert "margin-top: 1" in css_rule("Section")
-    # 2. No panel outlines: the tables and the strip buttons carry no border.
-    assert "border: none" in css_rule("#rangebar Button")
-    assert "border: none" in css_rule("DataTable {")
-    # 3. The active shortcut/tab is the lavender selection colour...
-    assert "#b9a7ff" in css_rule("Tab.-active")
-    assert "#b9a7ff" in css_rule("#rangebar Button.-active")
-    # ...and keyboard focus is still VISIBLE (underline) without being a border.
-    assert "underline" in css_rule("#controls Button:focus")
-    assert "#b9a7ff" in css_rule("Input:focus")  # an input says when it is live
-    # 4. The table header keeps its separator and weight; rows do not.
-    assert "bold" in css_rule("DataTable > .datatable--header")
-    # 5. The scope strip is a surface, and the dates are right-aligned so the
-    #    preset row cannot shove them around as it reflows.
-    assert "text-align: right" in css_rule("#range-dates")
-    assert "border: none" in css_rule("#rangebar Button")
+    # laws are pinned here rather than trusted to a screenshot -- and read off
+    # the widgets as the stylesheet resolved them, because a rule's text can sit
+    # in TokdashApp.CSS long after its selector stopped matching anything.
+    patch_fetchers(monkeypatch)
+    app = TokdashApp("today")
+    lavender = Color.parse("#b9a7ff")
+
+    def no_border(widget):
+        return tuple(widget.styles.border.spacing) == (0, 0, 0, 0)
+
+    async def steps(pilot):
+        assert await wait_for(app, pilot, lambda: app._state["overview"] == "ok")
+        # Thirty-six rows is the roomy page; at 24 the air gives way on purpose.
+        assert not app.query_one("#tabs").has_class("-compact")
+        table = app.query_one("#ov-table", DataTable)
+        strip = app.query_one("#range-yesterday", Button)  # not the live window
+        # 1. Sections separate by SPACING, not by a rule above each one: the
+        #    toolbar, the table and the caption under it each sit a row down.
+        #    (The stylesheet's own "Section" rule names a widget type the app
+        #    never builds, so the margins on these carry the law.)
+        for selector in ("#ov-subview", "#ov-table", "#ov-detail"):
+            margin = app.query_one(selector).styles.margin
+            assert margin.top == 1, (selector, margin)
+        # 2. No panel outlines: the tables and the strip buttons carry no border.
+        assert no_border(table), table.styles.border
+        assert no_border(strip), strip.styles.border
+        # 3. The active tab is the lavender selection colour...
+        tabs = list(app.query(Tab))
+        active = [tab for tab in tabs if tab.has_class("-active")]
+        assert len(active) == 1, [str(tab.label) for tab in active]
+        assert active[0].styles.background == lavender, active[0].styles.background
+        assert all(tab.styles.background != lavender
+                   for tab in tabs if tab is not active[0])
+        # ...and so is a strip shortcut in its press flash, Textual's -active.
+        assert strip.styles.background != lavender, strip.styles.background
+        strip.add_class("-active")
+        await pilot.pause()
+        assert strip.styles.background == lavender, strip.styles.background
+        strip.remove_class("-active")
+        await pilot.pause()
+        # Keyboard focus is still VISIBLE (underline) without being a border...
+        toggle = app.query_one("#ov-tab-models", Button)
+        toggle.focus()
+        assert await wait_for(app, pilot, lambda: toggle.has_focus)
+        assert "underline" in style_words(toggle.styles.text_style), toggle.styles.text_style
+        assert no_border(toggle), toggle.styles.border
+        # ...and an input says when it is live, in the selection colour.
+        app.action_begin_search()
+        box = app.query_one("#ov-search", Input)
+        assert await wait_for(app, pilot, lambda: box.has_focus)
+        assert box.styles.border_top == ("round", lavender), box.styles.border_top
+        # 4. The table header keeps its separator tone and its weight; rows do not.
+        header = table.get_component_styles("datatable--header")
+        assert "bold" in style_words(header.text_style), header.text_style
+        assert header.background == Color.parse("#18212f"), header.background
+        for name in ("datatable--odd-row", "datatable--even-row"):
+            row = table.get_component_styles(name)
+            assert row.background != header.background, (name, row.background)
+            assert "bold" not in style_words(row.text_style), (name, row.text_style)
+        # 5. The dates are right-aligned so the preset row cannot shove them
+        #    around as it reflows.
+        dates = app.query_one("#range-dates").styles.text_align
+        assert dates == "right", dates
+
+    drive(app, steps, size=(120, 36))
 
 
 
@@ -673,16 +709,27 @@ def test_tables_mark_the_keyboard_position_with_a_quiet_row_tone(monkeypatch):
         for table in tables:
             assert table.cursor_type == "row", table.id
             assert table.zebra_stripes is True, table.id
-        band = css_rule("DataTable > .datatable--cursor")
-        assert "#263141" in band and "#b9a7ff" not in band
-        odd = css_rule("DataTable > .datatable--odd-row")
-        even = css_rule("DataTable > .datatable--even-row")
-        assert "#b9a7ff" not in odd and "#b9a7ff" not in even, (odd, even)
-        # One tone each, and no rule between rows -- the separation the approved
-        # design draws with space and surface, not with lines.
-        assert "background:" in odd and "background:" in even, (odd, even)
-        for rule in (odd, even):
-            assert "border" not in rule and "underline" not in rule, rule
+        # Read off each table as the stylesheet resolved its row components.
+        lavender = Color.parse("#b9a7ff")
+        for table in tables:
+            band = table.get_component_styles("datatable--cursor")
+            hover = table.get_component_styles("datatable--hover")
+            odd = table.get_component_styles("datatable--odd-row")
+            even = table.get_component_styles("datatable--even-row")
+            assert band.background == Color.parse("#263141"), (table.id, band.background)
+            assert lavender not in (band.background, hover.background,
+                                    odd.background, even.background), table.id
+            # One tone each, one step apart, and no rule between rows -- the
+            # separation the approved design draws with space and surface, not
+            # with lines. An opaque tone of the app's own: Textual's defaults
+            # leave odd rows bare and lay even ones at half alpha.
+            assert odd.background.a == 1 and even.background.a == 1, (
+                table.id, odd.background, even.background)
+            assert odd.background != even.background, (table.id, odd.background)
+            for row in (odd, even):
+                assert tuple(row.border.spacing) == (0, 0, 0, 0), (table.id, row.border)
+                assert "underline" not in style_words(row.text_style), (
+                    table.id, row.text_style)
 
     drive(app, steps)
 

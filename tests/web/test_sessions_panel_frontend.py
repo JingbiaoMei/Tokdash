@@ -100,12 +100,6 @@ def test_every_panel_has_collapsible_markup():
 # Session tool registry: one check per tool the server serves
 # ---------------------------------------------------------------------------
 
-# zcode has no entry in sessionSortState. Its rows still sort by DEFAULT_SORT
-# through the fallback in updateSessionPanel, but updateSortArrows finds no state
-# and its header draws no sort arrow until a column is clicked. Kept explicit so
-# the gap is visible, and so the fix shows up here as a test to update.
-SORT_STATE_MISSING = {"zcode"}
-
 REGISTRY_HARNESS = """
 // --- what renderSessionsTab hands each panel ----------------------------------
 const rendered = [];
@@ -211,14 +205,11 @@ def test_every_session_tool_is_wired_into_the_sessions_tab(registry, tool):
     # Present and empty: a non-null slot would count as loaded before any fetch.
     assert tool in registry["initialResponses"], f"{tool} has no slot in lastSessionsResponses"
     assert registry["initialResponses"][tool] is None, registry["initialResponses"][tool]
-    if tool in SORT_STATE_MISSING:
-        assert tool not in registry["sortState"], (
-            f"{tool} has a sort state now; take it out of SORT_STATE_MISSING"
-        )
-    else:
-        assert registry["sortState"].get(tool) == registry["defaultSort"], (
-            f"{tool} does not start on the default sort"
-        )
+    # Without a sort state the rows still sort, but the header draws no arrow
+    # until a column is clicked.
+    assert registry["sortState"].get(tool) == registry["defaultSort"], (
+        f"{tool} does not start on the default sort"
+    )
 
     # Rendered exactly once, from its own response, without the Tool column.
     assert [row for row in registry["rendered"] if row["prefix"] == tool] == [
@@ -246,7 +237,7 @@ def test_the_page_lists_exactly_the_server_session_tools(registry):
     # state, filled from buildCombinedSessionsData and rendered last with the
     # Tool column, but never fetched.
     assert set(registry["initialResponses"]) == set(SESSION_PANELS)
-    assert set(registry["sortState"]) == set(SESSION_PANELS) - SORT_STATE_MISSING
+    assert set(registry["sortState"]) == set(SESSION_PANELS)
     assert registry["rendered"][-1] == {
         "prefix": "combined",
         "owner": "combined, built by the page",

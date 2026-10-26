@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 
 from support.frontend import extract_js_function, index_source, needs_node, run_node
@@ -290,10 +291,14 @@ async function main() {
 
     pick('X');
     await settle();
-    resolveRange('X', { total_tokens: 125, total_cost: 1.25, total_messages: 3 });
+    out.automaticUrl = fetchFor('X').url;
+    // Answered from cache, as nearly every timer tick is.
+    resolveRange('X', { total_tokens: 125, total_cost: 1.25, total_messages: 3,
+      response_cache: { status: 'hit', served_from_cache: true, age_seconds: 60 } });
     await settle(); await settle();
     out.afterAutomaticRefresh = log.refreshReports.length;
     out.automaticDelta = lastRefreshReport && lastRefreshReport.tokens;
+    out.automaticStatus = lastRefreshReport && lastRefreshReport.status;
 
     hideUsageRefreshReport({ dismissed: true });
     pick('X');
@@ -304,10 +309,13 @@ async function main() {
 
     pick('X', { forceRefresh: true });
     await settle();
-    resolveRange('X', { total_tokens: 175, total_cost: 1.75, total_messages: 5 });
+    out.forcedUrl = fetchFor('X').url;
+    resolveRange('X', { total_tokens: 175, total_cost: 1.75, total_messages: 5,
+      response_cache: { status: 'hit', served_from_cache: true, age_seconds: 60 } });
     await settle(); await settle();
     out.afterForcedRefresh = log.refreshReports.length;
     out.forcedDelta = lastRefreshReport && lastRefreshReport.tokens;
+    out.forcedStatus = lastRefreshReport && lastRefreshReport.status;
 
     hideUsageRefreshReport({ dismissed: true });
     pick('Y');
@@ -723,6 +731,11 @@ def test_every_same_range_refresh_reports_but_initial_and_range_loads_do_not(tmp
     assert out["forcedDelta"] == 25
     assert out["afterRangeChange"] == 2
     assert out["afterOtherRangeRefresh"] == 3
+    # Only the Refresh button asks the server to recompute, and only it can be
+    # told "nothing refreshed": a timer tick's cache hit is the TTL doing its job.
+    assert "refresh" not in parse_qs(urlsplit(out["automaticUrl"]).query)
+    assert parse_qs(urlsplit(out["forcedUrl"]).query).get("refresh") == ["1"]
+    assert (out["automaticStatus"], out["forcedStatus"]) == ("complete", "cached")
 
 
 # --- the agent-time card, with its real loader --------------------------------

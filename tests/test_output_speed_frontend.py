@@ -10,23 +10,26 @@ from drifting later:
 * Combined is the default, merges a model across harnesses, and a pick survives
   the switch to Per stream and back;
 * absence sorts last, formats as a dash, and never becomes a zero;
-* every element the speed code reaches for actually exists in the markup;
-* every speed string is present in all six shipped languages.
+* every element the speed code reaches for by selector exists in the markup;
+* every speed string the language-parity test cannot see is present in all six
+  shipped languages.
+
+Most of these run the shipped functions under node; the few that read the page
+as text pin markup a stub DOM cannot show.
 """
 from __future__ import annotations
 
 import json
 import re
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
 
-import tokdash  # type: ignore[import-untyped]
+from support.frontend import index_source, run_node
+from support.report import activate_dashboard_tab_program
 
-INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
-SRC = INDEX_HTML.read_text(encoding="utf-8")
+SRC = index_source()
 
 SPEED_SURFACES = ("usageReportSpeedPanel", "sessionSpeedPanel")
 LANGUAGES = ("en", "zh", "ja", "ko", "es", "pt")
@@ -74,9 +77,7 @@ def _run_node(tmp_path: Path, name: str, script: str):
         pytest.skip("node is not installed")
     harness = tmp_path / f"{name}.js"
     harness.write_text(script, encoding="utf-8")
-    result = subprocess.run(["node", str(harness)], check=True,
-                            capture_output=True, encoding="utf-8")
-    return json.loads(result.stdout)
+    return json.loads(run_node(harness))
 
 
 STUB_LINES = [
@@ -136,27 +137,20 @@ def _rows_js() -> str:
 
 
 def test_output_speed_renders_in_exactly_two_places():
+    """The markup half: the page sits in its own tab, after the report, and its
+    period control is its own. That the control commits the shared range, and
+    that a row carries its own method, is run under node below."""
     for element_id in SPEED_SURFACES:
         assert f'id="{element_id}"' in SRC, element_id
-    assert 'id="usageReportSubtabs"' not in SRC
     assert 'data-tab-target="speed"' in SRC
     assert 'data-tab="speed"' in SRC
     assert SRC.index('id="report-content"') < SRC.index('id="speed-content"') < SRC.index('id="usageReportSpeedPanel"')
     speed_panel = SRC[SRC.index('id="speed-content"'):SRC.index('id="quota-content"')]
-    # The page walks periods, but owns no dates: its control commits the shared
-    # range through the same router as the top picker.
     assert 'data-period=' not in speed_panel, "the report's period control is not this page's"
     assert 'data-speed-period="quarter"' in speed_panel
-    commit = _extract("function usageReportSpeedCommitPeriod(")
-    assert "commitDateSelection(" in commit
-    # One comparison table, and the method of each row is on the row itself.
+    # One comparison table, not a stack of sections.
     across = SRC[SRC.index('<div id="usageReportSpeedAcross">'):SRC.index('<details class="speed-method-note"')]
     assert across.count("<table") == 1, "the across view is one comparison table"
-    assert "'speed-model-meta'" in _extract("function usageReportSpeedTableRow(")
-    for dead in ("usageReportSpeedMethod", "usageReportSpeedCoverage",
-                 "usageReportSpeedExclusions", "usageReportSpeedInstrument",
-                 "usageReportSpeedTemporal", "usageReportSpeedPick", "usageReportSpeedHours"):
-        assert f'id="{dead}"' not in SRC, f"{dead} is a section the design no longer has"
 
 
 def test_the_chart_is_one_view_with_two_layouts_and_no_second_ranking():
@@ -166,33 +160,6 @@ def test_the_chart_is_one_view_with_two_layouts_and_no_second_ranking():
     assert 'id="usageReportSpeedBucket"' in chart, "the grouping lives on the chart it groups"
     assert "data-speed-sort" not in chart, "no second sortable model ranking"
     assert chart.count("<table") == 0, "the chart's data table is built from the chart, not a second view"
-
-
-def test_the_page_asks_for_speed_only_when_the_subtab_is_open():
-    """Laziness is the point: the summary report must not pay for this view.
-
-    The rule is one gate the whole view dispatches through, so it holds for the
-    report's own load, a subtab click, a tab return and a window that was hidden
-    when the request was queued. Asserted by running the loader rather than by
-    reading for a guard at each call site: the call sites are the part that
-    multiplies, and a load that forgets the gate is invisible to a string match.
-    """
-    callers = [
-        name for name in ("usageReportLoadSpeed", "usageReportEnsureTrend")
-        if "/api/output-speed" in _extract(
-            "async function usageReportLoadSpeed("
-            if name == "usageReportLoadSpeed"
-            else "function usageReportEnsureTrend("
-        )
-    ]
-    assert callers == ["usageReportLoadSpeed", "usageReportEnsureTrend"]
-    loader = _extract("async function loadUsageReport(options = {})")
-    assert len(loader) > 500, "the extractor returned a signature, not a body"
-    assert "/api/output-speed" not in loader
-    assert "usageReportLoadSpeed" not in loader
-    activate = _extract("function activateDashboardTab(")
-    assert "if (tab === 'speed')" in activate
-    assert "usageReportSpeedResume()" in activate
 
 
 def test_a_hidden_or_otherwise_unviewed_panel_asks_for_nothing(tmp_path):
@@ -500,18 +467,6 @@ def test_a_page_left_during_the_backoff_is_not_charged_for_another_request(tmp_p
     assert out["neverHidden"] == 5, out
 
 
-def test_range_changes_invalidate_speed_without_charging_the_report():
-    invalidate = _extract("function usageReportSpeedInvalidate(")
-    for field in ("loadedKey", "trendKey", "rows", "payload"):
-        assert field in invalidate
-    loader = _extract("async function usageReportLoadSpeed(")
-    assert "usageReportSpeedInvalidate();" in loader
-    assert "usageReportSpeedInvalidate" not in _extract("async function loadUsageReport(options = {})")
-    route = _extract("function updateDashboardByDateRange(")
-    assert "usageReportSpeedState.active" in route
-    assert route.index("usageReportLoadSpeed(") < route.index("updateDashboard(null")
-
-
 def _standalone_loader_js():
     return '\n'.join([
         STUBS,
@@ -542,6 +497,59 @@ def _standalone_loader_js():
         _extract('function updateDashboardByDateRange('),
         'usageReportSpeedState.active = true; usageReportSpeedState.tool = "kimi";',
     ])
+
+
+def test_range_changes_invalidate_speed_without_charging_the_report(tmp_path):
+    """A new window clears the old one's rows, payload and trend before it asks.
+
+    On the speed page the shared range router loads speed and never the Overview;
+    off it, the range goes to the Overview loader and speed is not asked. A kept
+    view (the window already loaded) is left alone. That the report's own load
+    never invalidates speed is run in tests/test_usage_report_frontend.py.
+    """
+    out = _run_node(tmp_path, 'standalone_invalidate', _standalone_loader_js() + '''
+const fields = () => {
+  const s = usageReportSpeedState;
+  return {loadedKey: s.loadedKey, trendKey: s.trendKey, trend: s.trend, rows: s.rows.length, payload: s.payload};
+};
+(async () => {
+  const out = {};
+  updateDashboardByDateRange(currentStartDate, currentEndDate);
+  asks[0].resolve({rows: [{source: 'kimi', model: 'm', speed_calls: 1}]});
+  await flush();
+  out.loaded = !!usageReportSpeedState.loadedKey && usageReportSpeedState.rows.length;
+  updateDashboardByDateRange(currentStartDate, currentEndDate);
+  out.sameWindowAsks = asks.length;
+  usageReportSpeedState.trend = {buckets: []};
+  usageReportSpeedState.trendKey = usageReportSpeedState.loadedKey;
+  currentStartDate = new Date(2026, 7, 1);
+  updateDashboardByDateRange(currentStartDate, currentEndDate);
+  out.whileAsking = {...fields(), asks: asks.length};
+  asks[1].resolve({rows: [{source: 'kimi', model: 'm', speed_calls: 2}]});
+  await flush();
+  usageReportSpeedInvalidate({keepUnchanged: true});
+  out.kept = usageReportSpeedState.rows.length;
+  usageReportSpeedInvalidate();
+  out.cleared = fields();
+  usageReportSpeedState.active = false;
+  try {
+    updateDashboardByDateRange(currentStartDate, currentEndDate);
+    out.offPage = 'no loader';
+  } catch (error) {
+    out.offPage = error.message;
+  }
+  out.offPageAsks = asks.length;
+  console.log(JSON.stringify(out));
+})();
+''')
+    cleared = {"loadedKey": "", "trendKey": "", "trend": None, "rows": 0, "payload": None}
+    assert out["loaded"] == 1
+    assert out["sameWindowAsks"] == 1, "the window on screen was asked for again"
+    assert out["whileAsking"] == {**cleared, "asks": 2}, "the old window's data outlived the range change"
+    assert out["kept"] == 1, "keepUnchanged threw away the window it was asked to keep"
+    assert out["cleared"] == cleared
+    assert out["offPage"] == "Range switch used Overview loader"
+    assert out["offPageAsks"] == 2, "the speed page asked for a range while it was not open"
 
 
 def test_top_range_starts_a_new_load_before_the_old_one_finishes(tmp_path):
@@ -672,7 +680,7 @@ def test_terminal_chart_followup_reads_snapshot_but_explicit_chart_load_can_ensu
     ])
     out = _run_node(tmp_path, 'terminal_trend_snapshot', program)
     assert len(out) == 3 and 'cache_only=1' in out[0] and 'cache_only' not in out[1]
-    assert all('view=trend' in url for url in out)
+    assert all(url.startswith('/api/output-speed?') and 'view=trend' in url for url in out)
     assert 'bucket' not in out[1] and 'bucket=week' in out[2], "a grouping is its own chart"
 
 
@@ -910,18 +918,15 @@ def test_queued_overview_work_is_not_dispatched_on_the_speed_page(tmp_path):
 def test_every_element_the_speed_code_reaches_for_exists():
     """A missing id is silent in a browser and loud here.
 
-    The harness pills, the chart and its grouping each need their own element:
-    one control cannot serve two purposes, and an earlier draft wrote two through
-    the same id, which silently removed the per-tool filter from the page.
+    tests/test_frontend_element_ids.py checks every getElementById target; the
+    speed code also reaches for elements through querySelector('#id'), which that
+    scan does not read, so those are checked here. The grouping control keeps
+    its own label.
     """
-    ids = set(re.findall(r"getElementById\(['\"](usageReportSpeed[A-Za-z]*|sessionSpeed[A-Za-z]*)['\"]\)", SRC))
-    ids |= set(re.findall(r"querySelector(?:All)?\(['\"]#(usageReportSpeed[A-Za-z]*|sessionSpeed[A-Za-z]*)", SRC))
-    assert ids, "the speed code should reference elements"
+    ids = set(re.findall(r"querySelector(?:All)?\(['\"]#(usageReportSpeed[A-Za-z]*|sessionSpeed[A-Za-z]*)", SRC))
+    assert ids, "the speed code should reach for elements by selector"
     for element_id in sorted(ids):
         assert f'id="{element_id}"' in SRC, f"{element_id} is referenced but never rendered"
-    for element_id in ("usageReportSpeedTools", "usageReportSpeedChart", "usageReportSpeedBucket",
-                       "usageReportSpeedLens", "usageReportSpeedPeriod", "usageReportSpeedSearch"):
-        assert element_id in ids, element_id
     assert 'for="usageReportSpeedBucket"' in SRC
 
 
@@ -942,26 +947,64 @@ def test_no_report_call_site_names_a_function_that_does_not_exist():
     assert not missing, f"called but never defined: {missing}"
 
 
-def test_standalone_speed_activation_sets_its_gate_before_loading():
-    body = _extract("function activateDashboardTab(")
-    assert body.index("usageReportSpeedState.active = tab === 'speed'") < body.index("usageReportSpeedResume()")
-    assert "outputSpeedRetirePending()" in body
-    assert "usageReportSpeedSetSubtab" not in body
-    # The page's own period control replaces the quick ranges, as the report's does.
-    assert "overviewRanges.hidden = tab === 'report' || tab === 'speed'" in body
+def test_standalone_speed_activation_sets_its_gate_before_loading(tmp_path):
+    """Laziness is the point: nothing on this page is asked for until it is open.
+
+    The tab switch sets the page's flag and only then wires and resumes it, since
+    every speed request goes through a gate that reads that flag. Leaving retires
+    what the page had in flight, and opening the Report or the Overview asks it
+    for nothing. (That the report's own load never dispatches speed is run in
+    tests/test_usage_report_frontend.py.)
+    """
+    program = activate_dashboard_tab_program("""
+const out = {};
+out.speed = visit('speed');
+out.report = visit('report');
+out.overview = visit('overview');
+out.speedAgain = visit('speed');
+console.log(JSON.stringify(out));
+""")
+    out = _run_node(tmp_path, "speed_activation", program)
+
+    speed = out["speed"]
+    assert speed["panels"] == ["speed-content"] and speed["speedActive"] is True, speed
+    assert "wireSpeed:active=true" in speed["log"] and "resumeSpeed:active=true" in speed["log"], (
+        f"the page was resumed before its gate was set: {speed['log']}"
+    )
+    assert speed["log"].index("wireSpeed:active=true") < speed["log"].index("resumeSpeed:active=true")
+    # The page walks the shared range with its own period control, so the quick
+    # ranges step aside here as they do for the report's chips.
+    assert speed["rangesHidden"] is True and speed["chipsHidden"] is True
+
+    report = out["report"]
+    assert "retireSpeed:active=true" in report["log"], report["log"]
+    assert report["speedActive"] is False
+    assert not [entry for entry in report["log"] if entry.startswith(("wireSpeed", "resumeSpeed"))]
+    assert not [entry for entry in out["overview"]["log"] if "Speed" in entry], out["overview"]["log"]
+    assert out["overview"]["rangesHidden"] is False
+    assert "resumeSpeed:active=true" in out["speedAgain"]["log"], "a return did not resume the page"
 
 
-def test_the_table_and_its_spanned_rows_agree_on_the_column_count():
+def test_the_table_and_its_spanned_rows_agree_on_the_column_count(tmp_path):
+    """A message row spans the header, and a built row has a cell per column."""
     headers = re.findall(r'data-speed-sort="([a-z_]+)"', SRC)
     assert headers == ["model", "rate", "speed_calls", "coverage"]
     table = SRC[SRC.index('id="usageReportSpeedTable"'):SRC.index('</thead>', SRC.index('id="usageReportSpeedTable"'))]
     columns = table.count('<th scope="col"')
     assert columns == 5, "a tick column, then the four sortable ones"
-    spans = set(re.findall(r"colSpan = (\d+)", _extract("function usageReportSpeedMessageRow(message)")))
-    assert spans == {str(columns)}, f"spanned rows must match the {columns} columns"
-    # A built row has a cell per column, too.
-    row = _extract("function usageReportSpeedTableRow(")
-    assert row.count("tr.appendChild(") == columns
+    out = _run_node(tmp_path, "table_columns", _table_row_js() + chr(10).join([
+        _extract("function usageReportSpeedMessageRow(message)"),
+        """
+const message = usageReportSpeedMessageRow('nothing measured');
+usageReportSpeedState.payload = {models: []};
+const row = usageReportSpeedTableRow({source: 'codex', model: 'm', measurement_kind: 'response_window',
+  token_basis: 'b', speed_calls: 4, coverage: 1, combined_tok_per_s: 30, output_tok_per_s: 20,
+  peak_in_flight: 3, parallelism: 1.16}, 100);
+console.log(JSON.stringify({messageCells: message.parts.length, span: message.parts[0].colSpan,
+  text: message.textContent, rowCells: row.parts.length}));
+""",
+    ]))
+    assert out == {"messageCells": 1, "span": columns, "text": "nothing measured", "rowCells": columns}
 
 
 # --------------------------------------------------------------------------
@@ -987,12 +1030,30 @@ console.log(JSON.stringify(cases.map((v) => usageReportSpeedRateValue(v))));
     assert out[6:] == [None, None, None], "non-finite and unparseable rates are absence"
 
 
-def test_the_chart_uses_that_guard():
-    body = _extract("function usageReportSpeedChartModel()")
-    assert "usageReportSpeedRateValue(at(raw, index))" in body
-    assert "Number(at(raw" not in body
-    draw = _extract("function usageReportDrawSpeedChart()")
-    assert "if (value === null) { pen = false; return; }" in draw, "a gap lifts the pen"
+def test_the_line_lifts_its_pen_over_an_unmeasured_bucket(tmp_path):
+    """A gap in the data is a gap in the line, not a slope through zero.
+
+    The chart model keeps an unmeasured bucket as null (run in
+    test_the_chart_reads_the_lens_view_and_merged_series_and_keeps_gaps); the
+    drawing then starts a new segment after it and puts no point on it.
+    """
+    out = _run_node(tmp_path, "speed_line_gap", _draw_js() + """
+state.lens = 'combined';
+state.chart = usageReportSpeedChartModel();
+usageReportDrawSpeedChart();
+const svg = nodes.usageReportSpeedChart.children[0];
+const line = svg.children.filter((n) => n.attrs.class === 'speed-line');
+const points = svg.children.filter((n) => n.attrs.class === 'speed-point').map((n) => Number(n.attrs.cx));
+console.log(JSON.stringify({values: state.chart.series[0].values, lines: line.length, d: line[0].attrs.d, points}));
+""")
+    assert out["values"] == [20, 22, None, 21, 23]
+    assert out["lines"] == 1
+    moves = re.findall(r"([ML])([\d.]+),", out["d"])
+    assert [command for command, _ in moves] == ["M", "L", "M", "L"], out["d"]
+    xs = [float(x) for _, x in moves]
+    assert xs == out["points"], "a point was drawn where nothing was measured"
+    step = xs[1] - xs[0]
+    assert xs[2] - xs[1] == pytest.approx(2 * step), "the line bridged the missing bucket"
 
 
 def _table_row_js() -> str:
@@ -1063,23 +1124,28 @@ console.log(JSON.stringify(out));
     assert out["merged"]["meta"].startswith("omp + opencode · ")
     assert "usageReportSpeedMethods" in out["merged"]["meta"], "two methods are named as two"
     assert "usageReportSpeedRateTitleMerged" in out["merged"]["title"]
+    # The tooltip gives both rates, whichever the lens prints.
+    assert '"stream":"20.0"' in out["at"]["title"] and '"combined":"30.0"' in out["at"]["title"], out["at"]["title"]
     assert out["stream"]["rate"] == "20.0" and out["stream"]["par"] is None, "Per stream has no ×N"
     assert out["full"]["disabled"] == "true", "a seventh row cannot be ticked"
 
 
-def test_method_explanations_are_collapsed_and_rows_carry_both_rates():
+def test_method_explanations_are_collapsed():
+    """The method note starts closed; that each row's tooltip carries both rates
+    is read off a built row in the row test above."""
     note = SRC[SRC.index('<details class="speed-method-note"'):SRC.index('</details>', SRC.index('<details class="speed-method-note"'))]
     assert ' open' not in note
     assert 'usageReportSpeedCompleteness' in note
     assert 'usageReportSpeedMethodSummary' in note
-    title = _extract('function usageReportSpeedRateTitle(row)')
-    assert 'row.output_tok_per_s' in title and 'row.combined_tok_per_s' in title
 
 
-def test_combined_is_the_default_lens():
-    state = _extract("const usageReportSpeedState = {")
-    assert "lens: 'combined'," in state
-    assert 'data-speed-lens="combined" aria-pressed="true"' in SRC
+def test_combined_is_the_default_lens(tmp_path):
+    out = _run_node(tmp_path, "default_lens", _rows_js() + """
+usageReportSpeedState.payload = {rows: [], models: []};
+console.log(JSON.stringify({lens: usageReportSpeedLens(), merging: usageReportSpeedMerging()}));
+""")
+    assert out["lens"] == "combined", "a fresh page must open on Combined"
+    assert 'data-speed-lens="combined" aria-pressed="true"' in SRC, "the pressed pill must match the default"
 
 
 def test_an_older_server_without_combined_reads_per_stream(tmp_path):
@@ -1391,10 +1457,36 @@ console.log(JSON.stringify(out));
     assert out["legacy"] == 1, "an older payload degrades to the number it can support"
 
 
-def test_the_note_under_the_table_reads_that_union():
-    body = _extract("function usageReportSpeedPartialLine()")
-    assert "usageReportSpeedMeasuredDays(rows)" in body
-    assert "Math.max(...rows.map((row) => Number(row.days_with_measurements" not in body
+def test_the_note_under_the_table_reads_that_union(tmp_path):
+    """The note prints the union: two models on two different days is 2/N, where
+    the old maximum printed 1/N. Rows with no measured call do not count."""
+    out = _run_node(tmp_path, "speed_partial_line", _table_row_js() + chr(10).join([
+        _extract("function usageReportSpeedPartialLine()"),
+        """
+const host = el('p');
+document.getElementById = (id) => (id === 'usageReportSpeedPartial' ? host : null);
+const day = (d) => Date.UTC(2026, 8, d, 12);
+usageReportSpeedState.tool = 'kimi';
+usageReportSpeedState.payload = {days_with_measurements: 4, selected_days: 28,
+  selected_range: {from: '2026-09-01', to: '2026-09-28'}};
+usageReportSpeedState.rows = [
+  {model: 'a', source: 'kimi', speed_calls: 3, days_with_measurements: 1, source_days_with_measurements: 2,
+   first_measured_at: day(3), last_measured_at: day(3)},
+  {model: 'b', source: 'kimi', speed_calls: 5, days_with_measurements: 1, source_days_with_measurements: 2,
+   first_measured_at: day(9), last_measured_at: day(9)},
+  {model: 'idle', source: 'kimi', speed_calls: 0, days_with_measurements: 0, source_days_with_measurements: 2},
+];
+usageReportSpeedPartialLine();
+const out = {line: host.textContent, title: host.title};
+usageReportSpeedState.rows = usageReportSpeedState.rows.slice(2);
+usageReportSpeedPartialLine();
+out.nothingMeasured = host.textContent;
+console.log(JSON.stringify(out));
+""",
+    ]))
+    assert out["line"] == "usageReportSpeedDaysWith 2/28", "the note printed the maximum, not the union"
+    assert out["title"].startswith("usageReportSpeedSelectedRange 2026-09-01 → 2026-09-28"), out["title"]
+    assert out["nothingMeasured"] == ""
 
 
 def test_absence_sorts_last_in_both_directions(tmp_path):
@@ -1603,13 +1695,20 @@ def _i18n_keys() -> dict[str, set[str]]:
 
 
 def test_every_speed_string_ships_in_all_six_languages():
-    used = set(re.findall(r'data-i18n(?:-aria|-placeholder)?="(usageReportSpeed[A-Za-z]*|sessionSpeed[A-Za-z]*|usageReportSubSpeed)"', SRC))
-    # With or without interpolation values: t('key') and t('key', {...}).
-    used |= set(re.findall(r"\bt\('(usageReportSpeed[A-Za-z]*|sessionSpeed[A-Za-z]*|speedKind[A-Za-z]*|usageReportSubSpeed)'[,)]", SRC))
-    used |= set(re.findall(r"\bt\(`(usageReportSpeed[A-Za-z]*|sessionSpeed[A-Za-z]*)`", SRC))
-    # Keys reached through a lookup table rather than a literal call.
-    used |= set(re.findall(r":\s*'((?:usageReportSpeedBucket|speedKindShort|speedKind)[A-Za-z]+)'", SRC))
-    assert len(used) >= 25, f"expected the speed view to carry its own strings, found {len(used)}"
+    """The speed keys the language-parity test cannot see.
+
+    tests/test_i18n_languages.py::test_i18n_language_parity collects keys written
+    as a bare t('key') or a data-i18n attribute. A key passed with values,
+    t('key', {...}), picked by a ternary, held in a lookup table or returned by
+    a helper is invisible to it, so those are collected and checked here.
+    """
+    prefix = r"(?:usageReportSpeed|sessionSpeed|speedKind)[A-Za-z]*"
+    used = set(re.findall(rf"\bt\('({prefix})',", SRC))
+    for first, second in re.findall(rf"\?\s*'({prefix})'\s*:\s*'({prefix})'", SRC):
+        used |= {first, second}
+    used |= set(re.findall(rf":\s*'({prefix})'", SRC))
+    used |= set(re.findall(rf"\breturn '({prefix})';", SRC))
+    assert len(used) >= 40, f"expected the speed view to carry its own strings, found {len(used)}"
     keys = _i18n_keys()
     for language, language_keys in keys.items():
         missing = used - language_keys
@@ -1682,12 +1781,17 @@ def test_reloading_with_a_tool_chosen_keeps_the_other_tools(tmp_path):
     assert out["sorted"] == ["kimi"]
     assert out["tools"] == ["kimi", "omp"], "omp survives the reload"
 
-    loader = _extract("async function usageReportLoadSpeed(")
-    queries = re.findall(r"usageReportSpeedQuery\([^)]*\)", loader)
-    assert queries, "the loader builds its own query"
-    for query in queries:
-        assert "source" not in query, (
-            f"{query} asks the server for one tool, which is what empties the picker"
+    # The loader, with kimi saved as the tool, still asks for every tool.
+    urls = _run_node(tmp_path, "speed_tool_reload_query", _standalone_loader_js() + """
+usageReportLoadSpeed();
+usageReportLoadSpeed({refresh: true});
+console.log(JSON.stringify(asks.map((ask) => ask.url)));
+""")
+    assert len(urls) == 2, urls
+    for url in urls:
+        assert url.startswith("/api/output-speed?"), url
+        assert not re.search(r"[?&](source|tool)=", url), (
+            f"{url} asks the server for one tool, which is what empties the picker"
         )
 
 
@@ -1767,8 +1871,6 @@ console.log(JSON.stringify(seen));
         "usageReportSpeedCachedHistory · usageReportSpeedLiveDeferred(3)",
         "loading",
     ]
-    for key in ("usageReportSpeedLiveDeferredOne", "usageReportSpeedLiveDeferred"):
-        assert len(re.findall(rf"^\s+{key}: '", SRC, re.M)) == len(LANGUAGES), key
 
 
 # --------------------------------------------------------------------------

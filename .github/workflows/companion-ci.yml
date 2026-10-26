@@ -9,7 +9,7 @@ on:
   pull_request:
     paths:
       - "companion/**"
-      - "tests/test_companion_*.py"
+      - "tests/**/test_companion_*.py"
       - "global.json"
       - ".github/workflows/companion-*.yml"
   push:
@@ -18,7 +18,7 @@ on:
       - feat/companion-mvp
     paths:
       - "companion/**"
-      - "tests/test_companion_*.py"
+      - "tests/**/test_companion_*.py"
       - "global.json"
       - ".github/workflows/companion-*.yml"
   workflow_dispatch: {}

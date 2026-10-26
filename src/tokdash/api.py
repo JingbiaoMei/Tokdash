@@ -1359,24 +1359,30 @@ _FORCE_REFRESH_JOIN_SECONDS = _bounded_float_env(
 )
 
 
-def _acquire_compute_slot(*, wait: bool = True) -> bool:
+def _acquire_compute_slot(*, wait: bool = True) -> Optional[threading.BoundedSemaphore]:
     """Take a heavy-compute slot, optionally waiting briefly for one to free up.
 
     ``wait=False`` keeps the old instant refusal for callers that have something else
     to serve (a stale value, or an opportunistic background refresh): those must never
     occupy a worker thread waiting when they can answer immediately.
+
+    Returns the semaphore the slot was taken from, or None, and the caller releases
+    exactly that one. Re-reading the module global at release time would hand the
+    slot to whatever semaphore is bound by then: a refresh thread that outlives a
+    rebinding (the tests swap in their own) then releases a slot it never took.
     """
     global _compute_waiters
-    if _compute_semaphore.acquire(blocking=False):
-        return True
+    semaphore = _compute_semaphore
+    if semaphore.acquire(blocking=False):
+        return semaphore
     if not wait:
-        return False
+        return None
     with _compute_waiters_guard:
         if _compute_waiters >= _COMPUTE_MAX_WAITERS:
-            return False
+            return None
         _compute_waiters += 1
     try:
-        return _compute_semaphore.acquire(timeout=_COMPUTE_WAIT_SECONDS)
+        return semaphore if semaphore.acquire(timeout=_COMPUTE_WAIT_SECONDS) else None
     finally:
         with _compute_waiters_guard:
             _compute_waiters -= 1
@@ -1620,10 +1626,10 @@ def _refresh_stale_in_background(
       burst cannot park an unbounded number of them — and where that cap is 0 this
       degrades back to an instant deferral rather than overrunning the thread budget.
     """
-    acquired_compute = False
+    slot = None
     try:
-        acquired_compute = _acquire_compute_slot(wait=wait_for_slot)
-        if not acquired_compute:
+        slot = _acquire_compute_slot(wait=wait_for_slot)
+        if slot is None:
             logger.debug("tokdash stale refresh deferred key=%s reason=compute_cap", key)
             return
         try:
@@ -1633,8 +1639,8 @@ def _refresh_stale_in_background(
             return
         _cache_set_if_epoch(key, fresh, epoch)
     finally:
-        if acquired_compute:
-            _compute_semaphore.release()
+        if slot is not None:
+            slot.release()
         _release_key_lock(key, lock)
 
 
@@ -1813,7 +1819,8 @@ def get_cached_or_fetch(
         # and a 503 is the honest answer. Releasing the lock to wait would instead let
         # several threads compute the same cold key, which is what single-flight exists
         # to prevent.
-        if not _acquire_compute_slot(wait=latest is None):
+        slot = _acquire_compute_slot(wait=latest is None)
+        if slot is None:
             if latest is not None:
                 # Return the cached value now — a caller holding a value must never
                 # park a request worker for a slot — but hand this key's single-flight
@@ -1842,7 +1849,7 @@ def get_cached_or_fetch(
         try:
             fresh = fetch_fn()
         finally:
-            _compute_semaphore.release()
+            slot.release()
         _cache_set_if_epoch(key, fresh, epoch)
         return result(fresh, "recomputed", 0.0)
     finally:

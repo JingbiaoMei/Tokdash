@@ -303,11 +303,26 @@ def test_a_background_stale_refresh_never_waits(monkeypatch):
     assert api._compute_semaphore.acquire(blocking=False)
     try:
         started = time.monotonic()
-        assert api._acquire_compute_slot(wait=False) is False
+        assert api._acquire_compute_slot(wait=False) is None
         assert time.monotonic() - started < 1.0
     finally:
         api._compute_semaphore.release()
 
+
+def test_a_slot_goes_back_to_the_semaphore_it_came_from(monkeypatch):
+    """A refresh thread can outlive a rebinding of the semaphore, as every test here
+    rebinds it. Releasing through the module global handed its slot to the new
+    semaphore, which never lent it: "Semaphore released too many times", raised
+    either in the thread or in the next request whose permit it had taken."""
+    lender = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(api, "_compute_semaphore", lender)
+    slot = api._acquire_compute_slot(wait=False)
+    assert slot is lender
+
+    monkeypatch.setattr(api, "_compute_semaphore", threading.BoundedSemaphore(1))
+    slot.release()
+    assert lender.acquire(blocking=False), "the lender never got its slot back"
+    lender.release()
 
 def test_the_default_concurrency_scales_with_cores_and_is_bounded(monkeypatch):
     for cores, expected in [(1, 2), (2, 2), (4, 2), (8, 4), (16, 8), (24, 8), (128, 8)]:

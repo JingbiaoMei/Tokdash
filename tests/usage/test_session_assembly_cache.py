@@ -193,6 +193,11 @@ def test_the_cached_read_matches_the_uncached_one(tmp_path, monkeypatch):
         str(tmp_path / "d.jsonl"): _raw("s3", [BASE - DAY]),
     }
     store = _store(tmp_path, contents)
+    # The reference prices with the shared price book as it stands. A stored read
+    # brings that book up to this data dir's rates first (_pricing_signature reloads
+    # it on drift); without the same step here, the reference priced with whatever
+    # rates an earlier test on this worker left loaded, and disagreed by the cost.
+    sessions_module._pricing_signature()
 
     windows = [
         (None, None),

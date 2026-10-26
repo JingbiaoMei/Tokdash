@@ -2069,24 +2069,40 @@ def test_quota_poll_notes_before_polling_then_reloads_refreshed(monkeypatch):
         await pilot.press("3")
         assert await wait_for(app, pilot, lambda: app._state["quota"] == "ok")
         note = app.query_one("#quota-note", Static)
+        # Every write to the note, with whether a poll was running when it came.
         updates = []
         real_update = note.update
         monkeypatch.setattr(
             note, "update",
-            lambda content: (updates.append(str(content)), real_update(content))[1],
+            lambda content: (updates.append((app._polling, str(content))),
+                             real_update(content))[1],
         )
+        # "ok" is not "quiet". The load that just finished leaves a refit behind
+        # it (_end_load -> call_after_refresh -> _refit_body), and that repaint
+        # writes the pre-poll banner -- rightly, since nothing has been pressed.
+        # On a slow runner it lands here, after the spy and ahead of the "u"
+        # queued behind it. This repaint stands in for it, so the interleaving
+        # that failed on Windows runs every time instead of now and then.
+        app._repaint_pane("quota")
         before = len(calls.quota_state)
         await pilot.press("u")
+        # The reload has LANDED, not merely started: its fetch is counted when it
+        # is called, a loop turn before the answer is painted over "computing…".
         assert await wait_for(
-            app, pilot, lambda: len(calls.quota_state) == before + 1
+            app, pilot,
+            lambda: len(calls.quota_state) == before + 1
+            and not app._open_loads.get("quota"),
         )
         assert seen["include_network"] is True   # mirrors `tokdash quota poll`
         assert seen["network_sources"] is None
         assert seen["note_at_call"] == "polling…"  # the note LED the result
-        ok_idx = updates.index("poll ok")
-        assert updates[0] == "polling…"          # order: polling → poll ok
-        assert ok_idx < len(updates) - 1         # …then the reload repainted
-        assert "enabled" in updates[-1]          # the fresh state's banner
+        # The order is the poll's own, read from the first write the poll made.
+        start = [polling for polling, _ in updates].index(True)
+        notes = [text for _, text in updates[start:]]
+        ok_idx = notes.index("poll ok")
+        assert notes[0] == "polling…"            # order: polling → poll ok
+        assert ok_idx < len(notes) - 1           # …then the reload repainted
+        assert "enabled" in notes[-1]            # the fresh state's banner
         assert calls.quota_state[-1] == (True,)  # reload IS forced
         assert not app._polling
 

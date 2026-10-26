@@ -1,20 +1,32 @@
 """Tests for the profile stats and activity heatmap frontend.
 
 Covers activity heatmap rendering, daily/weekly/cumulative aggregation, intensity
-levels, theme palettes, milestone tiers, and contribution reconciliation.
+levels, theme palettes, milestone tiers, and contribution reconciliation. The
+model functions run under node on their own; the Stats profile, the Overview
+band, their legends, tooltips, mode buttons and milestone switch, and the two
+activity-insight panels run on the stub DOM in tests/support/i18n_profile.py.
 """
 from __future__ import annotations
 
 import json
 import re
 import subprocess
+from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
 
 import tokdash
 
-from support.frontend import extract_js_function, needs_node
+from support.frontend import extract_js_function, index_source, needs_node, run_node
+from support.i18n_profile import (
+    APPLY_I18N_FUNCTIONS,
+    APPLY_I18N_STATE,
+    page_script,
+    run_page,
+    slice_line,
+    slice_statement,
+)
 
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
@@ -67,13 +79,7 @@ def _run_profile_js(tmp_path: Path, expression: str, payload: dict) -> object:
         + "process.stdout.write(JSON.stringify(result));\n",
         encoding="utf-8",
     )
-    result = subprocess.run(
-        ["node", str(harness), json.dumps(payload)],
-        check=True,
-        capture_output=True,
-        encoding="utf-8",
-    )
-    return json.loads(result.stdout)
+    return json.loads(run_node(harness, json.dumps(payload)))
 
 
 TOOLTIP_JS_SETUP = """
@@ -122,13 +128,7 @@ def _run_profile_tooltip_js(tmp_path: Path, expression: str, payload: dict) -> o
         + "process.stdout.write(JSON.stringify(result));\n",
         encoding="utf-8",
     )
-    result = subprocess.run(
-        ["node", str(harness), json.dumps(payload)],
-        check=True,
-        capture_output=True,
-        encoding="utf-8",
-    )
-    return json.loads(result.stdout)
+    return json.loads(run_node(harness, json.dumps(payload)))
 
 
 def _run_profile_tooltip_position_js(
@@ -147,13 +147,7 @@ def _run_profile_tooltip_position_js(
         + "process.stdout.write(JSON.stringify(result));\n",
         encoding="utf-8",
     )
-    result = subprocess.run(
-        ["node", str(harness), json.dumps(payload)],
-        check=True,
-        capture_output=True,
-        encoding="utf-8",
-    )
-    return json.loads(result.stdout)
+    return json.loads(run_node(harness, json.dumps(payload)))
 
 
 def _day(date: str, tokens: int, *, cost: float = 0.0) -> dict:
@@ -583,36 +577,9 @@ def test_profile_tooltip_exposes_milestone_badge_tone_and_accessible_text(
     assert "Milestone:" not in result["hidden"]["accessibleText"]
 
 
-def test_profile_milestone_tooltip_and_tier_aura_contract():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    compact = re.sub(r"\s+", "", source)
-    formatter = extract_js_function(
-        source,
-        "function formatProfileAggregateTooltip(aggregate, cumulative = false, milestonesEnabled = false) {",
-    )
-    renderer = extract_js_function(
-        source,
-        "function renderProfileActivityTooltipContent(tooltip, model) {",
-    )
-    profile_renderer = extract_js_function(source, "function renderProfileView() {")
-
-    assert "milestone: 'Milestone'" in source
-    assert "milestone: '里程碑'" in source
-    assert "getProfileMilestoneTier(tokenTotal)" in formatter
-    assert "profile-activity-tooltip-badge" in renderer
-    assert "badge.textContent = model.milestone.label;" in renderer
-    assert "tooltip.dataset.milestone" in renderer
-    assert ".innerHTML" not in renderer
-    assert "applyProfileMilestone(cell, definition.milestone);" in profile_renderer
-    assert "applyProfileMilestone(hit, milestone);" in profile_renderer
-    for level in range(1, 5):
-        assert f'--profile-milestone-{level}:' in compact
-        assert f'[data-milestone="{level}"]' in source
-        assert f'[data-tone="milestone-{level}"]' in source
-    assert "prefers-reduced-motion:reduce" in compact
-
-
-def test_profile_milestones_follow_active_heat_palette_and_keep_paper_keyline():
+def test_paper_keeps_a_keyline_around_milestone_cells():
+    """Paper's heat ramp starts at its own background colour, so a milestone
+    aura needs a keyline in that colour to read as a ring around the cell."""
     source = INDEX_HTML.read_text(encoding="utf-8")
     compact = re.sub(r"\s+", "", source)
     themes = THEMES_CSS.read_text(encoding="utf-8")
@@ -636,188 +603,6 @@ html.dark[data-ui-theme="paper"] .overview-profile-band {
     assert compact.count(
         "inset0001pxvar(--profile-milestone-keyline)"
     ) >= 8
-
-    palette_sync = extract_js_function(
-        source,
-        "function syncProfileMilestonePalette() {",
-    )
-    assert "for (let level = 1; level <= 4; level += 1)" in palette_sync
-    assert "getProfileActivityColor(level)" in palette_sync
-    assert "shell.style.setProperty(`--profile-milestone-${level}`" in palette_sync
-
-    style_setter = extract_js_function(source, "function applyStyleTheme(theme) {")
-    color_mode_setter = extract_js_function(source, "function applyTheme(theme) {")
-    assert "syncProfileMilestonePalette();" in style_setter
-    assert "syncProfileMilestonePalette();" in color_mode_setter
-
-
-def test_profile_uses_github_geometry_stronger_auras_and_edge_gutter():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    compact = re.sub(r"\s+", "", source)
-
-    assert (
-        ".profile-activity-grid-wrap{position:relative;min-width:595px;}"
-        in compact
-    )
-    assert (
-        ".profile-activity-grid{display:grid;grid-auto-flow:column;"
-        "grid-template-columns:repeat(52,minmax(8px,1fr));"
-        "grid-template-rows:repeat(7,minmax(8px,1fr));"
-        "gap:3.5px;width:100%;}"
-        in compact
-    )
-    assert (
-        ".profile-activity-week-hits{position:absolute;inset:0;display:grid;"
-        "grid-template-columns:repeat(52,minmax(8px,1fr));"
-        "gap:3.5px;pointer-events:none;}"
-        in compact
-    )
-    assert (
-        ".profile-activity-months{display:flex;justify-content:space-between;"
-        "min-width:595px;"
-        in compact
-    )
-    assert (
-        ".profile-activity-legend{display:flex;align-items:center;"
-        "justify-content:flex-end;gap:8px;min-width:595px;"
-        in compact
-    )
-    assert ".profile-activity-cell{" in compact
-    assert "border-radius:2px" in compact
-
-    assert (
-        ".profile-activity-scroll{--profile-interactive-aura-reserve:26px;"
-        "--profile-edge-safety-gutter:8px;overflow-x:auto;"
-        "padding-block:8px12px;"
-        "padding-inline:0calc(var(--profile-interactive-aura-reserve)"
-        "+var(--profile-edge-safety-gutter));}"
-    ) in compact
-    assert (
-        ".overview-profile-scroll{--overview-profile-interactive-aura-reserve:16px;"
-        "--profile-edge-safety-gutter:8px;overflow-x:auto;"
-        "padding-block:2px4px;"
-        "padding-inline:0calc(var(--overview-profile-interactive-aura-reserve)"
-        "+var(--profile-edge-safety-gutter));}"
-    ) in compact
-
-    for fragment in [
-        "0002pxcolor-mix(insrgb,var(--profile-milestone-tone)86%,transparent)",
-        "0011pxcolor-mix(insrgb,var(--profile-milestone-tone)72%,transparent)",
-        "0014pxcolor-mix(insrgb,var(--profile-milestone-tone)80%,transparent)",
-        "0003pxcolor-mix(insrgb,var(--profile-milestone-tone)72%,transparent)",
-        "0017pxcolor-mix(insrgb,var(--profile-milestone-tone)88%,transparent)",
-        "0004pxcolor-mix(insrgb,var(--profile-milestone-tone)78%,transparent)",
-        "0022pxcolor-mix(insrgb,var(--profile-milestone-tone)96%,transparent)",
-    ]:
-        assert fragment in compact
-
-    overview_base_rules = [
-        '.overview-profile-cell[data-milestone="1"]{box-shadow:inset 0 0 0 1px '
-        "var(--profile-milestone-keyline),0 0 0 1px color-mix(in srgb,"
-        "var(--profile-milestone-tone) 72%,transparent),0 0 6px color-mix("
-        "in srgb,var(--profile-milestone-tone) 42%,transparent);}",
-        '.overview-profile-cell[data-milestone="2"]{box-shadow:inset 0 0 0 1px '
-        "var(--profile-milestone-keyline),0 0 0 1px color-mix(in srgb,"
-        "var(--profile-milestone-tone) 78%,transparent),0 0 8px color-mix("
-        "in srgb,var(--profile-milestone-tone) 52%,transparent);}",
-        '.overview-profile-cell[data-milestone="3"]{box-shadow:inset 0 0 0 1px '
-        "var(--profile-milestone-keyline),0 0 0 1px color-mix(in srgb,"
-        "var(--color-text) 74%,transparent),0 0 0 2px color-mix(in srgb,"
-        "var(--profile-milestone-tone) 48%,transparent),0 0 10px color-mix("
-        "in srgb,var(--profile-milestone-tone) 62%,transparent);}",
-        '.overview-profile-cell[data-milestone="4"]{box-shadow:inset 0 0 0 1px '
-        "var(--profile-milestone-keyline),0 0 0 1px color-mix(in srgb,"
-        "var(--color-text) 82%,transparent),0 0 0 3px color-mix(in srgb,"
-        "var(--profile-milestone-tone) 58%,transparent),0 0 13px color-mix("
-        "in srgb,var(--profile-milestone-tone) 72%,transparent);}",
-    ]
-    for rule in overview_base_rules:
-        assert rule in source
-
-    overview_interaction_rule = (
-        ".overview-profile-grid button.overview-profile-cell[data-milestone]"
-        ":not(:disabled):is(:hover,:focus-visible),.overview-profile-grid "
-        ".overview-profile-cell[data-milestone].is-column-hover{box-shadow:"
-        "inset 0 0 0 1px var(--profile-milestone-keyline),0 0 0 1px "
-        "color-mix(in srgb,var(--color-text) 88%,transparent),0 0 0 3px "
-        "color-mix(in srgb,var(--profile-milestone-tone) 68%,transparent),"
-        "0 0 16px color-mix(in srgb,var(--profile-milestone-tone) 82%,transparent);}"
-    )
-    assert overview_interaction_rule in source
-
-
-def test_profile_view_html_and_localization_contract():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    required_ids = [
-        "statsViewTitle",
-        "viewProfile",
-        "statsMetricControls",
-        "calendarProfileView",
-        "profileStatRecordedTokens",
-        "profileStatPeakDay",
-        "profileStatActiveDays",
-        "profileStatCurrentStreak",
-        "profileStatLongestStreak",
-        "profileActivityGrid",
-        "profileActivityWeekHits",
-        "profileActivityMonths",
-        "profileActivityLegend",
-        "profileActivityScroller",
-        "profileActivityTooltip",
-        "profileModeDaily",
-        "profileModeWeekly",
-        "profileModeCumulative",
-    ]
-    for element_id in required_ids:
-        assert f'id="{element_id}"' in source
-    assert source.count("profileView: '") == 6
-    assert source.count("recordedTokens: '") == 6
-    assert source.count("tokenActivity: '") == 6
-    assert ".profile-activity-cell" in source
-    assert "border-radius:2px" in source.replace(" ", "")
-    assert "function renderProfileView() {" in source
-    assert "function setProfileActivityMode(mode) {" in source
-    assert "function showProfileActivityTooltip(target, model) {" in source
-    assert "setView('profile')" in source
-    assert "renderProfileView();" in source
-    assert "'calendarProfileView'" in source
-
-
-def test_profile_visual_polish_contract():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    compact = re.sub(r"\s+", "", source)
-    assert re.findall(
-        r'class="profile-activity-stat" data-tone="([^"]+)"', source
-    ) == ["primary", "secondary", "cost", "cta", "primary"]
-    assert '.profile-activity-head h3::before' in source
-    assert '.profile-activity-mode[aria-pressed="true"]' in source
-    assert '.profile-activity-tooltip-header' in source
-    assert '.profile-activity-tooltip-row[data-tone="reasoning"]' in source
-    assert '.profile-activity-tooltip-row[data-key="estimatedCost"]' in source
-    assert "button.profile-activity-cell:not(:disabled):is(:hover,:focus-visible)" in source
-    assert ".profile-activity-cell{transform:none!important;}" in compact
-
-    renderer = extract_js_function(
-        source,
-        "function renderProfileActivityTooltipContent(tooltip, model) {",
-    )
-    assert "document.createElement(" in renderer
-    assert ".textContent =" in renderer
-    assert "tooltip.replaceChildren(header, body);" in renderer
-    assert ".innerHTML" not in renderer
-
-    binder = extract_js_function(
-        source,
-        "function bindProfileActivityTooltip(target, model) {",
-    )
-    assert "model.accessibleText" in binder
-    assert "content.replaceAll" not in binder
-
-    resolver = extract_js_function(
-        source, "function resolveProfileActivityTooltip(target) {"
-    )
-    assert "dataset.profileTooltipId" in resolver
-    assert "profileActivityTooltip" in resolver
 
 
 @needs_node
@@ -881,125 +666,6 @@ def test_profile_tooltip_position_handles_zoomed_viewport_and_edges(tmp_path: Pa
     ]
 
 
-def test_profile_tooltips_use_viewport_portal_and_reflow_on_zoom():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    compact = re.sub(r"\s+", "", source)
-    portal_markup = """
-  <!-- Viewport-level tooltips must stay outside filtered/transformed cards. -->
-  <div id="overviewProfileTooltip" class="profile-activity-tooltip overview-profile-tooltip" role="tooltip" hidden></div>
-  <div id="profileActivityTooltip" class="profile-activity-tooltip" role="tooltip" hidden></div>
-""".strip()
-
-    assert portal_markup in source
-    assert source.count('id="overviewProfileTooltip"') == 1
-    assert source.count('id="profileActivityTooltip"') == 1
-    assert "max-height:calc(100dvh-16px)" in compact
-    assert "contain:layoutpaintstyle" in compact
-
-    viewport = extract_js_function(
-        source,
-        "function getProfileActivityViewport() {",
-    )
-    positioner = extract_js_function(
-        source,
-        "function positionActiveProfileActivityTooltip() {",
-    )
-    shower = extract_js_function(
-        source,
-        "function showProfileActivityTooltip(target, model) {",
-    )
-    assert "window.visualViewport" in viewport
-    assert "target.getBoundingClientRect()" in positioner
-    assert "tooltip.getBoundingClientRect()" in positioner
-    assert "tooltip.style.maxWidth" in positioner
-    assert "tooltip.style.maxHeight" in positioner
-    assert "snapProfileActivityTooltipCoordinate" in positioner
-    assert "offsetWidth" not in shower
-    assert "offsetHeight" not in shower
-    assert "window.innerWidth" not in shower
-    assert "window.innerHeight" not in shower
-    assert "window.addEventListener('resize', scheduleProfileActivityTooltipPosition" in source
-    assert "window.addEventListener('scroll', scheduleProfileActivityTooltipPosition" in source
-    assert "window.visualViewport?.addEventListener(" in source
-
-
-def test_profile_activity_legend_is_safe_localized_and_mode_aware():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    compact = re.sub(r"\s+", "", source)
-
-    assert 'id="profileActivityLegend"' in source
-    assert source.count("activityLegend: '") == 6
-    assert ".profile-activity-legend{" in compact
-    assert ".profile-activity-legend-swatches{" in compact
-    assert ".profile-activity-legend-bars{" in compact
-    assert ".profile-activity-legend-badge{" in compact
-
-    renderer = extract_js_function(
-        source,
-        "function renderProfileActivityLegend(targetId, mode) {",
-    )
-    assert "document.createElement(" in renderer
-    assert "legend.replaceChildren(scale, divider, milestones, toggle);" in renderer
-    assert "mode === 'daily'" in renderer
-    assert "getProfileActivityColor(level)" in renderer
-    assert "profile-activity-legend-bars" in renderer
-    assert "profile-activity-legend-badge" in renderer
-    assert "profile-milestone-toggle" in renderer
-    assert "glyph.setAttribute('aria-hidden', 'true');" in renderer
-    assert ".innerHTML" not in renderer
-
-    profile_renderer = extract_js_function(
-        source,
-        "function renderProfileView() {",
-    )
-    assert (
-        "renderProfileActivityLegend('profileActivityLegend', profileActivityMode);"
-        in profile_renderer
-    )
-
-
-def test_profile_milestone_toggle_defaults_off_persists_and_syncs_both_views():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    compact = re.sub(r"\s+", "", source)
-
-    assert "const PROFILE_MILESTONES_STORAGE_KEY = 'tokdash-profile-milestones';" in source
-    assert (
-        "let profileMilestonesEnabled = "
-        "localStorage.getItem(PROFILE_MILESTONES_STORAGE_KEY) === 'on';"
-        in source
-    )
-    assert source.count("milestones: '") == 6
-    assert source.count("showMilestones: '") == 6
-    assert source.count("hideMilestones: '") == 6
-    assert ".profile-milestone-toggle{" in compact
-    assert '[data-milestones-enabled="false"]' in source
-
-    setter = extract_js_function(
-        source,
-        "function setProfileMilestonesEnabled(enabled) {",
-    )
-    assert "profileMilestonesEnabled = Boolean(enabled);" in setter
-    assert "localStorage.setItem(" in setter
-    assert "profileMilestonesEnabled ? 'on' : 'off'" in setter
-    assert "renderProfileView();" in setter
-    assert "renderOverviewProfilePreview();" in setter
-
-    syncer = extract_js_function(
-        source,
-        "function syncProfileMilestoneControls() {",
-    )
-    assert "document.querySelectorAll('.profile-milestone-toggle')" in syncer
-    assert "'aria-pressed'" in syncer
-    assert "'data-milestones-enabled'" in syncer
-
-    applier = extract_js_function(
-        source,
-        "function applyProfileMilestone(target, milestone) {",
-    )
-    assert "delete target.dataset.milestone;" in applier
-    assert "if (!profileMilestonesEnabled || !milestone) return;" in applier
-
-
 def test_paper_uses_warm_terracotta_heat_palette():
     light, dark = _heat_palette_for("paper")
     assert light == [
@@ -1030,43 +696,16 @@ def test_paper_uses_warm_terracotta_heat_palette():
         "#3B82F6", "#60A5FA", "#93C5FD", "#BFDBFE",
     ]
 
-    activity_color = extract_js_function(
-        INDEX_HTML.read_text(encoding="utf-8"),
-        "function getProfileActivityColor(level) {",
-    )
-    assert "Math.round((safeLevel / 4) * Math.max(0, HEAT_COLORS.length - 1))" in activity_color
-
-
-def test_overview_profile_renderer_reuses_stats_warm_response():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    warm = extract_js_function(
-        source, "function scheduleStatsWarm(force = false) {"
-    )
-    renderer = extract_js_function(
-        source, "function renderOverviewProfilePreview(contributions = statsCache.default) {"
-    )
-    resolver = extract_js_function(
-        source, "function resolveProfileActivityTooltip(target) {"
-    )
-
-    assert warm.count("fetchSelectedServers('/api/stats'") == 1
-    assert "fillMissingDays(data.contributions || [])" in warm
-    assert "statsCache.default = filledContributions;" in warm
-    assert "renderOverviewProfilePreview(filledContributions);" in warm
-    assert "setOverviewProfileState('error');" in warm
-    assert "fetch(" not in renderer
-    assert "buildOverviewProfilePreview(contributions" in renderer
-    assert "overviewProfileTooltip" in renderer
-    assert "bindProfileActivityTooltip(cell, tooltip);" in renderer
-    assert "shell?.dataset.state !== 'error'" in renderer
-    assert "target?.dataset.profileTooltipId || 'profileActivityTooltip'" in resolver
-    assert "renderOverviewProfilePreview();" in extract_js_function(
-        source, "function renderOverviewTab(data) {"
-    )
-
 
 @needs_node
 def test_overview_profile_warm_cache_refreshes_only_when_forced(tmp_path: Path):
+    """The Overview band is painted from one background /api/stats read.
+
+    Its gap-filled, today-reconciled contributions become the shared stats
+    cache and are handed to the band as they are; a second warm reuses them, a
+    forced one reads again, and a failed read marks the band as failed while
+    keeping what is cached.
+    """
     source = INDEX_HTML.read_text(encoding="utf-8")
     scheduler = extract_js_function(
         source, "function scheduleStatsWarm(force = false) {"
@@ -1077,28 +716,33 @@ def test_overview_profile_warm_cache_refreshes_only_when_forced(tmp_path: Path):
 let statsWarmScheduled = false;
 let statsLoaded = false;
 const statsCache = { default: null };
-const lastUsageResponse = null;
-const currentStartDate = null;
-const currentEndDate = null;
+const lastUsageResponse = { today: 'usage' };
+const currentStartDate = 'range-start';
+const currentEndDate = 'range-end';
 let fetchCount = 0;
-let renderCount = 0;
+let failNext = false;
+const urls = [];
+const rendered = [];
+const states = [];
+const reconciled = [];
 function setTimeout(callback) { callback(); }
 function scheduleIdle(callback) { callback(); }
-function appPath(value) { return value; }
-function fetchJsonWithRetry() {
+function t(key) { return key; }
+function fetchSelectedServers(url) {
   fetchCount += 1;
-  return Promise.resolve({ contributions: [] });
+  urls.push(url);
+  if (failNext) return Promise.reject(new Error('stats down'));
+  return Promise.resolve([{ payload: { contributions: [{ date: '2026-01-05' }] } }]);
 }
-function fetchSelectedServers() {
-  fetchCount += 1;
-  return Promise.resolve([{ payload: { contributions: [] } }]);
+function combineStatsPayloads(payloads) { return payloads[0]; }
+function fillMissingDays(contributions) { return [...contributions, { date: 'filled' }]; }
+function reconcileTodayProfileContribution(contributions, usage, start, end) {
+  reconciled.push({ dates: contributions.map((day) => day.date), usage: usage === lastUsageResponse, range: [start, end] });
+  return [...contributions, { date: 'today' }];
 }
-function combineStatsPayloads(rows) { return rows[0]; }
-function fillMissingDays(contributions) { return contributions; }
-function reconcileTodayProfileContribution(contributions) { return contributions; }
 function isOverviewActive() { return true; }
-function renderOverviewProfilePreview() { renderCount += 1; }
-function setOverviewProfileState() {}
+function renderOverviewProfilePreview(contributions) { rendered.push(contributions); }
+function setOverviewProfileState(state) { states.push(state); }
 """
         + scheduler
         + """
@@ -1107,20 +751,28 @@ async function flushPromises() {
   await Promise.resolve();
   await new Promise((resolve) => setImmediate(resolve));
 }
+const cached = () => (statsCache.default || []).map((day) => day.date);
 (async () => {
   scheduleStatsWarm();
   await flushPromises();
-  const initial = { fetchCount, renderCount, pending: statsWarmScheduled };
+  const initial = { fetchCount, renders: rendered.length, pending: statsWarmScheduled,
+    cache: cached(), handedOver: rendered[0] === statsCache.default };
 
   scheduleStatsWarm();
   await flushPromises();
-  const cached = { fetchCount, renderCount, pending: statsWarmScheduled };
+  const reused = { fetchCount, renders: rendered.length, pending: statsWarmScheduled };
 
+  failNext = true;
   scheduleStatsWarm(true);
   await flushPromises();
-  const forced = { fetchCount, renderCount, pending: statsWarmScheduled };
+  const failed = { fetchCount, renders: rendered.length, pending: statsWarmScheduled, states: [...states], cache: cached() };
 
-  process.stdout.write(JSON.stringify({ initial, cached, forced }));
+  failNext = false;
+  scheduleStatsWarm(true);
+  await flushPromises();
+  const forced = { fetchCount, renders: rendered.length, pending: statsWarmScheduled };
+
+  process.stdout.write(JSON.stringify({ initial, reused, failed, forced, urls, reconciled: reconciled[0] }));
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;
@@ -1128,18 +780,35 @@ async function flushPromises() {
 """,
         encoding="utf-8",
     )
-    result = subprocess.run(
-        ["node", str(harness)],
-        check=True,
-        capture_output=True,
-        encoding="utf-8",
-    )
-    assert json.loads(result.stdout) == {
-        "initial": {"fetchCount": 1, "renderCount": 1, "pending": False},
-        "cached": {"fetchCount": 1, "renderCount": 1, "pending": False},
-        "forced": {"fetchCount": 2, "renderCount": 2, "pending": False},
+    report = json.loads(run_node(harness))
+    contributions = ["2026-01-05", "filled", "today"]
+    assert report["initial"] == {
+        "fetchCount": 1,
+        "renders": 1,
+        "pending": False,
+        "cache": contributions,
+        "handedOver": True,
     }
+    assert report["reused"] == {"fetchCount": 1, "renders": 1, "pending": False}
+    assert report["failed"] == {
+        "fetchCount": 2,
+        "renders": 1,
+        "pending": False,
+        "states": ["error"],
+        "cache": contributions,
+    }
+    assert report["forced"] == {"fetchCount": 3, "renders": 2, "pending": False}
+    assert report["urls"] == ["/api/stats"] * 3
+    assert report["reconciled"] == {
+        "dates": ["2026-01-05", "filled"],
+        "usage": True,
+        "range": ["range-start", "range-end"],
+    }
+    # The callers that start and repaint it, which no harness here runs.
     assert "scheduleStatsWarm(forceRefresh);" in source
+    assert "renderOverviewProfilePreview();" in extract_js_function(
+        source, "function renderOverviewTab(data) {"
+    )
 
 
 @needs_node
@@ -1203,267 +872,872 @@ def test_today_usage_reconciles_the_profile_day_without_mutating_history(tmp_pat
     source = INDEX_HTML.read_text(encoding="utf-8")
     renderer = extract_js_function(source, "function renderOverviewTab(data) {")
     loader = extract_js_function(source, "async function loadStats(options = {}) {")
-    warmer = extract_js_function(source, "function scheduleStatsWarm(force = false) {")
+    # The warm path is run above; these two callers are not run anywhere.
     assert "reconcileTodayProfileContribution(" in renderer
     assert "reconcileTodayProfileContribution(" in loader
-    assert "reconcileTodayProfileContribution(" in warmer
 
 
-def test_overview_profile_summary_markup_and_style_contract():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    compact = re.sub(r"\s+", "", source)
-    required_ids = [
-        "overviewProfileSummary",
-        "overviewProfileTitle",
-        "overviewProfileOpen",
-        "overviewProfileLoading",
-        "overviewProfileUnavailable",
-        "overviewProfileReady",
-        "overviewProfileActiveDays",
-        "overviewProfileCurrentStreak",
-        "overviewProfileLongestStreak",
-        "overviewProfileScroller",
-        "overviewProfileModeDaily",
-        "overviewProfileModeWeekly",
-        "overviewProfileModeCumulative",
-        "overviewProfileActivityLabel",
-        "overviewProfileGridWrap",
-        "overviewProfileGrid",
-        "overviewProfileWeekHits",
-        "overviewProfileLegend",
-        "overviewProfileTooltip",
+# --- the two heatmaps on a stub DOM ------------------------------------------
+#
+# The Stats profile and the Overview band are drawn by renderProfileView and
+# renderOverviewProfilePreview into a page shaped like index.html's: six mode
+# buttons, two grids with their week-hit rows, two legends and the two tooltips
+# that live directly under <body>. Everything here is the page's own code; the
+# number formatters and fetches are stand-ins, and any fetch is recorded.
+
+PROFILE_VIEW_FUNCTIONS = [
+    *PROFILE_FUNCTIONS,
+    "function formatProfileMetricNumber(value) {",
+    "function formatProfileAggregateTooltip(aggregate, cumulative = false, milestonesEnabled = false) {",
+    "function formatProfileDayTooltip(day, milestonesEnabled = false) {",
+    "function getProfileActivityColor(level) {",
+    "function syncProfileMilestonePalette() {",
+    "function syncProfileMilestoneControls() {",
+    "function renderProfileActivityLegend(targetId, mode) {",
+    "function renderProfileActivityTooltipContent(tooltip, model) {",
+    "function resolveProfileActivityTooltip(target) {",
+    "function showProfileActivityTooltip(target, model) {",
+    "function hideProfileActivityTooltip(target) {",
+    "function bindProfileActivityTooltip(target, model) {",
+    "function renderProfileSummary(summary) {",
+    "function renderProfileMonths(today = new Date()) {",
+    "function setProfileColumnHover(weekIndex, active) {",
+    "function applyProfileMilestone(target, milestone) {",
+    "function renderProfileView() {",
+    "function setOverviewProfileState(state) {",
+    "function setOverviewProfileColumnHover(weekIndex, active) {",
+    "function syncProfileActivityModeControls() {",
+    "function renderOverviewProfilePreview(contributions = statsCache.default) {",
+    "function setProfileActivityMode(mode) {",
+    "function setProfileMilestonesEnabled(enabled) {",
+    "function isOverviewActive() {",
+    # Queued on the next frame by both renderers; the harness never runs the frame.
+    "function ensureProfileActivityInitialScroll() {",
+    "function ensureOverviewProfileInitialScroll() {",
+]
+
+
+def _profile_view_snippets(source: str) -> list[str]:
+    """The profile's module state, read as the page declares it (the milestone
+    switch starts from localStorage), and the six mode buttons' click wiring."""
+    return [
+        slice_statement(
+            source,
+            "const PROFILE_MILESTONES_STORAGE_KEY",
+            "let profileActivityDidInitialScroll = false;",
+        ),
+        slice_statement(
+            source,
+            "let activeProfileActivityTooltipTarget = null;",
+            "let profileActivityTooltipPositionFrame = 0;",
+        ),
+        "let overviewProfileDidInitialScroll = false;",
+        slice_statement(
+            source,
+            "document.getElementById('profileModeDaily').addEventListener(",
+            "document.getElementById('overviewProfileModeCumulative')"
+            ".addEventListener('click', () => setProfileActivityMode('cumulative'));",
+        ),
     ]
-    for element_id in required_ids:
-        assert f'id="{element_id}"' in source
 
-    assert source.index('id="modelChart"') < source.index('id="overviewProfileSummary"')
-    assert source.index('id="overviewProfileSummary"') < source.index('id="toolsTable"')
-    for key in [
-        "overviewProfileEyebrow",
-        "overviewProfileTitle",
-        "overviewProfileRange",
-        "viewFullProfile",
-        "overviewProfileUnavailable",
-    ]:
-        assert source.count(f"{key}: '") == 6
 
-    assert ".overview-profile-band{" in compact
-    assert "grid-template-columns:minmax(220px,260px)minmax(0,1fr)" in compact
-    assert ".overview-profile-copy{" in compact
-    assert "border-radius:0;background:none;box-shadow:none" in compact
-    assert ".overview-profile-copyh2{margin-top:7px;font-size:19px" in compact
-    assert ".overview-profile-open{" in compact
-    assert "padding:7px0" in compact
-    assert "border:0;background:transparent;box-shadow:none" in compact
-    assert ".overview-profile-metricsdd{margin:0;color:var(--overview-profile-tone);font-size:19px" in compact
-    assert ".overview-profile-mode{padding:6px10px;font-size:12px;" in compact
-    assert ".overview-activity-insight-kpi[data-tone=\"secondary\"]" in compact
-    assert ".overview-activity-insight-kpidd{margin:0;overflow:hidden;color:var(--overview-insight-tone);font-size:15px" in compact
-    assert (
-        ".overview-profile-grid-wrap{position:relative;min-width:595px;}"
-        in compact
+PROFILE_VIEW_PRELUDE = r"""
+let HEAT_COLORS = ['#h0', '#h1', '#h2', '#h3', '#h4', '#h5', '#h6', '#h7'];
+const statsCache = { default: null };
+const calendarState = { view: 'profile', contributions: [] };
+let statsLoaded = true;
+function formatTokenCount(value, includeUnit = false) { return `${Number(value) || 0}${includeUnit ? ' tokens' : ''}`; }
+function formatNumber(value) { return String(Number(value) || 0); }
+function formatCurrency(value) { return `$${(Number(value) || 0).toFixed(2)}`; }
+function formatShortDate(value) { return String(value || '—'); }
+function pluralDays(count) { return `${count} d`; }
+const fetched = [];
+function fetch(url) { fetched.push(String(url)); return new Promise(() => {}); }
+function fetchSelectedServers(url) { fetched.push(String(url)); return new Promise(() => {}); }
+function fetchJsonWithRetry(url) { fetched.push(String(url)); return new Promise(() => {}); }
+
+const PROFILE_TEST_MODES = ['Daily', 'Weekly', 'Cumulative'];
+document.body.append(
+  el('section', { id: 'overview-content', class: 'tab-content active' },
+    el('section', { id: 'overviewProfileSummary', class: 'surface overview-profile-band', 'data-state': 'loading' },
+      el('dd', { id: 'overviewProfileActiveDays' }),
+      el('dd', { id: 'overviewProfileCurrentStreak' }),
+      el('dd', { id: 'overviewProfileLongestStreak' }),
+      ...PROFILE_TEST_MODES.map((mode) => el('button', { id: `overviewProfileMode${mode}`, class: 'profile-activity-mode overview-profile-mode', 'aria-pressed': 'false' })),
+      el('div', { id: 'overviewProfileScroller' },
+        el('div', { id: 'overviewProfileGridWrap' },
+          el('div', { id: 'overviewProfileGrid' }),
+          el('div', { id: 'overviewProfileWeekHits' }))),
+      el('div', { id: 'overviewProfileLegend', class: 'profile-activity-legend overview-profile-legend' }))),
+  el('section', { id: 'stats-content', class: 'tab-content' },
+    el('div', { id: 'calendarProfileView' },
+      el('div', { class: 'profile-activity-shell' },
+        ...['RecordedTokens', 'PeakDay', 'ActiveDays', 'CurrentStreak', 'LongestStreak'].map((name) => el('dd', { id: `profileStat${name}` })),
+        ...PROFILE_TEST_MODES.map((mode) => el('button', { id: `profileMode${mode}`, class: 'profile-activity-mode', 'aria-pressed': 'false' })),
+        el('div', { id: 'profileActivityMonths' }),
+        el('div', { id: 'profileActivityScroller' },
+          el('div', { id: 'profileActivityGrid' }),
+          el('div', { id: 'profileActivityWeekHits' })),
+        el('div', { id: 'profileActivityLegend', class: 'profile-activity-legend' })))),
+  el('div', { id: 'overviewProfileTooltip', class: 'profile-activity-tooltip overview-profile-tooltip', role: 'tooltip' }),
+  el('div', { id: 'profileActivityTooltip', class: 'profile-activity-tooltip', role: 'tooltip' }),
+);
+document.getElementById('overviewProfileTooltip').hidden = true;
+document.getElementById('profileActivityTooltip').hidden = true;
+
+// A contribution `offset` days before today, all of it input tokens.
+function contribution(offset, tokens) {
+  const now = new Date();
+  return {
+    date: formatDateKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - offset)),
+    totals: { tokens, cost: 1, messages: 1 },
+    tokenBreakdown: { input: tokens, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+    sources: [],
+  };
+}
+function marked(id) {
+  return document.getElementById(id).children.filter((node) => node.hasAttribute('data-milestone')).length;
+}
+function milestoneState() {
+  return {
+    enabled: profileMilestonesEnabled,
+    stored: localStorage.getItem('tokdash-profile-milestones'),
+    toggles: document.querySelectorAll('.profile-milestone-toggle').map((toggle) => ({
+      legend: toggle.closest('.profile-activity-legend').id,
+      pressed: toggle.getAttribute('aria-pressed'),
+      label: toggle.getAttribute('aria-label'),
+      title: toggle.title,
+      legendFlag: toggle.closest('.profile-activity-legend').getAttribute('data-milestones-enabled'),
+    })),
+    marked: { profile: marked('profileActivityGrid'), overview: marked('overviewProfileGrid') },
+  };
+}
+function describeLegend(id) {
+  const legend = document.getElementById(id);
+  const [scale, divider, milestones, toggle] = legend.children;
+  const glyph = scale.children[1];
+  return {
+    mode: legend.dataset.mode,
+    label: legend.getAttribute('aria-label'),
+    parts: legend.children.map((child) => child.className),
+    less: scale.children[0].textContent,
+    more: scale.children[2].textContent,
+    glyph: glyph.className,
+    glyphHidden: glyph.getAttribute('aria-hidden'),
+    dividerHidden: divider.getAttribute('aria-hidden'),
+    items: glyph.children.map((item) => [item.className, item.style.background || null]),
+    badges: milestones.children.map((badge) => [badge.dataset.milestone, badge.textContent]),
+    toggle: toggle.children[0].textContent,
+    toggleLabel: toggle.getAttribute('aria-label'),
+  };
+}
+"""
+
+
+def _profile_view_script(body: str, *, prelude: str = "", functions: tuple[str, ...] = ()) -> str:
+    source = index_source()
+    return page_script(
+        [*PROFILE_VIEW_FUNCTIONS, *functions],
+        snippets=_profile_view_snippets(source),
+        prelude=prelude + PROFILE_VIEW_PRELUDE,
+        body=body,
+        i18n=True,
+        source=source,
     )
-    assert (
-        ".overview-profile-grid{display:grid;grid-auto-flow:column;"
-        "grid-template-columns:repeat(52,minmax(8px,1fr));"
-        "grid-template-rows:repeat(7,minmax(8px,1fr));"
-        "gap:3.5px;width:100%;}"
-        in compact
+
+
+@needs_node
+def test_one_mode_switch_redraws_both_heatmaps_and_presses_six_buttons(tmp_path: Path):
+    """The Stats profile and the Overview band share one mode.
+
+    A click on any of the six buttons redraws whichever views are on screen
+    from the stats already in hand (no fetch), presses the matching button in
+    both groups, and switches both legends; an unknown mode changes nothing.
+    """
+    body = """
+statsCache.default = [contribution(0, 1200000000), contribution(3, 5000)];
+const BUTTONS = ['profileModeDaily', 'profileModeWeekly', 'profileModeCumulative',
+  'overviewProfileModeDaily', 'overviewProfileModeWeekly', 'overviewProfileModeCumulative'];
+function view(prefix) {
+  const grid = document.getElementById(`${prefix}Grid`);
+  const hits = document.getElementById(`${prefix}WeekHits`);
+  return {
+    cells: grid.children.length,
+    cellTags: [...new Set(grid.children.map((cell) => cell.tagName))],
+    hits: hits.children.length,
+    hitsHidden: hits.hidden,
+    hitTooltips: [...new Set(hits.children.map((hit) => hit.dataset.profileTooltipId || null))],
+    legend: document.getElementById(`${prefix}Legend`).dataset.mode,
+  };
+}
+function snapshot() {
+  return {
+    mode: profileActivityMode,
+    pressed: BUTTONS.filter((id) => document.getElementById(id).getAttribute('aria-pressed') === 'true'),
+    profile: view('profileActivity'),
+    overview: view('overviewProfile'),
+  };
+}
+document.getElementById('overviewProfileModeWeekly').click();
+const weekly = snapshot();
+setProfileActivityMode('sideways');
+const ignored = snapshot();
+document.getElementById('profileModeDaily').click();
+const daily = snapshot();
+// Neither view on screen: the buttons follow, the grids wait for the next draw.
+document.getElementById('overview-content').classList.remove('active');
+calendarState.view = 'month';
+document.getElementById('profileModeCumulative').click();
+const offscreen = snapshot();
+// With no stats in hand the band says it is loading, unless its last load failed.
+const band = document.getElementById('overviewProfileSummary');
+band.dataset.state = 'error';
+renderOverviewProfilePreview(null);
+const afterError = band.dataset.state;
+band.dataset.state = 'ready';
+renderOverviewProfilePreview(null);
+const pending = { state: band.dataset.state, busy: band.getAttribute('aria-busy') };
+print({ weekly, ignored, daily, offscreen, afterError, pending, fetched });
+"""
+    report = run_page(tmp_path, "profile-modes", _profile_view_script(body))
+
+    aggregate = {"cells": 364, "cellTags": ["SPAN"], "hits": 52, "hitsHidden": False}
+    assert report["weekly"]["mode"] == "weekly"
+    assert report["weekly"]["pressed"] == ["profileModeWeekly", "overviewProfileModeWeekly"]
+    assert report["weekly"]["profile"] == {**aggregate, "hitTooltips": [None], "legend": "weekly"}
+    assert report["weekly"]["overview"] == {
+        **aggregate,
+        "hitTooltips": ["overviewProfileTooltip"],
+        "legend": "weekly",
+    }
+    assert report["ignored"] == report["weekly"]
+
+    daily = {"cells": 364, "cellTags": ["BUTTON"], "hits": 0, "hitsHidden": True, "hitTooltips": [], "legend": "daily"}
+    assert report["daily"]["pressed"] == ["profileModeDaily", "overviewProfileModeDaily"]
+    assert report["daily"]["profile"] == daily
+    assert report["daily"]["overview"] == daily
+
+    assert report["offscreen"]["mode"] == "cumulative"
+    assert report["offscreen"]["pressed"] == ["profileModeCumulative", "overviewProfileModeCumulative"]
+    assert report["offscreen"]["profile"] == daily
+    assert report["offscreen"]["overview"] == daily
+
+    assert report["afterError"] == "error"
+    assert report["pending"] == {"state": "loading", "busy": "true"}
+    assert report["fetched"] == []
+
+
+@needs_node
+def test_the_milestone_switch_starts_off_persists_and_redraws_both_views(tmp_path: Path):
+    """Milestones are opt-in: off until the reader turns them on, remembered in
+    localStorage, and either legend's switch redraws both heatmaps, so a 1B-token
+    day gains its tier in the Stats profile and the Overview band together."""
+    body = """
+currentLang = 'ja';
+statsCache.default = [contribution(0, 1200000000)];
+setProfileActivityMode('daily');
+const before = milestoneState();
+document.querySelector('#profileActivityLegend .profile-milestone-toggle').click();
+const on = milestoneState();
+document.querySelector('#overviewProfileLegend .profile-milestone-toggle').click();
+const off = milestoneState();
+print({ before, on, off, show: I18N.ja.showMilestones, hide: I18N.ja.hideMilestones });
+"""
+    report = run_page(tmp_path, "profile-milestones", _profile_view_script(body))
+    show, hide = report["show"], report["hide"]
+    assert show != "showMilestones" and hide != "hideMilestones"
+
+    def toggles(pressed: str, label: str) -> list[dict]:
+        return [
+            {"legend": legend, "pressed": pressed, "label": label, "title": label, "legendFlag": pressed}
+            for legend in ("overviewProfileLegend", "profileActivityLegend")
+        ]
+
+    assert report["before"] == {
+        "enabled": False,
+        "stored": None,
+        "toggles": toggles("false", show),
+        "marked": {"profile": 0, "overview": 0},
+    }
+    assert report["on"] == {
+        "enabled": True,
+        "stored": "on",
+        "toggles": toggles("true", hide),
+        "marked": {"profile": 1, "overview": 1},
+    }
+    assert report["off"] == {
+        "enabled": False,
+        "stored": "off",
+        "toggles": toggles("false", show),
+        "marked": {"profile": 0, "overview": 0},
+    }
+
+    remembered = run_page(
+        tmp_path,
+        "profile-milestones-remembered",
+        _profile_view_script(
+            """
+statsCache.default = [contribution(0, 1200000000)];
+setProfileActivityMode('daily');
+print(milestoneState());
+""",
+            prelude="localStorage.setItem('tokdash-profile-milestones', 'on');\n",
+        ),
     )
-    assert (
-        ".overview-profile-week-hits{"
-        "grid-template-columns:repeat(52,minmax(8px,1fr));"
-        "gap:3.5px;}"
-        in compact
+    assert remembered["enabled"] is True
+    assert {toggle["pressed"] for toggle in remembered["toggles"]} == {"true"}
+    assert remembered["marked"] == {"profile": 1, "overview": 1}
+
+
+@needs_node
+def test_the_legend_draws_swatches_or_bars_for_its_mode(tmp_path: Path):
+    """Daily reads as five heat swatches, the aggregate modes as five bars; the
+    milestone badges and the switch follow; every label is the current
+    language's and is set as text."""
+    body = """
+currentLang = 'ja';
+renderProfileActivityLegend('profileActivityLegend', 'daily');
+const daily = describeLegend('profileActivityLegend');
+renderProfileActivityLegend('profileActivityLegend', 'weekly');
+const weekly = describeLegend('profileActivityLegend');
+renderProfileActivityLegend('profileActivityLegend', 'sideways');
+const fallback = describeLegend('profileActivityLegend');
+renderProfileActivityLegend('noSuchLegend', 'daily');
+print({
+  daily, weekly, fallback,
+  ja: { less: I18N.ja.less, more: I18N.ja.more, legend: I18N.ja.activityLegend,
+        milestones: I18N.ja.milestones, show: I18N.ja.showMilestones },
+  innerHTML: __innerHTMLWrites.length,
+});
+"""
+    report = run_page(tmp_path, "profile-legend", _profile_view_script(body))
+    ja = report["ja"]
+    shared = {
+        "label": ja["legend"],
+        "parts": [
+            "profile-activity-legend-scale",
+            "profile-activity-legend-divider",
+            "profile-activity-legend-milestones",
+            "profile-milestone-toggle",
+        ],
+        "less": ja["less"],
+        "more": ja["more"],
+        "glyphHidden": "true",
+        "dividerHidden": "true",
+        "badges": [["1", "100M"], ["2", "300M"], ["3", "500M"], ["4", "1B"]],
+        "toggle": ja["milestones"],
+        "toggleLabel": ja["show"],
+    }
+    # Levels 0-4 spread over the eight-step heat ramp.
+    swatches = [["profile-activity-legend-swatch", color] for color in ("#h0", "#h2", "#h4", "#h5", "#h7")]
+    assert report["daily"] == {
+        **shared,
+        "mode": "daily",
+        "glyph": "profile-activity-legend-glyph profile-activity-legend-swatches",
+        "items": swatches,
+    }
+    assert report["weekly"] == {
+        **shared,
+        "mode": "weekly",
+        "glyph": "profile-activity-legend-glyph profile-activity-legend-bars",
+        "items": [["profile-activity-legend-bar", None]] * 5,
+    }
+    assert report["fallback"] == report["daily"]
+    assert report["innerHTML"] == 0
+
+
+@needs_node
+def test_a_language_switch_redraws_both_legends_in_the_current_mode(tmp_path: Path):
+    """applyI18n redraws the two legends itself: their accessible name and the
+    switch label are written by the renderer, not by a data-i18n hook, and the
+    mode is whatever the reader last picked."""
+    body = """
+renderProfileActivityLegend('profileActivityLegend', 'daily');
+renderProfileActivityLegend('overviewProfileLegend', 'daily');
+profileActivityMode = 'cumulative';
+currentLang = 'ko';
+applyI18n();
+print({
+  legends: ['profileActivityLegend', 'overviewProfileLegend'].map(describeLegend),
+  ko: { legend: I18N.ko.activityLegend, milestones: I18N.ko.milestones, show: I18N.ko.showMilestones },
+});
+"""
+    script = _profile_view_script(body, prelude=APPLY_I18N_STATE, functions=APPLY_I18N_FUNCTIONS)
+    report = run_page(tmp_path, "profile-legend-i18n", script)
+    ko = report["ko"]
+    for legend in report["legends"]:
+        assert legend["mode"] == "cumulative"
+        assert legend["glyph"].endswith("profile-activity-legend-bars")
+        assert legend["label"] == ko["legend"]
+        assert legend["toggle"] == ko["milestones"]
+        assert legend["toggleLabel"] == ko["show"]
+
+
+@needs_node
+def test_a_tooltip_shows_its_tier_badge_and_keeps_every_label_as_text(tmp_path: Path):
+    """The tooltip is built from elements: the tier badge and data-milestone come
+    and go with the model, a label that looks like markup stays text, and a cell
+    shows the tooltip it names (the Overview's) or the Stats one by default."""
+    body = """
+const hostile = '<img src=x onerror=alert(1)>';
+I18N.en.total = hostile;
+const tooltip = document.getElementById('overviewProfileTooltip');
+const breakdown = { input: 1, output: 1, cacheRead: 1, cacheWrite: 1, reasoning: 1 };
+const high = formatProfileAggregateTooltip(
+  { startDate: '2026-07-20', endDate: '2026-07-26', totals: { tokens: 1000000000, cost: 1 }, tokenBreakdown: breakdown }, false, true);
+const plain = formatProfileAggregateTooltip(
+  { startDate: '2026-07-27', endDate: '2026-07-27', totals: { tokens: 5, cost: 0 }, tokenBreakdown: breakdown }, false, true);
+function describe(node) {
+  const [header, body] = node.children;
+  return {
+    milestone: node.dataset.milestone ?? null,
+    header: header.children.map((part) => [part.className, part.dataset.milestone ?? null, part.textContent]),
+    rows: body.children.map((row) => ({
+      key: row.dataset.key, tone: row.dataset.tone, prominent: row.dataset.prominent ?? null,
+      label: row.children[1].textContent, labelNodes: row.children[1].children.length,
+      value: row.children[2].textContent,
+    })),
+  };
+}
+renderProfileActivityTooltipContent(tooltip, high);
+const withBadge = describe(tooltip);
+renderProfileActivityTooltipContent(tooltip, plain);
+const withoutBadge = describe(tooltip);
+
+const overviewCell = el('button', { 'data-profile-tooltip-id': 'overviewProfileTooltip' });
+const statsCell = el('button');
+document.body.append(overviewCell, statsCell);
+bindProfileActivityTooltip(overviewCell, high);
+bindProfileActivityTooltip(statsCell, plain);
+const visible = () => ({
+  overview: !document.getElementById('overviewProfileTooltip').hidden,
+  stats: !document.getElementById('profileActivityTooltip').hidden,
+});
+fire(overviewCell, 'mouseenter');
+const hovered = { ...visible(), describedBy: overviewCell.getAttribute('aria-describedby'),
+  label: overviewCell.getAttribute('aria-label') };
+fire(overviewCell, 'mouseleave');
+const left = { ...visible(), describedBy: overviewCell.getAttribute('aria-describedby') };
+fire(statsCell, 'focus');
+const focused = { ...visible(), describedBy: statsCell.getAttribute('aria-describedby'),
+  title: document.getElementById('profileActivityTooltip').children[0].textContent };
+print({ hostile, withBadge, withoutBadge, hovered, left, focused,
+  accessible: high.accessibleText, innerHTML: __innerHTMLWrites.length });
+"""
+    report = run_page(tmp_path, "profile-tooltip-content", _profile_view_script(body))
+
+    badge = report["withBadge"]
+    assert badge["milestone"] == "4"
+    assert badge["header"] == [
+        ["profile-activity-tooltip-title", None, "2026-07-20 → 2026-07-26"],
+        ["profile-activity-tooltip-badge", "4", "1B+"],
+    ]
+    assert [row["key"] for row in badge["rows"]] == [
+        "total", "input", "output", "cacheRead", "cacheWrite", "reasoning", "estimatedCost",
+    ]
+    total = badge["rows"][0]
+    assert total["tone"] == "milestone-4" and total["prominent"] == "true"
+    assert total["label"] == report["hostile"] and total["labelNodes"] == 0
+
+    plain = report["withoutBadge"]
+    assert plain["milestone"] is None
+    assert [part[0] for part in plain["header"]] == ["profile-activity-tooltip-title"]
+    assert plain["rows"][0]["tone"] == "primary"
+
+    assert report["hovered"] == {
+        "overview": True,
+        "stats": False,
+        "describedBy": "overviewProfileTooltip",
+        "label": report["accessible"],
+    }
+    assert report["left"] == {"overview": False, "stats": False, "describedBy": None}
+    assert report["focused"] == {
+        "overview": False,
+        "stats": True,
+        "describedBy": "profileActivityTooltip",
+        "title": "2026-07-27",
+    }
+    assert report["innerHTML"] == 0
+
+
+def test_every_milestone_tier_has_its_styles():
+    """Tiers 1-4 each have a palette slot, a cell aura and a tooltip tone.
+
+    The tier a cell carries is computed, so a missing rule only shows as one tier
+    quietly looking like no tier at all.
+    """
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    compact = re.sub(r"\s+", "", source)
+    for level in range(1, 5):
+        assert f"--profile-milestone-{level}:" in compact
+        assert f'[data-milestone="{level}"]' in source
+        assert f'[data-tone="milestone-{level}"]' in source
+
+
+@needs_node
+def test_milestone_auras_follow_the_active_heat_palette(tmp_path: Path):
+    """A style or light/dark switch repaints the four tier colours on every shell
+    from the new heat ramp, picked the way the heatmap picks its levels."""
+    source = index_source()
+    script = page_script(
+        [
+            "function isDark() {",
+            "function getHeatColors(uiTheme, dark) {",
+            "function getProfileActivityColor(level) {",
+            "function syncProfileMilestonePalette() {",
+            "function applyStyleTheme(theme) {",
+            "function applyTheme(theme) {",
+        ],
+        snippets=[
+            THEME_CONFIG_JS.read_text(encoding="utf-8"),
+            slice_statement(
+                source,
+                "const THEME_CONFIG = window.TOKDASH_THEME_CONFIG || {};",
+                "let HEAT_COLORS = [...HEAT_COLORS_LIGHT];",
+            ),
+            slice_line(source, "const VALID_STYLE_THEMES = ["),
+        ],
+        prelude="""
+document.body.append(
+  el('div', { class: 'profile-activity-shell' }),
+  el('section', { class: 'overview-profile-band' }),
+  el('div', { class: 'profile-activity-tooltip' }),
+);
+""",
+        body="""
+const shells = document.querySelectorAll('.profile-activity-shell, .overview-profile-band, .profile-activity-tooltip');
+const read = () => shells.map((shell) => [1, 2, 3, 4].map((level) => shell.style.getPropertyValue(`--profile-milestone-${level}`)));
+applyStyleTheme('paper');
+const paperLight = read();
+applyTheme('dark');
+const paperDark = read();
+applyStyleTheme('classic');
+const classicDark = read();
+print({ paperLight, paperDark, classicDark });
+""",
+        source=source,
     )
-    assert ".overview-profile-cell{border-radius:2px" in compact
-    assert "overviewProfileRange: 'Past 52 weeks'" in source
-    assert "overviewProfileRange: '过去 52 周'" in source
-    assert source.count('class="profile-activity-mode overview-profile-mode"') == 3
+    report = run_page(tmp_path, "profile-milestone-palette", script)
+    paper_light, paper_dark = _heat_palette_for("paper")
+    _, classic_dark = _heat_palette_for("classic")
+    tiers = (2, 4, 5, 7)  # levels 1-4 of 0-4 over an eight-step ramp
+    for name, palette in (
+        ("paperLight", paper_light),
+        ("paperDark", paper_dark),
+        ("classicDark", classic_dark),
+    ):
+        assert report[name] == [[palette[index] for index in tiers]] * 3, name
+
+
+@needs_node
+def test_the_overview_profile_link_opens_the_profile_without_resetting_it(tmp_path: Path):
+    """"View full profile" lands on the Stats profile with its navigation and
+    mode kept; any other way into Stats starts from a fresh navigation."""
+    source = index_source()
+    script = page_script(
+        ["function openOverviewProfile() {", "function activateDashboardTab(tab) {"],
+        snippets=[slice_line(source, "getElementById('overviewProfileOpen')")],
+        prelude="""
+document.body.append(
+  el('button', { class: 'tab-btn', 'data-tab': 'overview', 'aria-selected': 'true' }),
+  el('button', { class: 'tab-btn', 'data-tab': 'stats', 'aria-selected': 'false' }),
+  el('a', { class: 'sidebar-nav-item active', 'data-tab-target': 'overview' }),
+  el('a', { class: 'sidebar-nav-item', 'data-tab-target': 'stats' }),
+  el('section', { id: 'overview-content', class: 'tab-content active' }, el('button', { id: 'overviewProfileOpen' })),
+  el('section', { id: 'stats-content', class: 'tab-content' }),
+  el('div', { id: 'overviewProfileTooltip' }),
+);
+let preserveStatsNavigationOnNextActivation = false;
+let currentDashboardTab = 'overview';
+const usageReportState = { active: false, loaded: true, staleReread: false };
+const usageReportSpeedState = { active: false };
+let quotaLoaded = true;
+let pricingDbLoaded = true;
+let profileActivityMode = 'weekly';
+let monthCursor = 'month-cursor';
+let yearCursor = 'year-cursor';
+""",
+        body="""
+document.getElementById('overviewProfileOpen').click();
+const opened = {
+  order: callNames().filter((name) => name === 'loadStats' || name === 'setView'),
+  loadStats: calls('loadStats'),
+  setView: calls('setView'),
+  active: document.querySelectorAll('.tab-content.active').map((node) => node.id),
+  selected: document.querySelector('.tab-btn[data-tab="stats"]').getAttribute('aria-selected'),
+  tooltipHidden: document.getElementById('overviewProfileTooltip').hidden,
+  kept: [profileActivityMode, monthCursor, yearCursor],
+  armed: preserveStatsNavigationOnNextActivation,
+};
+activateDashboardTab('overview');
+activateDashboardTab('stats');
+print({ opened, later: calls('loadStats') });
+""",
+        source=source,
+    )
+    report = run_page(tmp_path, "overview-profile-open", script)
+    assert report["opened"] == {
+        "order": ["loadStats", "setView"],
+        "loadStats": [[{"preserveNavigation": True}]],
+        "setView": [["profile"]],
+        "active": ["stats-content"],
+        "selected": "true",
+        "tooltipHidden": True,
+        "kept": ["weekly", "month-cursor", "year-cursor"],
+        "armed": False,
+    }
+    assert report["later"] == [[{"preserveNavigation": True}], [{"preserveNavigation": False}]]
+
+
+@needs_node
+def test_the_overview_band_scrolls_to_today_once_per_overflow(tmp_path: Path):
+    """The band opens scrolled to today, then leaves the reader's scroll alone
+    on every resize, until a window wide enough to fit it re-arms the jump."""
+    source = index_source()
+    script = page_script(
+        ["function ensureOverviewProfileInitialScroll() {"],
+        snippets=[
+            "let overviewProfileDidInitialScroll = false;",
+            slice_line(source, "window.addEventListener('resize', ensureOverviewProfileInitialScroll"),
+        ],
+        prelude="""
+const scroller = el('div', { id: 'overviewProfileScroller' });
+document.body.append(scroller);
+""",
+        body="""
+const steps = [];
+const step = () => steps.push([scroller.scrollLeft, overviewProfileDidInitialScroll]);
+scroller.scrollWidth = 1200;
+scroller.clientWidth = 600;
+ensureOverviewProfileInitialScroll();
+step();
+scroller.scrollLeft = 100;
+window.dispatchWindowEvent('resize');
+step();
+scroller.clientWidth = 1400;
+window.dispatchWindowEvent('resize');
+step();
+scroller.clientWidth = 600;
+window.dispatchWindowEvent('resize');
+step();
+print(steps);
+""",
+        source=source,
+    )
+    assert run_page(tmp_path, "overview-profile-scroll", script) == [
+        [1200, True],   # first draw: scrolled to today
+        [100, True],    # a resize keeps where the reader scrolled
+        [100, False],   # wide enough to fit: re-armed, nothing moved
+        [1200, True],   # narrow again: back to today
+    ]
+
+
+class _ParentScanner(HTMLParser):
+    """Record the parent tag of every element that carries an id."""
+
+    VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.stack: list[str] = []
+        self.parents: dict[str, str] = {}
+
+    def handle_starttag(self, tag, attrs):  # type: ignore[no-untyped-def]
+        element_id = dict(attrs).get("id")
+        if element_id:
+            self.parents[element_id] = self.stack[-1] if self.stack else ""
+        if tag not in self.VOID:
+            self.stack.append(tag)
+
+    def handle_endtag(self, tag):  # type: ignore[no-untyped-def]
+        if tag in self.stack:
+            while self.stack.pop() != tag:
+                pass
+
+
+def test_profile_and_overview_markup_order_and_portals():
+    """Where the profile pieces sit in the page, which no render can move.
+
+    The band sits between the model chart and the tools table, each legend under
+    its grid with the activity insights after it, the overview mode buttons are
+    named by their visible label, and both tooltips are children of <body>: a
+    tooltip inside a filtered or transformed card is clipped by it and positioned
+    against it instead of the viewport.
+    """
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    order = [
+        ('id="modelChart"', 'id="overviewProfileSummary"'),
+        ('id="overviewProfileSummary"', 'id="toolsTable"'),
+        ('id="overviewProfileGridWrap"', 'id="overviewProfileLegend"'),
+        ('id="profileActivityLegend"', 'id="profileActivityInsights"'),
+        ('id="overviewProfileLegend"', 'id="overviewActivityInsights"'),
+    ]
+    for before, after in order:
+        assert source.index(before) < source.index(after), f"{before} must come before {after}"
     assert 'aria-labelledby="overviewProfileActivityLabel"' in source
-    assert 'aria-label="Activity aggregation"' not in source
-    assert ".overview-profile-mode{" in compact
-    assert 'id="overviewProfileWeekHits"' in source
-    assert "@media(max-width:800px)" in compact
-    assert ".overview-profile-cell{transform:none!important;}" in compact
+
+    # The markup ends where the main <script> (the one holding applyI18n) begins.
+    scanner = _ParentScanner()
+    scanner.feed(source[: source.rfind("<script>", 0, source.index("function applyI18n()"))])
+    for tooltip in ("overviewProfileTooltip", "profileActivityTooltip"):
+        assert scanner.parents.get(tooltip) == "body", (
+            f"#{tooltip} sits in <{scanner.parents.get(tooltip)}>, not directly in <body>"
+        )
 
 
-def test_overview_profile_modes_share_state_and_render_aggregate_hits_contract():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    overview_renderer = extract_js_function(
-        source,
-        "function renderOverviewProfilePreview(contributions = statsCache.default) {",
+@needs_node
+def test_activity_insights_share_one_request_and_label_themselves(tmp_path: Path):
+    """Both insight panels render from one /api/activity-insights request.
+
+    A second load while one is in flight reuses it, a loaded answer is reused
+    until a forced refresh, and the profile ranks at most five tools, each name
+    set as text. The ranking's and the Overview panel's accessible names come
+    from this render pass in the current language (the markup carries no
+    data-i18n hook for them), and a failed load says so in both panels.
+    """
+    source = index_source()
+    script = page_script(
+        [
+            "function safeActivityNumber(value) {",
+            "function formatActivityShare(value) {",
+            "function formatActivityEffort(effort) {",
+            "function buildActivityInsightValues(data) {",
+            "function createActivityInsightKpi(label, value, tone, compact = false) {",
+            "function formatActivityCoverage(data) {",
+            "function renderProfileActivityInsights() {",
+            "function renderOverviewActivityInsights() {",
+            "function renderActivityInsights() {",
+            "async function loadActivityInsights(options = {}) {",
+            "function renderLoadingPlaceholder(element, label = t('loading')) {",
+        ],
+        prelude="""
+function formatNumber(value) { return String(Number(value) || 0); }
+const activityInsightsState = { status: 'idle', data: null, promise: null };
+const fetched = [];
+let pendingFetch = null;
+function fetchSelectedServers(url) {
+  fetched.push(url);
+  return new Promise((resolve, reject) => { pendingFetch = { resolve, reject }; });
+}
+function fetch(url) { fetched.push(`fetch:${url}`); return new Promise(() => {}); }
+function combineInsightsPayloads(payloads) { return payloads[0]; }
+document.body.append(
+  el('section', { id: 'profileActivityInsights' },
+    el('dl', { id: 'profileActivityInsightsKpis' }),
+    el('p', { id: 'profileActivityCoverage' }),
+    el('ol', { id: 'profileActivityToolRanking' })),
+  el('section', { id: 'overviewActivityInsights' },
+    el('dl', { id: 'overviewActivityInsightsValues' }),
+    el('p', { id: 'overviewActivityInsightsState' })),
+);
+function kpis(id) {
+  return document.getElementById(id).children.map((kpi) => [text(kpi.querySelector('dt')), text(kpi.querySelector('dd'))]);
+}
+function snapshot() {
+  const ranking = document.getElementById('profileActivityToolRanking');
+  const overview = document.getElementById('overviewActivityInsights');
+  return {
+    states: [document.getElementById('profileActivityInsights').dataset.state, overview.dataset.state],
+    busy: overview.getAttribute('aria-busy'),
+    labels: [ranking.getAttribute('aria-label'), overview.getAttribute('aria-label')],
+    profileText: text(document.getElementById('profileActivityInsightsKpis')),
+    note: text(document.getElementById('overviewActivityInsightsState')),
+    tools: ranking.children.map((row) => [row.children[0].textContent, row.children[0].children.length]),
+  };
+}
+""",
+        i18n=True,
+        body="""
+currentLang = 'ja';
+const hostile = '<img src=x onerror=alert(1)>';
+const payload = {
+  recorded_chats: { value: 12 },
+  reasoning: { most_used: { effort: 'xhigh', share: 0.5 } },
+  tools: {
+    total_calls: 70,
+    most_used: { name: 'exec', share: 0.3 },
+    distribution: [hostile, 'exec', 'read', 'write', 'grep', 'glob', 'edit']
+      .map((name) => ({ name, count: 10, share: 0.1 })),
+  },
+};
+const first = loadActivityInsights();
+const second = loadActivityInsights();
+const loading = { ...snapshot(), fetched: [...fetched] };
+pendingFetch.resolve([{ payload }]);
+await Promise.all([first, second]);
+const ready = { ...snapshot(), profile: kpis('profileActivityInsightsKpis'), overview: kpis('overviewActivityInsightsValues') };
+await loadActivityInsights();
+const reused = [...fetched];
+const forced = loadActivityInsights({ force: true });
+pendingFetch.resolve([{ payload }]);
+await forced;
+activityInsightsState.data = null;
+const failing = loadActivityInsights({ force: true });
+pendingFetch.reject(new Error('insights down'));
+await failing.catch(() => {});
+const failed = snapshot();
+currentLang = 'ko';
+renderActivityInsights();
+const korean = snapshot().labels;
+const efforts = {};
+for (const lang of Object.keys(I18N)) {
+  currentLang = lang;
+  efforts[lang] = {
+    got: ['xhigh', 'high', 'medium', 'low', 'turbo'].map(formatActivityEffort),
+    want: [I18N[lang].effortXhigh, I18N[lang].effortHigh, I18N[lang].effortMedium, I18N[lang].effortLow, 'turbo'],
+  };
+}
+const words = (lang) => Object.fromEntries(['activityTopTools', 'activityInsightsTitle', 'activityRecordedChats',
+  'activityReasoning', 'activityToolCalls', 'activityTopTool', 'activityUnavailable', 'activityLocalScope',
+  'effortXhigh', 'loading'].map((key) => [key, I18N[lang][key]]));
+print({ hostile, loading, ready, reused, fetched, failed, korean, efforts, ja: words('ja'), ko: words('ko'),
+  innerHTML: __innerHTMLWrites.length });
+""",
+        source=source,
     )
-    profile_renderer = extract_js_function(source, "function renderProfileView() {")
-    setter = extract_js_function(source, "function setProfileActivityMode(mode) {")
-    syncer = extract_js_function(
-        source,
-        "function syncProfileActivityModeControls() {",
-    )
+    report = run_page(tmp_path, "activity-insights-panels", script)
+    ja, ko = report["ja"], report["ko"]
 
-    assert "buildOverviewProfilePreview(contributions, new Date(), profileActivityMode)" in overview_renderer
-    assert "profileActivityMode === 'daily' ? 'button' : 'span'" in overview_renderer
-    assert "overviewProfileWeekHits" in overview_renderer
-    assert "formatProfileAggregateTooltip(" in overview_renderer
-    assert "profileMilestonesEnabled" in overview_renderer
-    assert "setOverviewProfileColumnHover(weekIndex, true)" in overview_renderer
-    assert "applyProfileMilestone(hit, milestone);" in overview_renderer
-    assert "fetch(" not in overview_renderer
-    assert "syncProfileActivityModeControls();" in overview_renderer
-    assert "syncProfileActivityModeControls();" in profile_renderer
-    assert "syncProfileActivityModeControls();" in setter
-    assert "if (isOverviewActive()) renderOverviewProfilePreview();" in setter
-    assert "fetch(" not in setter
-    for element_id in [
-        "profileModeDaily",
-        "profileModeWeekly",
-        "profileModeCumulative",
-        "overviewProfileModeDaily",
-        "overviewProfileModeWeekly",
-        "overviewProfileModeCumulative",
-    ]:
-        assert element_id in syncer
-    for element_id in [
-        "overviewProfileModeDaily",
-        "overviewProfileModeWeekly",
-        "overviewProfileModeCumulative",
-    ]:
-        assert f"document.getElementById('{element_id}').addEventListener" in source
+    loading = report["loading"]
+    assert loading["states"] == ["loading", "loading"] and loading["busy"] == "true"
+    assert loading["note"] == ja["loading"]
+    assert loading["fetched"] == ["/api/activity-insights"]
 
+    ready = report["ready"]
+    assert ready["states"] == ["ready", "ready"] and ready["busy"] == "false"
+    assert ready["labels"] == [ja["activityTopTools"], ja["activityInsightsTitle"]]
+    figures = [
+        [ja["activityRecordedChats"], "12"],
+        [ja["activityReasoning"], f"{ja['effortXhigh']} · 50%"],
+        [ja["activityToolCalls"], "70"],
+        [ja["activityTopTool"], "exec · 30%"],
+    ]
+    assert ready["profile"] == figures
+    assert ready["overview"] == figures
+    assert ready["note"] == ja["activityLocalScope"]
+    assert ready["tools"] == [
+        [report["hostile"], 0], ["exec", 0], ["read", 0], ["write", 0], ["grep", 0],
+    ]
 
-def test_overview_profile_legend_reuses_mode_and_scroller_contract():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    compact = re.sub(r"\s+", "", source)
+    assert report["reused"] == ["/api/activity-insights"]
+    assert report["fetched"] == [
+        "/api/activity-insights",
+        "/api/activity-insights?refresh=1",
+        "/api/activity-insights?refresh=1",
+    ]
+    failed = report["failed"]
+    assert failed["states"] == ["error", "error"]
+    assert failed["profileText"] == ja["activityUnavailable"]
+    assert failed["note"] == ja["activityUnavailable"]
+    assert failed["tools"] == []
+    assert report["korean"] == [ko["activityTopTools"], ko["activityInsightsTitle"]]
 
-    assert 'id="overviewProfileLegend"' in source
-    assert source.index('id="overviewProfileGridWrap"') < source.index(
-        'id="overviewProfileLegend"'
-    ) < source.index('id="overviewProfileTooltip"')
-    assert ".overview-profile-legend{" in compact
-
-    renderer = extract_js_function(
-        source,
-        "function renderOverviewProfilePreview(contributions = statsCache.default) {",
-    )
-    assert (
-        "renderProfileActivityLegend('overviewProfileLegend', profileActivityMode);"
-        in renderer
-    )
-    assert "fetch(" not in renderer
-
-    i18n = extract_js_function(source, "function applyI18n() {")
-    assert "renderProfileActivityLegend('profileActivityLegend', profileActivityMode);" in i18n
-    assert "renderProfileActivityLegend('overviewProfileLegend', profileActivityMode);" in i18n
-
-
-def test_overview_profile_navigation_preserves_profile_state_contract():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    activator = extract_js_function(source, "function activateDashboardTab(tab) {")
-    opener = extract_js_function(source, "function openOverviewProfile() {")
-
-    assert "content.classList.add('active');" in activator
-    assert "const preserveNavigation = preserveStatsNavigationOnNextActivation;" in activator
-    assert "preserveStatsNavigationOnNextActivation = false;" in activator
-    assert "loadStats({ preserveNavigation });" in activator
-    assert "preserveStatsNavigationOnNextActivation = true;" in opener
-    assert "activateDashboardTab('stats');" in opener
-    assert "setView('profile');" in opener
-    assert "profileActivityMode =" not in opener
-    assert "monthCursor =" not in opener
-    assert "yearCursor =" not in opener
-    assert "addEventListener('click', openOverviewProfile)" in source
-
-
-def test_overview_profile_resize_rearms_initial_scroll_contract():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    helper = extract_js_function(
-        source, "function ensureOverviewProfileInitialScroll() {"
-    )
-
-    no_overflow = "if (scroller.scrollWidth <= scroller.clientWidth) {"
-    assert no_overflow in helper
-    assert "overviewProfileDidInitialScroll = false;" in helper
-    assert helper.index(no_overflow) < helper.index(
-        "if (overviewProfileDidInitialScroll) return;"
-    )
-    assert (
-        "window.addEventListener('resize', ensureOverviewProfileInitialScroll, "
-        "{ passive: true });"
-    ) in source
-
-
-def test_activity_insights_profile_and_overview_markup_contract():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    for element_id in (
-        "profileActivityInsights",
-        "profileActivityInsightsKpis",
-        "profileActivityCoverage",
-        "profileActivityToolRanking",
-        "overviewActivityInsights",
-        "overviewActivityInsightsValues",
-        "overviewActivityInsightsState",
-    ):
-        assert f'id="{element_id}"' in source
-    assert source.index('id="profileActivityLegend"') < source.index(
-        'id="profileActivityInsights"'
-    )
-    assert source.index('id="overviewProfileLegend"') < source.index(
-        'id="overviewActivityInsights"'
-    )
-
-
-def test_activity_insights_use_one_shared_fetch_and_limit_profile_to_five_tools():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    loader = extract_js_function(
-        source, "async function loadActivityInsights(options = {}) {"
-    )
-    profile = extract_js_function(
-        source, "function renderProfileActivityInsights() {"
-    )
-    overview = extract_js_function(
-        source, "function renderOverviewActivityInsights() {"
-    )
-
-    assert source.count("/api/activity-insights") >= 1
-    assert "force ? '?refresh=1' : ''" in loader
-    assert "fetchSelectedServers(url)" in loader
-    assert "activityInsightsState.promise" in loader
-    assert ".slice(0, 5)" in profile
-    assert "fetch(" not in profile
-    assert "fetch(" not in overview
-    assert "innerHTML" not in profile
-    assert "innerHTML" not in overview
-    assert "textContent" in profile
-    assert "textContent" in overview
-
-
-def test_activity_insights_localization_states_and_responsive_contract():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    compact = re.sub(r"\s+", "", source)
-    for key in (
-        "activityInsightsTitle",
-        "activityRecordedChats",
-        "activityReasoning",
-        "activityToolCalls",
-        "activityTopTool",
-        "activityCoverage",
-        "activityNoData",
-        "activityUnavailable",
-        "activityLocalScope",
-        "effortXhigh",
-    ):
-        assert source.count(f"{key}: '") == 6
-    assert "@media(max-width:768px)" in compact
-    assert (
-        ".profile-activity-insights-kpis{display:grid;"
-        "grid-template-columns:repeat(4,minmax(0,1fr))" in compact
-    )
-    assert (
-        ".profile-activity-insights-kpis,.overview-activity-insights-values"
-        "{grid-template-columns:repeat(2,minmax(0,1fr))" in compact
-    )
-    assert ".overview-activity-insights{background:transparent" in compact
-    assert ".overview-profile-grid-wrap{position:relative;min-width:595px;" in compact
+    # The effort labels are looked up through a variable, which the parity test
+    # cannot see: each language must name all four.
+    for lang, row in report["efforts"].items():
+        assert row["got"] == row["want"], lang
+        assert not any(label.startswith("effort") for label in row["got"]), lang
+    assert report["innerHTML"] == 0
 
 
 def _run_activity_insights_js(
@@ -1490,26 +1764,13 @@ def _run_activity_insights_js(
         + "process.stdout.write(JSON.stringify(result));\n",
         encoding="utf-8",
     )
-    result = subprocess.run(
-        [
-            "node",
-            str(harness),
-            json.dumps(payload),
-            json.dumps(
-                labels
-                or {
-                    "effortXhigh": "Extra High",
-                    "effortHigh": "High",
-                    "effortMedium": "Medium",
-                    "effortLow": "Low",
-                }
-            ),
-        ],
-        check=True,
-        capture_output=True,
-        encoding="utf-8",
-    )
-    return json.loads(result.stdout)
+    labels = labels or {
+        "effortXhigh": "Extra High",
+        "effortHigh": "High",
+        "effortMedium": "Medium",
+        "effortLow": "Low",
+    }
+    return json.loads(run_node(harness, json.dumps(payload), json.dumps(labels)))
 
 
 def test_activity_insights_display_values_cover_full_partial_and_unknown_effort(

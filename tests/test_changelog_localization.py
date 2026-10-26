@@ -5,9 +5,11 @@ English is canonical: `docs/development/CHANGELOG.md` is the full record and
 translation shipped today, and it has two halves that both have to line up with English:
 the shipped sidecar the dashboard overlays, and the docs page a GitHub Release links.
 
-Every test here is a drift detector, not a behaviour test: the app renders English when a
-translation is missing, so a stale Chinese file never breaks a user. It does make the
-Chinese view lie about the newest release, which is what these catch.
+The app renders English when a translation is missing, so a stale Chinese file never
+breaks a user. It does make the Chinese view lie about the newest release, so most tests
+here are drift detectors that catch exactly that. One runs the drawer's own code under
+node, on the stub DOM in ``tests/support/i18n_profile.py``, to pin the English fallback
+itself.
 """
 from __future__ import annotations
 
@@ -17,6 +19,9 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+
+from support.frontend import needs_node
+from support.i18n_profile import release_notes_script, run_page
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 STATIC_DIR = REPO_ROOT / "src" / "tokdash" / "static"
@@ -123,38 +128,105 @@ def test_only_deliberate_locales_get_a_sidecar() -> None:
         )
 
 
-def test_untranslated_entries_fall_back_to_english_in_the_dashboard() -> None:
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    renderer = source[source.index("function renderReleaseNotes(payload) {"):]
-    renderer = renderer[:renderer.index("\n    async function loadReleaseNotes")]
+@needs_node
+def test_untranslated_entries_fall_back_to_english_in_the_dashboard(tmp_path: Path) -> None:
+    """The drawer overlays the sidecar on the English notes bullet by bullet, and
+    English fills every gap: an untranslated release, a blank or non-string
+    entry, a translation shorter than the English list, a locale with no sidecar.
 
-    # English is the default and the repair path, never a blank row.
-    assert "englishItem" in renderer
-    assert "typeof translated === 'string' && translated.trim()" in renderer
-    assert ": englishItem;" in renderer
-    assert "itemElement.textContent = item;" in renderer
+    A failed sidecar read leaves the English on screen and is not cached, so the
+    next open asks again. The English payload paints the moment it lands, so a
+    sidecar that arrives second repaints the open drawer; awaiting both reads is
+    not enough on its own. The full-changelog link follows the same rule.
+    """
+    script = release_notes_script(
+        body="""
+const NOTES = '/base/static/release-notes.json';
+const SIDECAR = '/base/static/release-notes.zh.json';
+const english = { current: '2.6.0', releases: [
+  { version: '2.6.0', date: '2026-10-20', sections: [
+    { type: 'added', items: ['Added one', 'Added two', 'Added three'] },
+    { type: 'fixed', items: ['Fixed one'] },
+  ] },
+  { version: '2.5.0', date: '2026-10-01', sections: [{ type: 'changed', items: ['Changed one'] }] },
+] };
+// The second entry is blank and the third is missing; the fix is not a string.
+const chinese = { releases: { '2.6.0': { added: ['新增一', '   '], fixed: [7] } } };
+const bullets = () => entries().map((entry) => [entry.version,
+  entry.sections.map((section) => [section.label, section.items.map((item) => item.text)])]);
 
-    loader = source[source.index("function loadReleaseNotesTranslation(lang = currentLang) {"):]
-    loader = loader[:loader.index("\n    async function openReleaseNotes")]
-    assert "cache: 'no-store'" in loader
-    # A failed sidecar fetch must not surface an error: the English payload already shows.
-    assert "return null;" in loader
-    # ...and must not be cached as an empty map, which would read as "translated" and skip
-    # every later retry, stranding the locale in English until a page reload.
-    assert "releaseNotesTranslationsByLang.set(lang, {})" not in loader
-    assert loader.count("releaseNotesTranslationsByLang.set(lang,") == 1
+initReleaseNotes();
+answer('/app/api/version', { current: '2.6.0' });
+await settle();
+currentLang = 'zh';
+toggle.click();
+const reads = requests.slice(1).map((request) => [request.url, request.options]);
+answer(NOTES, english);
+await settle();
+const beforeSidecar = bullets();
+fail(SIDECAR);
+await settle();
+const afterFailure = bullets();
+const zhLink = changelogLink.href;
+closeButton.click();
 
-    # The English payload paints as soon as it lands, so a sidecar that arrives second has
-    # to repaint the drawer that is already open. Awaiting both is not enough on its own.
-    opener = source[source.index("async function openReleaseNotes() {"):]
-    opener = opener[:opener.index("\n    function closeReleaseNotes")]
-    assert "Promise.all([loadReleaseNotes(), loadReleaseNotesTranslation()])" in opener
-    assert "if (releaseNotesPayload) renderReleaseNotes(releaseNotesPayload);" in opener
+toggle.click();
+const retried = requested(SIDECAR).length;
+const whileRetrying = bullets();
+answer(SIDECAR, chinese);
+await settle();
+const translated = bullets();
+closeButton.click();
+toggle.click();
+await settle();
+const cached = { bullets: bullets(), requests: requests.length };
 
-    # The footer's full-changelog link follows the same language rule as the entries.
-    assert "CHANGELOG_DOCS_URLS" in source
-    assert "CHANGELOG_CN.md" in source
-    assert "CHANGELOG_DOCS_URLS[currentLang] || CHANGELOG_DOCS_URLS.en" in source
+currentLang = 'ja';
+const noSidecar = await loadReleaseNotesTranslation();
+renderReleaseNotes(releaseNotesPayload);
+print({
+  reads, beforeSidecar, afterFailure, zhLink, retried, whileRetrying, translated, cached,
+  japanese: { translation: noSidecar, bullets: bullets(), link: changelogLink.href, requests: requests.length },
+  labels: Object.fromEntries(['zh', 'ja'].map((lang) => [lang, ['added', 'fixed', 'changed'].map((key) => I18N[lang][key])])),
+  links: CHANGELOG_DOCS_URLS,
+});
+""",
+    )
+    report = run_page(tmp_path, "release-notes-translation", script)
+    added, fixed, changed = report["labels"]["zh"]
+    english = [
+        ["v2.6.0", [[added, ["Added one", "Added two", "Added three"]], [fixed, ["Fixed one"]]]],
+        ["v2.5.0", [[changed, ["Changed one"]]]],
+    ]
+    assert report["reads"] == [
+        ["/base/static/release-notes.json", {"cache": "no-store"}],
+        ["/base/static/release-notes.zh.json", {"cache": "no-store"}],
+    ]
+    # English bullets under Chinese labels until the sidecar lands, and after it fails.
+    assert report["beforeSidecar"] == english
+    assert report["afterFailure"] == english
+    assert report["zhLink"] == report["links"]["zh"]
+    assert report["zhLink"].endswith("docs/development/CHANGELOG_CN.md")
+
+    assert report["retried"] == 2, "a failed sidecar was cached and never asked for again"
+    assert report["whileRetrying"] == english
+    translated = [
+        ["v2.6.0", [[added, ["新增一", "Added two", "Added three"]], [fixed, ["Fixed one"]]]],
+        ["v2.5.0", [[changed, ["Changed one"]]]],
+    ]
+    assert report["translated"] == translated, "the late sidecar did not repaint the open drawer"
+    assert report["cached"] == {"bullets": translated, "requests": 4}
+
+    ja_added, ja_fixed, ja_changed = report["labels"]["ja"]
+    assert report["japanese"] == {
+        "translation": None,
+        "bullets": [
+            ["v2.6.0", [[ja_added, ["Added one", "Added two", "Added three"]], [ja_fixed, ["Fixed one"]]]],
+            ["v2.5.0", [[ja_changed, ["Changed one"]]]],
+        ],
+        "link": report["links"]["en"],
+        "requests": 4,
+    }
 
 
 def test_chinese_docs_page_is_generated_and_current() -> None:

@@ -2,8 +2,9 @@
 
 `applyI18n` translates four kinds of markup: text nodes (`data-i18n`) and
 three attribute forms (`data-i18n-placeholder`, `data-i18n-title`,
-`data-i18n-aria`). These tests pin the properties that are easy to break
-silently, because none of them raise at runtime:
+`data-i18n-aria`); one test runs it under node in every language. The rest pin
+the properties that are easy to break silently, because none of them raise at
+runtime:
 
 * every attribute selector in the page stylesheet is a single valid
   selector -- two attribute conditions in one ``[...]`` bracket make the
@@ -23,7 +24,6 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 import shutil
 from html.parser import HTMLParser
 from pathlib import Path
@@ -32,7 +32,13 @@ import pytest
 
 import tokdash  # type: ignore[import-untyped]
 
-from support.frontend import extract_i18n_literal
+from support.frontend import extract_i18n_literal, needs_node, run_node
+from support.i18n_profile import (
+    APPLY_I18N_FUNCTIONS,
+    APPLY_I18N_STATE,
+    page_script,
+    run_page,
+)
 
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
@@ -111,8 +117,7 @@ def static_html(source: str) -> str:
 @pytest.fixture(scope="module")
 def english_dictionary(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
     """The ``en`` block of the I18N literal, evaluated by node."""
-    node = shutil.which("node")
-    if node is None:  # pragma: no cover - node ships with the dev extra
+    if shutil.which("node") is None:  # pragma: no cover - node ships with the dev extra
         pytest.skip("node not available")
     source = INDEX_HTML.read_text(encoding="utf-8")
     literal = extract_i18n_literal(source)
@@ -121,10 +126,7 @@ def english_dictionary(tmp_path_factory: pytest.TempPathFactory) -> dict[str, st
         literal + "\nprocess.stdout.write(JSON.stringify(I18N.en));",
         encoding="utf-8",
     )
-    output = subprocess.run(
-        [node, str(harness)], capture_output=True, check=True, encoding="utf-8"
-    ).stdout
-    return json.loads(output)
+    return json.loads(run_node(harness))
 
 
 def _style_blocks(source: str) -> list[str]:
@@ -225,32 +227,6 @@ def test_no_selector_packs_two_attributes_into_one_bracket(source: str) -> None:
     )
 
 
-def test_attribute_selectors_contain_at_most_one_condition(
-    source: str,
-) -> None:
-    """Every ``[...]`` holds exactly one attribute condition.
-
-    Per the CSS syntax spec an attribute selector is
-    ``[ ws* ident ws* [ op ws* [ ident | string ] ws* ]? ws* ]`` -- a single
-    condition. A second ``name=value`` inside the same bracket makes the
-    whole selector invalid, and the browser discards the entire rule
-    without logging anything, which is how the desktop tab row came back.
-    """
-    for block in _style_blocks(source):
-        for rule in re.finditer(r"([^{}]+)\{[^{}]*\}", _strip_css_comments(block)):
-            for selector in _selectors(rule.group(1)):
-                for bracket in re.findall(r"\[([^\]]*)\]", selector):
-                    conditions = re.findall(
-                        r"[A-Za-z_][\w-]*\s*(?:[~^$*|]?=)?\s*(?:\"[^\"]*\"|'[^']*'|[^\s\]]+)?",
-                        bracket,
-                    )
-                    assert len(conditions) <= 1, (
-                        f"{selector.strip()!r}: the bracket holds "
-                        f"{len(conditions)} conditions {conditions!r}; only one is "
-                        "valid, so the browser drops the rule"
-                    )
-
-
 def test_desktop_tab_row_rule_targets_a_stable_hook(source: str) -> None:
     """The tab row is hidden by id, not by a translated string."""
     block = re.search(r"@media \(min-width: 768px\) \{(.*?)\n    \}", source, re.S)
@@ -299,8 +275,11 @@ def test_desktop_tab_row_nav_is_not_hidden_by_its_translated_label(
 # --- single source of truth for JS-set labels ------------------------------
 
 
-def test_js_set_labels_carry_no_translation_hook(static_html: str) -> None:
-    """No data-i18n-aria hook may point at a key other than the JS one.
+@pytest.mark.parametrize("element_id", sorted(JS_SET_LABELS))
+def test_js_set_label_elements_have_no_attribute_translation_markers(
+    element_id: str, static_html: str
+) -> None:
+    """No data-i18n-* hook may label an element JavaScript already labels (#128).
 
     ``showUsageRefreshReport`` and ``renderProfileActivityInsights``
     overwrite the attribute during their own render pass, so a hook on
@@ -309,32 +288,6 @@ def test_js_set_labels_carry_no_translation_hook(static_html: str) -> None:
     (``close`` vs ``refreshReportClose``; in ja the deltas label flipped
     between two different translations).
     """
-    parser = _ElementScanner()
-    parser.feed(static_html)
-    offenders = []
-    for element in parser.found:
-        identity = element.get("id") or (element.get("class") or "").split(" ")[0]
-        if identity not in JS_SET_LABELS:
-            continue
-        hook = element.get("data-i18n-aria")
-        if hook is None:
-            continue
-        _function, _attribute, key = JS_SET_LABELS[identity]
-        offenders.append(
-            f"{identity}: data-i18n-aria={hook!r} conflicts with the JS label "
-            f"from {key!r}"
-        )
-    assert not offenders, (
-        "these elements are labelled by JavaScript, so a data-i18n-aria hook "
-        f"is a second source of truth: {offenders}"
-    )
-
-
-@pytest.mark.parametrize("element_id", sorted(JS_SET_LABELS))
-def test_js_set_label_elements_have_no_attribute_translation_markers(
-    element_id: str, static_html: str
-) -> None:
-    """Direct, per-element assertion of the #128 guidance."""
     _function, attribute, key = JS_SET_LABELS[element_id]
     parser = _ElementScanner()
     parser.feed(static_html)
@@ -353,14 +306,6 @@ def test_js_set_label_elements_have_no_attribute_translation_markers(
                 f"#{element_id} is labelled by {_function}() from {key!r}; the "
                 f"{marker} hook makes the label language-dependent in a second way"
             )
-
-
-def test_refresh_report_labels_come_from_the_javascript_pass(source: str) -> None:
-    """The JS pass still writes both refresh-report labels."""
-    assert "t('refreshReportClose')" in source
-    assert "t('refreshReportDiffLabel')" in source
-    assert "ranking.setAttribute('aria-label', t('activityTopTools'))" in source
-    assert "shell.setAttribute('aria-label', t('activityInsightsTitle'))" in source
 
 
 # --- inline fallbacks agree with the dictionary ---------------------------
@@ -542,24 +487,6 @@ def test_token_composition_bars_share_one_wording(
     )
 
 
-def test_brand_text_is_static(source: str, english_dictionary: dict[str, str]) -> None:
-    """"Tokdash" is the product name, not a translatable string.
-
-    ``appTitle`` and ``appName`` were "Tokdash" in all six locales, so the
-    keys only implied the brand could be translated, and applyI18n wrote
-    document.title on every language switch for no effect.
-    """
-    assert "document.title =" not in source, (
-        "applyI18n must not write document.title; the brand is the same in "
-        "every locale and <title> already carries it"
-    )
-    assert 'data-i18n="appName"' not in source
-    assert 'data-i18n="appTitle"' not in source
-    assert "<title>Tokdash</title>" in source
-    assert "appTitle" not in english_dictionary
-    assert "appName" not in english_dictionary
-
-
 # --- JavaScript-written names must go through t() --------------------------
 
 
@@ -608,24 +535,13 @@ def test_js_written_names_are_never_hardcoded_english(source: str) -> None:
     )
 
 
-def test_quota_provider_menu_name_comes_from_the_dictionary(
-    source: str, english_dictionary: dict[str, str]
-) -> None:
-    """The provider-visibility menu is named in all six locales."""
-    assert "setAttribute('aria-label', t('quotaVisibilityMenu'))" in source
-    assert english_dictionary["quotaVisibilityMenu"] == "Show providers"
-    # Sits with the Show: / Show: All / Show: None family it labels.
-    for sibling in ("quotaVisibilityPrefix", "quotaVisibilityAll", "quotaVisibilityNone"):
-        assert sibling in english_dictionary
-
-
 # --- the translation mechanism itself -------------------------------------
 
 
 def test_applyi18n_translates_every_attribute_form_through_one_table(
     source: str,
 ) -> None:
-    """One loop over a marker -> attribute table, not three copies."""
+    """The marker -> attribute table names every attribute form."""
     assert "I18N_ATTR_TARGETS" in source, (
         "applyI18n should drive the attribute passes from a single table"
     )
@@ -633,18 +549,58 @@ def test_applyi18n_translates_every_attribute_form_through_one_table(
         assert f"'{marker}': '{attribute}'" in source, (
             f"{marker} is missing from I18N_ATTR_TARGETS"
         )
-    body = source[
-        source.index("function applyI18n()") : source.index("function applyI18n()") + 1200
-    ]
-    for marker in ATTRIBUTE_FOR_KEY:
-        assert f"[{marker}]" not in body, (
-            f"{marker} still has its own querySelectorAll loop; the table was "
-            "bypassed"
-        )
-    assert "querySelectorAll(`[${marker}]`)" in body, (
-        "the attribute passes must read the marker from I18N_ATTR_TARGETS"
+
+
+# What applyI18n sets <html lang> to for each dictionary.
+HTML_LANG = {"en": "en", "zh": "zh-CN", "ja": "ja", "ko": "ko", "es": "es", "pt": "pt-BR"}
+
+
+@needs_node
+def test_a_language_switch_rewrites_every_marker_form(tmp_path: Path) -> None:
+    """applyI18n, run in every language, writes each marker to its attribute.
+
+    Text through data-i18n, then placeholder, title and aria-label through the
+    table; an icon-only button with only attribute hooks keeps its glyph.
+    """
+    script = page_script(
+        APPLY_I18N_FUNCTIONS,
+        prelude=APPLY_I18N_STATE
+        + """
+document.body.append(
+  el('span', { id: 'text', 'data-i18n': 'whatsNew' }, "What's new"),
+  el('input', { id: 'field', 'data-i18n-placeholder': 'searchSessions', placeholder: 'Search sessions/projects...' }),
+  el('button', { id: 'icon', 'data-i18n-title': 'closeDialog', 'data-i18n-aria': 'closeDialog',
+    title: 'Close dialog', 'aria-label': 'Close dialog' }, el('svg', { class: 'glyph' })),
+);
+""",
+        i18n=True,
+        body="""
+const out = {};
+for (const lang of Object.keys(I18N)) {
+  currentLang = lang;
+  applyI18n();
+  const icon = document.getElementById('icon');
+  out[lang] = {
+    html: document.documentElement.lang,
+    got: [
+      document.getElementById('text').textContent,
+      document.getElementById('field').getAttribute('placeholder'),
+      icon.getAttribute('title'),
+      icon.getAttribute('aria-label'),
+    ],
+    want: [I18N[lang].whatsNew, I18N[lang].searchSessions, I18N[lang].closeDialog, I18N[lang].closeDialog],
+    glyph: icon.children.map((child) => child.getAttribute('class')),
+  };
+}
+print(out);
+""",
     )
-    assert "el.setAttribute(attribute, t(el.getAttribute(marker)))" in body
+    report = run_page(tmp_path, "apply-i18n-markers", script)
+    assert {lang: row["html"] for lang, row in report.items()} == HTML_LANG
+    for lang, row in report.items():
+        assert row["got"] == row["want"], lang
+        assert row["glyph"] == ["glyph"], f"{lang}: the icon button lost its glyph"
+    assert report["zh"]["got"] != report["en"]["got"]
 
 
 def test_static_markup_stays_well_formed(static_html: str) -> None:
@@ -741,7 +697,8 @@ CHART_TOOLTIPS = {
 }
 
 
-def test_chart_tooltips_reuse_their_heading_terminology() -> None:
+@needs_node
+def test_chart_tooltips_reuse_their_heading_terminology(tmp_path: Path) -> None:
     """Every locale's tooltip opens with its own heading's wording.
 
     The three session-chart tooltips sit directly under headings. The ja
@@ -751,13 +708,8 @@ def test_chart_tooltips_reuse_their_heading_terminology() -> None:
     from the heading above it is a mismatch the reader has to resolve
     themselves, so each one must start with the heading's own term.
     """
-    node = shutil.which("node")
-    if node is None:  # pragma: no cover - node ships with the dev extra
-        pytest.skip("node not available")
     source = INDEX_HTML.read_text(encoding="utf-8")
-    harness = (
-        REPO_ROOT / "_i18n_tooltip_probe.js"
-    )
+    harness = tmp_path / "i18n_tooltip_probe.js"
     harness.write_text(
         extract_i18n_literal(source)
         + "\nconst pairs = "
@@ -772,14 +724,7 @@ def test_chart_tooltips_reuse_their_heading_terminology() -> None:
         "process.stdout.write(JSON.stringify(out));",
         encoding="utf-8",
     )
-    try:
-        rows = json.loads(
-            subprocess.run(
-                [node, str(harness)], capture_output=True, check=True, encoding="utf-8"
-            ).stdout
-        )
-    finally:
-        harness.unlink(missing_ok=True)
+    rows = json.loads(run_node(harness))
     mismatches = [
         f"{lang} {tip}: {tip!r} starts {tooltip!r} instead of the heading "
         f"{heading!r}"

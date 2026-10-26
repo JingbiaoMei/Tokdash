@@ -594,7 +594,6 @@ class TokdashApp(App):
     /* A Static is 1fr wide by default, which turns a row label into a spring
        that pushes the chips off the right edge. */
     .chip-label { width: auto; height: 1; padding: 0 1 0 0; }
-    Section { margin-top: 1; }
     Static { background: transparent; }
     .label { color: #8fa0b8; }
 
@@ -778,22 +777,21 @@ class TokdashApp(App):
        table to the bottom. Toolbars are one row tall, always. */
     .toggle { height: auto; margin-top: 1; }
     #tabs.-compact .toggle { margin-top: 0; }
-    #controls { height: auto; background: transparent; padding: 0; }
     /* Same arithmetic as the range strip: one cell of ground, one cell of gap,
        one row tall. A toolbar whose chips wrap onto a second row has eaten two
        rows of a twenty-four row terminal to say the same thing. */
-    #controls Button, .toggle Button, .tools Button {
+    .toggle Button, .tools Button {
         width: auto; min-width: 0; height: 1;
         background: #1b2534; color: #a0adbf; border: none; padding: 0 0;
         margin: 0 1 0 0; text-style: none;
     }
     /* -active is Textual's 200 ms press flash. -selected is ours: the only
        thing that says which preset, subview or lens is in force. */
-    #controls Button.-active, .toggle Button.-active, .tools Button.-active,
-    #controls Button.-selected, .toggle Button.-selected, .tools Button.-selected {
+    .toggle Button.-active, .tools Button.-active,
+    .toggle Button.-selected, .tools Button.-selected {
         background: #b9a7ff; color: #12121a; text-style: bold;
     }
-    #controls Button:focus, .toggle Button:focus, .tools Button:focus {
+    .toggle Button:focus, .tools Button:focus {
         background: #253044; color: #e3eaf3; text-style: bold underline;
     }
     /* A picker BUTTON is a labelled VALUE, not a command: it reads "Series:

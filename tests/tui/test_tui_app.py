@@ -640,8 +640,6 @@ def test_the_surface_keeps_its_layout_laws_in_css(monkeypatch):
         strip = app.query_one("#range-yesterday", Button)  # not the live window
         # 1. Sections separate by SPACING, not by a rule above each one: the
         #    toolbar, the table and the caption under it each sit a row down.
-        #    (The stylesheet's own "Section" rule names a widget type the app
-        #    never builds, so the margins on these carry the law.)
         for selector in ("#ov-subview", "#ov-table", "#ov-detail"):
             margin = app.query_one(selector).styles.margin
             assert margin.top == 1, (selector, margin)

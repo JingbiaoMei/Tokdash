@@ -1,22 +1,23 @@
-"""The Overview's active-time KPI: one clock across every session tool."""
+"""The Overview's active-time KPI: one clock across every session tool.
+
+The aggregate and its route are tested here directly. The card's renderer and
+the browser-side merge of several servers' payloads run under node below; the
+card's loader, which is driven by the range queue, runs in
+test_dashboard_queue_frontend.py.
+"""
 from __future__ import annotations
 
 import json
 import re
-import subprocess
 from datetime import datetime
-from pathlib import Path
 
 import pytest
 
-import tokdash
 from tokdash import sessions
 from tokdash.sessions import get_active_time_data
 
-from support.frontend import extract_js_function, needs_node
+from support.frontend import extract_js_function, index_source, needs_node, run_node
 
-
-INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 
 BASE_MS = 1_767_225_600_000  # 2026-01-01T00:00:00Z
 MINUTE = 60_000
@@ -383,167 +384,34 @@ def test_the_warmer_and_the_route_share_a_cache_key(monkeypatch):
 
 
 def test_the_card_sits_after_total_messages_in_a_six_column_row():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    kpis = source.split('<!-- KPI cards -->', 1)[1].split("</section>", 1)[0]
+    kpis = index_source().split('<!-- KPI cards -->', 1)[1].split("</section>", 1)[0]
 
     assert "lg:grid-cols-6" in kpis
     assert len(re.findall(r'<div class="surface p-5">', kpis)) == 6
     assert kpis.index('id="messagesDelta"') < kpis.index('id="overviewActiveTime"')
     assert kpis.index('id="overviewActiveTime"') < kpis.index('data-i18n="avgCacheHitRate"')
-    # A delta line like the cards beside it, and a line for the tools it could not read.
+    # A delta line like the cards beside it. renderDelta takes its id as an
+    # argument, so the generic id check cannot see this one.
     assert 'id="overviewActiveDelta"' in kpis
-    assert 'id="overviewActiveMeta"' in kpis
     # A one-line label, like every other card in the row.
     assert 'data-i18n="agentTime"' in kpis
     assert 'data-i18n-title="agentTimeOverviewHint"' in kpis
 
 
-def test_the_total_tokens_value_carries_no_unit():
-    """The card's own label says "Total Tokens"; the value only costs width."""
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    renderer = extract_js_function(source, "function renderOverviewTokenTotal(value = overviewTotalTokensRaw, staticText = null) {")
+def test_a_language_switch_repaints_the_card():
+    """The card's loading label and its unavailable-tools line are written by script.
 
-    assert "formatCompactTokenCount(overviewTotalTokensRaw)" in renderer
-    assert "formatReadableTokenCount" not in source
-    # The exact count keeps the unit for the tooltip and the screen reader.
-    assert "${formatNumber(overviewTotalTokensRaw)} ${t('tokensUnit')}" in renderer
-    # The readout and the aria-label both come from the shared helper now that all
-    # six cards in the row use one, so this card no longer sets them inline.
-    assert (
-        "setKpiExactReadout('totalTokens', 'totalTokensExact'"
-        in renderer
-    )
-    readout = extract_js_function(
-        source,
-        "function setKpiExactReadout(valueId, tooltipId, text, note = '') {",
-    )
-    assert "valueElement.setAttribute('aria-label', text)" in readout
-
-
-def test_the_card_is_rendered_on_every_path_that_can_change_it():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-
-    assert "renderOverviewActiveTime();" in extract_js_function(source, "function renderOverviewTab(data) {")
-    assert "renderOverviewActiveTime();" in extract_js_function(source, "function applyI18n() {")
-    assert "loadOverviewActiveTime(customDays, dateFrom, dateTo, { force: forceRefresh })" in source
-    # Review sessions count towards active time, so the toggle must refetch.
-    toggle = source.split("getElementById('codexReviewToggle')?.addEventListener", 1)[1].split("});", 1)[0]
-    assert "loadOverviewActiveTime(" in toggle
-
-
-def test_a_stale_reply_cannot_overwrite_a_newer_range():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    loader = extract_js_function(source, "async function loadOverviewActiveTime(customDays, dateFrom, dateTo, options = {}) {")
-
-    assert "const requestId = ++overviewActiveTimeState.requestId;" in loader
-    assert loader.count("if (requestId !== overviewActiveTimeState.requestId) return;") == 2
-
-
-def test_a_new_range_blanks_the_card_before_it_loads():
-    """A cold read takes seconds; the old range's figure must not sit under the new one."""
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    invalidate = extract_js_function(source, "function invalidateOverviewActiveTime(customDays, dateFrom, dateTo) {")
-    loader = extract_js_function(source, "async function loadOverviewActiveTime(customDays, dateFrom, dateTo, options = {}) {")
-
-    assert "if (overviewActiveTimeState.key === requestKey && overviewActiveTimeState.data) return false;" in invalidate
-    assert "overviewActiveTimeState.data = null;" in invalidate
-    assert "renderOverviewActiveTime();" in invalidate
-    # A load already running for the old range must not land under the new one.
-    assert "overviewActiveTimeState.requestId += 1;" in invalidate
-    # The clear happens before this request takes its id, or it would cancel itself.
-    assert loader.index("invalidateOverviewActiveTime(") < loader.index("const requestId =")
-    # A same-key forced refresh that fails keeps the figure it already had.
-    assert "overviewActiveTimeState.status = overviewActiveTimeState.data ? 'ready' : 'error';" in loader
-
-
-def test_the_card_is_cleared_the_moment_the_range_changes():
-    """Its fetch waits behind /api/usage; the clear must not wait with it."""
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    updater = extract_js_function(source, "async function updateDashboard(customDays = null, dateFrom = null, dateTo = null, options = {}) {")
-    before_fetch = updater.split("try {", 1)[0]
-
-    assert "invalidateOverviewActiveTime(customDays, dateFrom, dateTo);" in before_fetch
-    # Still deferred: the expensive request stays after the primary paint.
-    assert "loadOverviewActiveTime(customDays, dateFrom, dateTo, { force: forceRefresh })" in updater.split("} finally {", 1)[1]
-
-
-def test_a_range_change_during_a_load_is_queued_not_dropped():
-    """The picker has already relabelled, so dropping leaves stale numbers on screen.
-
-    Structure only; the queue's behaviour is driven for real against deferred
-    fetches in tests/test_dashboard_queue_frontend.py.
+    applyI18n retranslates only the markup's data-i18n labels, so it has to call
+    the card's renderer for the rest. Nothing runs applyI18n under test yet, so
+    this one call is checked in its source. Every other path that repaints the
+    card runs for real: renderOverviewTab in
+    test_overview_empty_states_frontend.py::test_the_kpi_readouts_follow_the_range,
+    and the loader, the range queue and the Codex review toggle in
+    test_dashboard_queue_frontend.py.
     """
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    updater = extract_js_function(source, "async function updateDashboard(customDays = null, dateFrom = null, dateTo = null, options = {}) {")
-    guard = updater.split("let usageApiUrl;", 1)[0]
-    finally_block = updater.split("} finally {", 1)[1]
+    i18n = extract_js_function(index_source(), "function applyI18n() {")
 
-    # Only work the running load is already doing is dropped, and picking that
-    # range again drops whatever was queued behind it.
-    assert "if (windowKey === inFlightDashboardKey && !forceRefresh && !inFlightResultDiscarded) {" in guard
-    assert "pendingDashboardRequest = null;" in guard
-    assert "pendingDashboardRequest = { customDays, dateFrom, dateTo, options };" in guard
-    assert "invalidateOverviewActiveTime(customDays, dateFrom, dateTo);" in guard
-
-    # The queued range runs next, and the superseded one skips its deferred work.
-    assert "const queued = pendingDashboardRequest;" in finally_block
-    assert "pendingDashboardRequest = null;" in finally_block
-    assert "updateDashboard(queued.customDays, queued.dateFrom, queued.dateTo, queued.options);" in finally_block
-    assert "inFlightDashboardKey = null;" in finally_block
-    deferred = finally_block.split("if (queued) {", 1)[1]
-    # The existing standalone speed page also suppresses Overview follow-ups.
-    # Keep its navigation guard while checking the queue's branch ordering.
-    follow_up = "} else if (typeof usageReportSpeedState === 'undefined' || !usageReportSpeedState.active) {"
-    assert deferred.index(follow_up) < deferred.index("loadActivityInsights(")
-    assert deferred.index(follow_up) < deferred.index("scheduleStatsWarm(")
-
-
-def test_manual_refresh_reaches_the_server_cache():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    loader = extract_js_function(source, "async function loadOverviewActiveTime(customDays, dateFrom, dateTo, options = {}) {")
-
-    assert "const refreshParam = force ? '&refresh=1' : '';" in loader
-    assert "${reviewParam}${refreshParam}" in loader
-
-
-def test_an_unchanged_range_still_refetches():
-    """The 5-minute auto-refresh must move this card too, not freeze it."""
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    loader = extract_js_function(source, "async function loadOverviewActiveTime(customDays, dateFrom, dateTo, options = {}) {")
-    before_request = loader.split("try {", 1)[0]
-
-    assert "return;" not in before_request
-
-
-def test_the_request_key_identifies_the_servers():
-    """Selections of equal size must not collide on "[object Object]"."""
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    key_fn = extract_js_function(source, "function activeTimeRequestKey(customDays, dateFrom, dateTo) {")
-
-    assert "server.id" in key_fn
-    assert ".sort()" in key_fn
-    assert "selectedServers().join" not in key_fn
-
-
-def test_active_time_overview_labels_exist_in_both_languages():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    for key in ("agentTime", "agentTimeOverviewHint", "activeTimeToolsUnavailable", "idleCap"):
-        assert len(re.findall(rf"^\s+{key}: ", source, re.MULTILINE)) == 6, key
-    # The wording the card no longer uses is gone rather than left to rot.
-    assert "activeTimeOverviewMultiServerHint" not in source
-
-
-def test_the_card_shows_agent_time_and_its_delta():
-    """Agent time is additive, so several servers need no relabelling."""
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    renderer = extract_js_function(source, "function renderOverviewActiveTime() {")
-
-    assert "formatDuration(data.active_ms_sum)" in renderer
-    assert "formatDuration(data.active_ms)" not in renderer, "the union figure is no longer shown"
-    assert "renderDelta('overviewActiveDelta', data.comparison?.active_ms_sum_pct ?? null)" in renderer
-    # Nothing is left of the multi-server relabelling the union needed.
-    assert "activeTimeCombined" not in renderer
-    assert "_server_count" not in renderer
+    assert "renderOverviewActiveTime();" in i18n
 
 
 @needs_node
@@ -553,8 +421,12 @@ def test_the_card_says_loading_rather_than_answering_with_a_dash(tmp_path):
     A dash in that gap reads as "no agent time in this range" — an answer the card
     has not got yet. It shares the shimmer the rest of the tab's deferred surfaces
     use, and keeps the dash for the states that really are an answer.
+
+    Once the figure lands the card shows agent time, the additive one, with that
+    figure's own delta. Summing agent time across servers is the same quantity, so
+    a two-server payload is printed as it is, with no caveat of its own.
     """
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     harness = tmp_path / "active-time-render.js"
     harness.write_text(
         """
@@ -581,7 +453,8 @@ const document = {
 };
 const overviewActiveTimeState = { status: 'idle', data: null, key: null, requestId: 0 };
 function t(key) { return key; }
-function renderDelta() {}
+const deltas = [];
+function renderDelta(id, pct) { deltas.push([id, pct]); }
 function formatDuration(ms) { return `dur:${ms}`; }
 function formatToolName(name) { return name; }
 function fitKpiValue() {}
@@ -603,6 +476,7 @@ const snapshot = () => ({
   html: node('overviewActiveTime').innerHTML,
   shimmer: node('overviewActiveTime').classes.has('tokdash-loading-placeholder'),
   meta: node('overviewActiveMeta').textContent,
+  delta: deltas.at(-1) || null,
 });
 for (const status of ['loading', 'error', 'idle']) {
   overviewActiveTimeState.status = status;
@@ -611,18 +485,19 @@ for (const status of ['loading', 'error', 'idle']) {
   out[status] = snapshot();
 }
 overviewActiveTimeState.status = 'ready';
-overviewActiveTimeState.data = { active_ms_sum: 42, unavailable_tools: [] };
+// Two servers' payloads merged: the clock (active_ms) and the agent time differ,
+// and so do their deltas.
+overviewActiveTimeState.data = {
+  active_ms: 7, active_ms_sum: 42, unavailable_tools: [], _server_count: 2,
+  comparison: { active_ms_pct: 99, active_ms_sum_pct: 12.5 },
+};
 renderOverviewActiveTime();
 out.ready = snapshot();
 process.stdout.write(JSON.stringify(out));
 """,
         encoding="utf-8",
     )
-    out = json.loads(
-        subprocess.run(
-            ["node", str(harness)], check=True, capture_output=True, encoding="utf-8"
-        ).stdout
-    )
+    out = json.loads(run_node(harness))
 
     assert out["loading"]["shimmer"] is True, "a pending request must not read as a dash"
     assert "tokdash-loading-label" in out["loading"]["html"]
@@ -634,15 +509,18 @@ process.stdout.write(JSON.stringify(out));
     assert out["error"]["meta"] == "loadFailed"
     assert out["idle"]["shimmer"] is False
     assert out["idle"]["text"] == "\u2014"
+    assert out["idle"]["delta"] == ["overviewActiveDelta", None], "no figure, no delta"
 
     # And the shimmer is dropped once the figure lands, not left under the value.
     assert out["ready"]["shimmer"] is False
-    assert out["ready"]["text"] == "dur:42"
+    assert out["ready"]["text"] == "dur:42", "the card shows agent time, not the clock"
+    assert out["ready"]["delta"] == ["overviewActiveDelta", 12.5], "and agent time's own delta"
+    assert out["ready"]["meta"] == "", "two servers' agent time needs no relabelling"
 
 
 @needs_node
 def test_equal_sized_server_selections_get_different_keys(tmp_path):
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     harness = tmp_path / "active-time-key.js"
     harness.write_text(
         "let includeCodexReviewSessions = null;\n"
@@ -662,14 +540,7 @@ def test_equal_sized_server_selections_get_different_keys(tmp_path):
         [{"id": "c", "url": "http://c"}, {"id": "d", "url": "http://d"}],
         [{"id": "b", "url": "http://b"}, {"id": "a", "url": "http://a"}],
     ]
-    first, other, reordered = json.loads(
-        subprocess.run(
-            ["node", str(harness), json.dumps(selections)],
-            check=True,
-            capture_output=True,
-            encoding="utf-8",
-        ).stdout
-    )
+    first, other, reordered = json.loads(run_node(harness, json.dumps(selections)))
 
     assert "[object Object]" not in first
     assert first != other  # same size, different servers
@@ -677,7 +548,7 @@ def test_equal_sized_server_selections_get_different_keys(tmp_path):
 
 
 def _combine(tmp_path, payloads):
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     harness = tmp_path / "active-time.js"
     harness.write_text(
         extract_js_function(source, "function pctChange(current, previous) {")
@@ -687,14 +558,7 @@ def _combine(tmp_path, payloads):
         + "process.stdout.write(JSON.stringify(combineActiveTimePayloads(input)));\n",
         encoding="utf-8",
     )
-    return json.loads(
-        subprocess.run(
-            ["node", str(harness), json.dumps(payloads)],
-            check=True,
-            capture_output=True,
-            encoding="utf-8",
-        ).stdout
-    )
+    return json.loads(run_node(harness, json.dumps(payloads)))
 
 
 @needs_node

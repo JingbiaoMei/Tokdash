@@ -11,16 +11,18 @@ render functions under node against a stub DOM and a hand-driven idle queue.
 from __future__ import annotations
 
 import json
-import subprocess
+import re
 from pathlib import Path
 
 
-import tokdash
+from support.frontend import (
+    extract_i18n_literal,
+    extract_js_function,
+    index_source,
+    needs_node,
+    run_node,
+)
 
-from support.frontend import extract_js_function, needs_node
-
-
-INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 
 pytestmark = needs_node
 
@@ -366,7 +368,7 @@ main();
 
 
 def _run(tmp_path: Path, scenario: str) -> dict:
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     functions = "\n".join(
         extract_js_function(source, signature)
         for signature in (
@@ -397,13 +399,7 @@ def _run(tmp_path: Path, scenario: str) -> dict:
     )
     harness = tmp_path / f"{scenario}.js"
     harness.write_text(HARNESS.replace("__FUNCTIONS__", functions), encoding="utf-8")
-    result = subprocess.run(
-        ["node", str(harness), scenario],
-        check=True,
-        capture_output=True,
-        encoding="utf-8",
-    )
-    return json.loads(result.stdout)
+    return json.loads(run_node(harness, scenario))
 
 
 def _is_loading(markup: str) -> bool:
@@ -530,25 +526,51 @@ def test_re_rendering_the_same_range_does_not_clear(tmp_path):
     assert out["dimmed"] is False
 
 
+CLEAR_HARNESS = """
+const nodes = {};
+const node = (id) => nodes[id] || (nodes[id] = { id, innerHTML: '', textContent: '', style: {} });
+const document = { getElementById: node };
+let currentLang = 'en';
+__I18N__;
+__T__
+let overviewBreakdownWindowKey = 'X_X';
+let overviewRenderToken = 0;
+function clearOverviewFacets() {}
+__CLEAR__
+// Both containers hold a painted range when the range moves.
+node('appsBreakdown').innerHTML = '<table>apps of X</table>';
+node('allModelsTable').innerHTML = '<tr><td>models of X</td></tr>';
+clearOverviewBreakdowns();
+process.stdout.write(JSON.stringify({
+  apps: node('appsBreakdown').innerHTML,
+  models: node('allModelsTable').innerHTML,
+}));
+"""
+
+
+def _shipped_contents(source: str, opening: str, closing: str) -> str:
+    match = re.search(re.escape(opening) + r"\s*(.*?)\s*" + re.escape(closing), source, re.S)
+    assert match, f"{opening} is no longer in the markup"
+    return match.group(1)
+
+
 def test_the_cleared_markup_matches_the_placeholder_the_page_ships(tmp_path):
-    """Clearing reuses the initial markup, so the two cannot drift apart."""
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    cleared = extract_js_function(source, "function clearOverviewBreakdowns() {")
+    """Clearing reuses the initial markup, so the two cannot drift apart.
 
-    for shipped in (
-        (
-            '<p class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);">'
-            '<span class="tokdash-loading-label" data-i18n="loading">Loading…</span></p>'
-        ),
-        (
-            '<td colspan="8" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);">'
-            '<span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td>'
-        ),
-    ):
-        assert shipped in source, "the initial markup moved; update clearOverviewBreakdowns"
+    The cleared state is one the stylesheet and the translator already handle only
+    if it is the shipped placeholder exactly: the same classes, the same colspan,
+    and a label applyI18n can still find. Run in English, the clear has to write
+    back exactly what the page ships.
+    """
+    source = index_source()
+    harness = tmp_path / "clear-breakdowns.js"
+    harness.write_text(
+        CLEAR_HARNESS.replace("__I18N__", extract_i18n_literal(source))
+        .replace("__T__", extract_js_function(source, "function t(key, vars) {"))
+        .replace("__CLEAR__", extract_js_function(source, "function clearOverviewBreakdowns() {")),
+        encoding="utf-8",
+    )
+    out = json.loads(run_node(harness))
 
-    # Same classes, same colspan, and still translatable after being rewritten.
-    assert cleared.count("tokdash-loading-placeholder") == 2
-    assert 'data-i18n="loading"' in cleared
-    assert 'colspan="8"' in cleared
-    assert "style=\"color: var(--color-muted);\"" in cleared
+    assert out["apps"] == _shipped_contents(source, '<div id="appsBreakdown">', "</div>")
+    assert out["models"] == _shipped_contents(source, '<tbody id="allModelsTable">', "</tbody>")

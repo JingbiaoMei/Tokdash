@@ -35,14 +35,13 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 from pathlib import Path
 
 import pytest
 
 import tokdash
 
-from support.frontend import needs_node
+from support.frontend import needs_node, run_node
 
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
@@ -960,11 +959,7 @@ def _harness_script(src: str, tail: str = "") -> str:
 def _run_script(tmp_path: Path, script: str, name: str):
     path = tmp_path / f"{name}.js"
     path.write_text(script, encoding="utf-8")
-    result = subprocess.run(
-        ["node", str(path)], capture_output=True, text=True, cwd=str(tmp_path),
-    )
-    assert result.returncode == 0, f"node harness failed:\n{result.stderr[-4000:]}"
-    return json.loads(result.stdout)
+    return json.loads(run_node(path))
 
 
 def _run_harness(tmp_path: Path, name: str = "sparklines"):

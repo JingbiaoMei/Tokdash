@@ -726,6 +726,39 @@ def press(app, widget_id: str):
     app.query_one(f"#{widget_id}", Button).press()
 
 
+_STAMPED_REFITS = (TokdashApp._refit_activity, TokdashApp._refit_speed_series)
+
+
+def paint_with_refits_flushed_early(app, paint) -> None:
+    """Run ``paint`` with the refits it queues run BEFORE its layout lands.
+
+    Textual runs a screen's after-refresh callbacks from ``_on_timer_update``
+    whether or not the Layout messages the same paint queued have reached the
+    screen, and ``Pilot.pause`` calls it after every poll. A refit run in that gap
+    measures the frame the paint itself measured. That is the ordering Windows CI
+    met now and then; this helper makes it the ordering every run gets: the
+    stamp-guarded refits the paint asks for are held, and run as soon as the
+    paint returns, before anything has been laid out.
+    """
+    held = []
+    real = app.call_after_refresh
+
+    def hold(callback, *args, **kwargs):
+        if getattr(callback, "__func__", None) in _STAMPED_REFITS:
+            held.append((callback, args, kwargs))
+            return True
+        return real(callback, *args, **kwargs)
+
+    app.call_after_refresh = hold  # the instance attribute shadows the method
+    try:
+        paint()
+    finally:
+        del app.call_after_refresh
+    assert held, "the paint queued no stamped refit, so nothing was flushed early"
+    for callback, args, kwargs in held:
+        callback(*args, **kwargs)
+
+
 def line_text(app) -> str:
     """The whole visible screen, for 'the note says X' style assertions."""
     return "\n".join(screen_lines(app))

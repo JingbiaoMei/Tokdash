@@ -929,6 +929,9 @@ class TokdashApp(App):
         # refused never gets asked a second time, and the page keeps figures
         # laid out for a size it no longer has. Paid by _end_load / _page_moved.
         self._refit_owed: set[str] = set()
+        # The stamp-guarded refits a paint has asked for, each with the number of
+        # page layouts it stays armed for. See _refit_once_laid_out.
+        self._refits_due: dict = {}
         # Is something covering the page right now? The refit on the way back is
         # owed only after a chooser that was ACTUALLY OPEN goes away: the app also
         # publishes a screen change for its very first screen, and reading that as
@@ -1363,6 +1366,10 @@ class TokdashApp(App):
         # bubble here, so the app's screen-change signal is the hook; the page
         # only learns its real geometry on the way back. See _screen_changed.
         self.screen_change_signal.subscribe(self, self._screen_changed)
+        # The page's own layouts, as they land: the refits a paint arms are run
+        # against them rather than against whatever frame a refresh callback
+        # happens to find. See _refit_once_laid_out.
+        self.screen.screen_layout_refresh_signal.subscribe(self, self._on_page_layout)
 
     # ------------------------------------------------------------- dispatch --
 
@@ -2625,6 +2632,51 @@ class TokdashApp(App):
         if self._active_pane() == "speed" and self._speed_series_stale():
             self._repaint_pane("speed")
 
+    #: Page layouts a refit stays armed for after the paint that asked for it.
+    #: One is the layout that carries the paint; the spare two cover a layout an
+    #: earlier change had already queued, which can land first and still show
+    #: the frame being replaced.
+    _REFIT_LAYOUTS = 3
+
+    def _refit_once_laid_out(self, refit) -> None:
+        """Run a stamp-guarded refit once the layout this paint asked for lands.
+
+        A refresh callback alone does not promise that. Textual runs the screen's
+        after-refresh callbacks from ``_on_timer_update`` -- on the screen's update
+        timer, and at the end of every ``Pilot.pause`` -- whether or not the
+        Layout messages this paint queued have reached the screen yet. A refit
+        flushed in that gap measures the frame being replaced, finds the stamp the
+        paint recorded from that same frame, and does nothing; the layout lands a
+        moment later with nothing left to look at it. Windows CI caught both
+        refits doing that: Overview's band sized for the rows it had before the
+        "agent time unmeasured" strip appeared above it in the same paint, and
+        Speed's hour detail pushed one row under the footer by a strip that grew
+        while the series was painted.
+
+        So the refit is still asked for on the next refresh, and it is ALSO armed
+        for the next few layouts of the page, where the frame it measures is the
+        frame on screen. It repaints only when its stamp disagrees, and a repaint
+        arms it again, so the chain settles exactly as the refresh-only one did.
+        """
+        self.call_after_refresh(refit)
+        self._refits_due[refit] = self._REFIT_LAYOUTS
+
+    def _on_page_layout(self, _screen) -> None:
+        """A layout of the page has landed: give each armed refit a look at it."""
+        if not self._refits_due:
+            return
+        due = list(self._refits_due.items())
+        for refit, left in due:
+            if left > 1:
+                self._refits_due[refit] = left - 1
+            else:
+                self._refits_due.pop(refit, None)
+        try:
+            for refit, _left in due:
+                refit()
+        except NoMatches:
+            return  # the page is being taken down under the layout that fired
+
     def _fit_after_refresh(self) -> None:
         self._fit_pending = False
         self._fit_panes()
@@ -3371,7 +3423,7 @@ class TokdashApp(App):
         # Enter spends rows the box was sized without: the refit on the next
         # refresh re-divides the pane, and this is the number it divides against.
         self._sp_detail_wanted = len(rows)
-        self.call_after_refresh(self._refit_speed_series)
+        self._refit_once_laid_out(self._refit_speed_series)
         self._reveal_cursor(self.query_one("#sp-table", DataTable))
 
     def _held_key(self, table: DataTable) -> object:
@@ -4834,7 +4886,7 @@ class TokdashApp(App):
                     spare_caption, room_width, limit=max(1, given - 1),
                     notice=False)]
             ))
-            self.call_after_refresh(self._refit_activity)
+            self._refit_once_laid_out(self._refit_activity)
             return
         # And then it is measured AGAIN, against the rows there really are. The
         # floor above buys a picture where a short neighbour has left five rows,
@@ -4850,9 +4902,10 @@ class TokdashApp(App):
                 # One row is not an assembly; it is a heading. Say which band this
                 # is and leave the geometry stable -- hiding it here would make the
                 # next measurement disagree, and the picture would flicker.
-                widget.styles.height = "1"
+                # The box is the row PLUS the band's own padding (see below).
+                widget.styles.height = str(1 + self._vertical_inset(widget))
                 widget.update(emit_markup([[Run(title, "bold")]]))
-                self.call_after_refresh(self._refit_activity)
+                self._refit_once_laid_out(self._refit_activity)
                 return
             widget.styles.height = "auto"
             widget.update(emit_markup(
@@ -4861,17 +4914,23 @@ class TokdashApp(App):
                     spare_caption, room_width, limit=max(1, given - 1),
                     notice=False)]
             ))
-            self.call_after_refresh(self._refit_activity)
+            self._refit_once_laid_out(self._refit_activity)
             return
         widget.update(emit_markup(lines))
         # The band is drawn to the rows the pane is actually leaving, not to the
         # rows the picture happened to need. A surface that stops where its text
         # stops leaves a hole of page background under the chart, and the page
         # reads as a strip of content floating above an empty terminal.
-        widget.styles.height = str(max(len(lines), given))
+        #
+        # ``given`` counts the rows INSIDE the band's padding, and a height is the
+        # outside of the box. Set to ``given`` alone, the bottom padding came out
+        # of the content: whenever the picture filled its rows exactly, which is
+        # what the loop above aims for, the caption's last row -- the one with the
+        # full bucket keys and "server local time" -- was drawn under the lip.
+        widget.styles.height = str(max(len(lines), given) + self._vertical_inset(widget))
         # The rows this was sized against are the ones the PREVIOUS paint left
         # behind; once the frame settles, redraw for the rows there really are.
-        self.call_after_refresh(self._refit_activity)
+        self._refit_once_laid_out(self._refit_activity)
 
     def _activity_stamp(self, widget: Static) -> tuple:
         """What the last activity picture was divided against.
@@ -4926,11 +4985,20 @@ class TokdashApp(App):
         # buys a scrollbar, and a scrollbar takes a column off every table on the
         # page. Measured from the widget rather than assumed, because the surfaces
         # do not all carry the same padding.
-        inset = max(0, widget.content_region.y - widget.region.y) + max(
-            0, widget.region.bottom - widget.content_region.bottom
-        )
+        inset = self._vertical_inset(widget)
         # One row in hand: the pane ends the row BEFORE the strip begins.
         return max(0, limit - top - 1 - inset)
+
+    @staticmethod
+    def _vertical_inset(widget) -> int:
+        """Rows a widget's own top and bottom padding take out of its box.
+
+        The other half of _rows_above_strip: that number is what the ASSEMBLY
+        may spend, so a box sized from it has to be given these rows back.
+        """
+        return max(0, widget.content_region.y - widget.region.y) + max(
+            0, widget.region.bottom - widget.content_region.bottom
+        )
 
     def _sessions_grouped(self, rows: list[dict]) -> bool:
         """Whether the list has more than one tool in it, and so is grouped."""
@@ -6118,7 +6186,7 @@ class TokdashApp(App):
         split, _cells = self._speed_chart_geometry()
         table_rows, chart_rows = self._speed_series_budget(
             detail_rows, split, chart=self._sp_chart_wanted)
-        self.call_after_refresh(self._refit_speed_series)
+        self._refit_once_laid_out(self._refit_speed_series)
         box = self.query_one("#sp-series")
         table = self.query_one("#sp-table", DataTable)
         # Explicit heights, not 1fr: the arithmetic above is the layout, and a
@@ -6411,7 +6479,7 @@ class TokdashApp(App):
             lens_note=("output per measured stream-second" if stream
                        else "combined output over the busy clock"),
         )
-        self.call_after_refresh(self._refit_speed_series)
+        self._refit_once_laid_out(self._refit_speed_series)
 
     def _paint_speed_hours(self) -> None:
         self._sp_chart_wanted = True
@@ -6491,7 +6559,7 @@ class TokdashApp(App):
             lens_note=("combined output over the busy clock" if combined
                        else "output per measured stream-second"),
         )
-        self.call_after_refresh(self._refit_speed_series)
+        self._refit_once_laid_out(self._refit_speed_series)
 
     def _paint_quota(self) -> None:
         self._paint_scope("quota")

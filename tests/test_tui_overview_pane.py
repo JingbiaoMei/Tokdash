@@ -29,6 +29,7 @@ from support.tui import (  # noqa: E402
     USAGE,
     api,  # noqa: F401  (the fixture these tests ask pytest for)
     headers_of,
+    paint_with_refits_flushed_early,
     press,
     rows_of,
     run,
@@ -156,6 +157,58 @@ def test_activity_strip_reports_the_buckets_the_payload_carries(api):
         assert "0 tokens" in text              # a real zero hour stays visible
 
     run(api, body)
+
+
+def test_the_activity_band_is_measured_again_once_its_page_has_moved(api):
+    """A refit run before its paint's layout still gets the frame on screen.
+
+    The paint that lands agent time puts "agent time unmeasured: kimi" above the
+    cards AND sizes the band, in one step, so the band is measured against the
+    page as it was before that strip existed. Windows CI then ran the refit
+    queued behind the paint before the strip was laid out: it measured the same
+    stale frame, found its own stamp, and the band kept a picture sized for two
+    rows the page no longer had. Driven here the other way round (the strip goes
+    away and the band moves up), with the refit run early on purpose.
+    """
+    async def body(app, pilot):
+        await settle(pilot)
+        band = app.query_one("#ov-activity")
+        note = app.query_one("#ov-note")
+        assert note.display, "the fixture's unmeasured kimi should raise the note"
+        top = band.region.y
+        app._ov_active = {**app._ov_active, "unavailable_tools": []}
+        paint_with_refits_flushed_early(app, app._paint_overview)
+        await settle(pilot)
+        assert not note.display
+        assert band.region.y < top, (band.region.y, top)  # the page really moved
+        assert app._activity_painted == app._activity_stamp(band), (
+            "the band is still sized for the frame it was painted in")
+        text = visible(app, "#ov-activity")
+        assert "2026-10-18T09" in text, text
+        assert "server local time" in text, text
+
+    run(api, body)
+
+
+@pytest.mark.parametrize("size", [(120, 36), (120, 38), (120, 40), (120, 42)])
+def test_the_activity_band_box_holds_every_line_written_into_it(api, size):
+    """A height is the outside of the box, and the band's padding is not content.
+
+    The rows the band may spend are counted INSIDE its padding. The box was then
+    given exactly that many rows, so whenever the picture filled them the
+    caption's last row sat under the band's own bottom lip. Which terminal
+    heights make the picture fill its rows exactly depends on the frame, so
+    several are checked.
+    """
+    async def body(app, pilot):
+        await settle(pilot)
+        band = app.query_one("#ov-activity")
+        written = str(band.content).splitlines()
+        assert band.content_region.height >= len(written), (
+            size, band.region, band.content_region, written)
+        assert "server local time" in visible(app, "#ov-activity"), size
+
+    run(api, body, size=size)
 
 
 def test_long_range_omits_the_chart_instead_of_inventing_one(api):

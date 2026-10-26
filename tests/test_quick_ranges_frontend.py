@@ -5,36 +5,23 @@ Covers the quick range selector buttons in the dashboard.
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
 
 import tokdash
 
+from support.frontend import extract_js_function, needs_node
+
+
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
-
-
-def _extract_js_function(source: str, signature: str) -> str:
-    start = source.find(signature)
-    assert start != -1, f"{signature} not found in index.html"
-    depth = 0
-    for index in range(source.find("{", start), len(source)):
-        if source[index] == "{":
-            depth += 1
-        elif source[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return source[start : index + 1]
-    raise AssertionError(f"unterminated JavaScript function: {signature}")
 
 
 def _run_quick_range_js(
     tmp_path: Path, cases: list[dict[str, str]]
 ) -> list[dict[str, object]]:
     source = INDEX_HTML.read_text(encoding="utf-8")
-    function = _extract_js_function(
+    function = extract_js_function(
         source, "function getQuickRangeDates(range, today = new Date()) {"
     )
     harness = tmp_path / "quick-ranges.js"
@@ -69,7 +56,7 @@ def test_last_week_button_and_localizations_are_present():
     assert "lastWeek: '上周'" in source
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_last_week_is_previous_monday_through_sunday_without_mutation(
     tmp_path: Path,
 ):
@@ -85,7 +72,7 @@ def test_last_week_is_previous_monday_through_sunday_without_mutation(
     ]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_existing_quick_ranges_keep_their_current_dates(tmp_path: Path):
     cases = [
         {"range": "today", "today": "2026-07-29"},

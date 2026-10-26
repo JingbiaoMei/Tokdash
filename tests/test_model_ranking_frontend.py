@@ -10,30 +10,16 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
 
 import tokdash
 
+from support.frontend import extract_js_function, needs_node
+
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
-
-
-def _extract_js_function(src: str, signature: str) -> str:
-    start = src.find(signature)
-    assert start >= 0, f"{signature} not found"
-    depth = 0
-    for index in range(src.find("{", start), len(src)):
-        if src[index] == "{":
-            depth += 1
-        elif src[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return src[start : index + 1]
-    raise AssertionError(f"unterminated function: {signature}")
 
 
 def _run_js(tmp_path: Path, name: str, script: str, value=None):
@@ -58,10 +44,10 @@ def _payload(models: list[tuple[str, int, float]]) -> dict:
     }
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_multi_server_merge_keeps_token_ranking(tmp_path):
     source = INDEX_HTML.read_text(encoding="utf-8")
-    function = _extract_js_function(source, "function combineUsagePayloads(list) {")
+    function = extract_js_function(source, "function combineUsagePayloads(list) {")
 
     # Halved across two servers so the merge, not either input, fixes the order.
     # cheap-workhorse ends on 10k tokens for $1; pricey-boutique on 4k for $9.
@@ -86,14 +72,14 @@ def test_multi_server_merge_keeps_token_ranking(tmp_path):
         assert rows[0]["cost"] < rows[1]["cost"], key
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_cost_chart_picks_its_own_top_five_by_cost(tmp_path):
     source = INDEX_HTML.read_text(encoding="utf-8")
-    function = _extract_js_function(source, "function updateModelChart(topModels) {")
+    function = extract_js_function(source, "function updateModelChart(topModels) {")
     # The real chart factory, not a stub: updateModelChart now reaches Chart.js
     # through it, and a stub would let the function under test keep passing even
     # if the helper the page actually ships were broken.
-    create_chart = _extract_js_function(source, "function createChart(context, config) {")
+    create_chart = extract_js_function(source, "function createChart(context, config) {")
 
     # Six models. By tokens the last one is bottom of the list; by cost it is top.
     # The panel is titled "Top Models by Cost", so it must lead with the $12 model
@@ -149,10 +135,10 @@ def test_cost_chart_reads_the_served_cost_podium():
     assert "combined_models" in argument and "top_models" in argument
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_multi_server_merge_builds_both_podiums_from_the_full_list(tmp_path):
     source = INDEX_HTML.read_text(encoding="utf-8")
-    function = _extract_js_function(source, "function combineUsagePayloads(list) {")
+    function = extract_js_function(source, "function combineUsagePayloads(list) {")
 
     # Six models per server, so each server's own five-entry podium omits one.
     models = [
@@ -195,11 +181,11 @@ def test_multi_server_merge_builds_both_podiums_from_the_full_list(tmp_path):
     assert "ocl-small" not in out["by_tokens"]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_merge_keeps_models_from_a_server_without_combined_models(tmp_path):
     """Deriving the podiums from a partial full list would drop a server entirely."""
     source = INDEX_HTML.read_text(encoding="utf-8")
-    function = _extract_js_function(source, "function combineUsagePayloads(list) {")
+    function = extract_js_function(source, "function combineUsagePayloads(list) {")
 
     modern = _payload([("shared-model", 5_000, 1.0)])
     # A server predating combined_models: it sends only the capped array.

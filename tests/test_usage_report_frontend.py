@@ -13,13 +13,15 @@ import ast
 import json
 import re
 from datetime import date, timedelta
-import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
 import tokdash  # type: ignore[import-untyped]
+
+from support.frontend import extract_js_function, needs_node
+
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 
@@ -59,22 +61,6 @@ def _report_block(source: str) -> str:
     start = source.index("const USAGE_REPORT_FACETS")
     end = source.index("    function activateDashboardTab(tab) {", start)
     return source[start:end]
-
-
-def _extract_js_function(source: str, signature: str) -> str:
-    start = source.find(signature)
-    assert start != -1, f"{signature} not found in index.html"
-    body_start = start + len(signature) - 1
-    assert source[body_start] == "{", f"{signature} must end at the function body"
-    depth = 0
-    for index in range(body_start, len(source)):
-        if source[index] == "{":
-            depth += 1
-        elif source[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return source[start : index + 1]
-    raise AssertionError(f"unterminated JavaScript function: {signature}")
 
 
 def _run_node(tmp_path: Path, name: str, body: str, *argv: str) -> str:
@@ -220,8 +206,8 @@ def test_every_notice_the_model_records_reaches_the_banner() -> None:
     surface that says which one did.
     """
     block = _report_block(_source())
-    model = _extract_js_function(block, BUILD_MODEL_SIGNATURE)
-    banner = _extract_js_function(block, "function usageReportRenderBanner(model) {")
+    model = extract_js_function(block, BUILD_MODEL_SIGNATURE)
+    banner = extract_js_function(block, "function usageReportRenderBanner(model) {")
     notices = set(re.findall(r"\b(\w+Missing),?$", model[model.index("notices: {"):], re.M))
     assert notices == {"insightsMissing", "usageMissing", "activeTimeMissing"}
     for notice in notices:
@@ -233,7 +219,7 @@ def test_report_counts_every_codex_session_whatever_overview_shows() -> None:
     pins the review-session filter open instead of inheriting the server default
     or the Overview toggle -- either would make the two tabs disagree silently."""
     block = _report_block(_source())
-    loader = _extract_js_function(block, "async function loadUsageReport(options = {}) {")
+    loader = extract_js_function(block, "async function loadUsageReport(options = {}) {")
     assert "/api/active-time?include_review_sessions=true" in loader
     assert "includeCodexReviewSessions" not in loader, "the Overview toggle is not this tab's input"
 
@@ -248,7 +234,7 @@ def test_report_is_single_server_and_prints_which_one() -> None:
 # --- window math, executed for real under node ------------------------------
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 @pytest.mark.parametrize(
     ("today", "period", "expected", "calendar"),
     [
@@ -317,7 +303,7 @@ def test_report_windows_are_calendar_aligned(
     tmp_path: Path, today: str, period: str, expected: dict, calendar: dict
 ) -> None:
     source = _source()
-    body = "\n".join(_extract_js_function(source, signature) for signature in HELPERS)
+    body = "\n".join(extract_js_function(source, signature) for signature in HELPERS)
     body += f"""
 usageReportToday = () => new Date('{today}T12:00:00');
 const periodArg = process.argv[2];
@@ -344,11 +330,11 @@ process.stdout.write(JSON.stringify({{
     }
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_an_elapsed_window_never_exceeds_the_period_it_claims(tmp_path: Path) -> None:
     """The in-progress note prints `{d} of {n} days`; both have to be true."""
     source = _source()
-    body = "\n".join(_extract_js_function(source, signature) for signature in HELPERS)
+    body = "\n".join(extract_js_function(source, signature) for signature in HELPERS)
     body += """
 usageReportToday = () => new Date(process.argv[2] + 'T12:00:00');
 const out = [];
@@ -373,13 +359,13 @@ process.stdout.write(JSON.stringify(out));
     }
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_back_steps_whole_periods(tmp_path: Path) -> None:
     """The top-bar chips walk whole periods back: a past week is the full
     Monday-to-Sunday, a past month its first to its last, a past year Jan-Dec.
     Only the current window stops at today."""
     source = _source()
-    body = "\n".join(_extract_js_function(source, signature) for signature in HELPERS)
+    body = "\n".join(extract_js_function(source, signature) for signature in HELPERS)
     body += """
 usageReportToday = () => new Date('2026-09-07T12:00:00');
 const out = [];
@@ -407,7 +393,7 @@ process.stdout.write(JSON.stringify(out));
             assert row["elapsed"] == row["length"], f"{row}: a past window must be the whole period"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 @pytest.mark.parametrize(
     ("today", "back", "expected"),
     [
@@ -421,7 +407,7 @@ def test_day_navigation_crosses_calendar_and_clock_boundaries(
     tmp_path: Path, today: str, back: int, expected: str
 ) -> None:
     body = "process.env.TZ = 'Europe/London';\n"
-    body += "\n".join(_extract_js_function(_source(), signature) for signature in HELPERS)
+    body += "\n".join(extract_js_function(_source(), signature) for signature in HELPERS)
     body += f"""
 usageReportToday = () => new Date('{today}T12:00:00');
 process.stdout.write(JSON.stringify(usageReportWindows('day', {back})));
@@ -432,7 +418,7 @@ process.stdout.write(JSON.stringify(usageReportWindows('day', {back})));
     }
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_duration_units_are_localized_across_languages_and_language_switches(tmp_path: Path) -> None:
     source = _source()
     locales = re.search(r"const LANG_LOCALES = \{[^\n]+\};", source)
@@ -443,7 +429,7 @@ def test_duration_units_are_localized_across_languages_and_language_switches(tmp
         "function formatDurationUnit(unit, value) {",
         "function formatDurationUnits(ms) {",
     ):
-        body += _extract_js_function(source, signature) + "\n"
+        body += extract_js_function(source, signature) + "\n"
     body += """
 const durations = [0, 45000, 5 * 60000, (7 * 60 + 39) * 60000, 24 * 3600000, 65 * 3600000, 8 * 86400000, 34 * 86400000];
 const out = {};
@@ -473,15 +459,15 @@ def test_the_report_tab_swaps_quick_ranges_for_period_chips() -> None:
     walk the report's period back, named from real dates."""
     source = _source()
     assert 'id="overviewQuickRanges"' in source and 'id="reportPeriodChips"' in source
-    tab = _extract_js_function(source, "function activateDashboardTab(tab) {")
+    tab = extract_js_function(source, "function activateDashboardTab(tab) {")
     assert "overviewRanges.hidden = tab === 'report'" in tab
     assert "reportChips.hidden = tab !== 'report'" in tab
-    defs = _extract_js_function(source, "function usageReportChipDefs() {")
+    defs = extract_js_function(source, "function usageReportChipDefs() {")
     assert "getMonthLabels()" in defs, "month chips must be named from real dates"
     assert "usageReportChipWeeksAgo" in defs
-    render = _extract_js_function(source, "function usageReportRenderPeriodChips() {")
+    render = extract_js_function(source, "function usageReportRenderPeriodChips() {")
     assert "usageReportState.pendingBack = def.back" in render, "a mid-load chip click must queue, not drop"
-    controls = _extract_js_function(source, "function usageReportRenderControls() {")
+    controls = extract_js_function(source, "function usageReportRenderControls() {")
     assert "usageReportRenderPeriodChips()" in controls
 
 
@@ -489,16 +475,16 @@ def test_a_past_window_names_itself() -> None:
     """'This month' over an August report is a lie: past windows take the
     card-style title, and a completed year prints its number, not 'year to date'."""
     source = _source()
-    title = _extract_js_function(source, "function usageReportPeriodTitle(model) {")
+    title = extract_js_function(source, "function usageReportPeriodTitle(model) {")
     assert "usageReportCardTitle(model)" in title
-    card = _extract_js_function(source, "function usageReportCardTitle(model) {")
+    card = extract_js_function(source, "function usageReportCardTitle(model) {")
     assert "-12-31" in card
 
 
 def test_the_card_filename_names_the_theme() -> None:
     """The card wears the active style theme, so the export names it -- the
     same window saved under two themes must not overwrite itself."""
-    fn = _extract_js_function(_source(), "function usageReportCardFilename(model, tier, mode) {")
+    fn = extract_js_function(_source(), "function usageReportCardFilename(model, tier, mode) {")
     assert "dataset.uiTheme" in fn
 
 
@@ -573,7 +559,7 @@ process.stdout.write(JSON.stringify({
 """
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_a_failed_active_time_leaves_no_count_rather_than_a_zero(tmp_path: Path) -> None:
     """`/api/active-time` is one of three requests and can fail on its own.
 
@@ -583,7 +569,7 @@ def test_a_failed_active_time_leaves_no_count_rather_than_a_zero(tmp_path: Path)
     row was a row nobody could see.
     """
     source = _source()
-    body = "\n".join(_extract_js_function(source, sig) for sig in MODEL_SIGNATURES) + MODEL_FIXTURE
+    body = "\n".join(extract_js_function(source, sig) for sig in MODEL_SIGNATURES) + MODEL_FIXTURE
     report = json.loads(_run_node(tmp_path, "usage-report-model.js", body))
 
     whole = report["whole"]
@@ -603,7 +589,7 @@ def test_a_failed_active_time_leaves_no_count_rather_than_a_zero(tmp_path: Path)
     assert report["noInsights"]["sessions"] == 4
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_the_first_paint_builds_a_model_over_two_absent_sources(tmp_path: Path) -> None:
     """The hero paints off /api/usage before the other two have been issued.
 
@@ -613,7 +599,7 @@ def test_the_first_paint_builds_a_model_over_two_absent_sources(tmp_path: Path) 
     forever, which no amount of reading the source proves absent.
     """
     source = _source()
-    body = "\n".join(_extract_js_function(source, sig) for sig in MODEL_SIGNATURES) + MODEL_FIXTURE
+    body = "\n".join(extract_js_function(source, sig) for sig in MODEL_SIGNATURES) + MODEL_FIXTURE
     first = json.loads(_run_node(tmp_path, "usage-report-model.js", body))["firstPaint"]
 
     assert first["notices"]["pending"] is True, "the banner needs silence told from refusal"
@@ -728,7 +714,7 @@ process.stdout.write(JSON.stringify({
 """
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_the_agent_table_prints_every_tool_it_was_given(tmp_path: Path) -> None:
     """The table used to headline ten tools and park the rest behind an "Other
     tools on this machine" disclosure. On a machine with a long tail that read as
@@ -740,7 +726,7 @@ def test_the_agent_table_prints_every_tool_it_was_given(tmp_path: Path) -> None:
     """
     source = _source()
     block = _report_block(source)
-    body = "\n".join(_extract_js_function(block, sig) for sig in AGENTS_TABLE_SIGNATURES)
+    body = "\n".join(extract_js_function(block, sig) for sig in AGENTS_TABLE_SIGNATURES)
     body += _table_sort_state(source)
     body += AGENTS_TABLE_FIXTURE
     table = json.loads(_run_node(tmp_path, "usage-report-agents.js", body))
@@ -825,10 +811,10 @@ def test_every_column_of_every_ranking_table_is_a_sort_control() -> None:
     # The click path: wired once, and a click repaints all three tables so the
     # arrow on the header a reader just used is the arrow on the rows below it.
     block = _report_block(source)
-    wire = _extract_js_function(block, "function usageReportWireTableSort() {")
+    wire = extract_js_function(block, "function usageReportWireTableSort() {")
     assert "th[data-report-sort]" in wire
     assert "usageReportRenderTables(usageReportState.model)" in wire
-    assert "usageReportWireTableSort();" in _extract_js_function(block, "function usageReportWire() {")
+    assert "usageReportWireTableSort();" in extract_js_function(block, "function usageReportWire() {")
 
 
 def test_the_report_tables_speak_the_overview_vocabulary() -> None:
@@ -883,12 +869,12 @@ def test_the_active_time_tile_prints_one_figure() -> None:
     tile = source[source.index('data-i18n="usageReportActiveTime"') : source.index("usageReportDays")]
     assert tile.count("usage-report-kpi-value") == 1, "the tile carries one figure"
     assert "usage-report-kpi-sub" not in tile, "and no second line under it"
-    hero = _extract_js_function(_report_block(source), "function usageReportRenderHeroActivity(model) {")
+    hero = extract_js_function(_report_block(source), "function usageReportRenderHeroActivity(model) {")
     assert "formatDurationUnits(model.agentMs)" in hero
     assert "usageReportKActiveSub" not in hero
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_the_share_column_ranks_because_the_row_carries_the_share_it_prints(
     tmp_path: Path,
 ) -> None:
@@ -900,7 +886,7 @@ def test_the_share_column_ranks_because_the_row_carries_the_share_it_prints(
     back the name order.
     """
     source = _source()
-    body = "\n".join(_extract_js_function(source, sig) for sig in MODEL_SIGNATURES) + MODEL_FIXTURE
+    body = "\n".join(extract_js_function(source, sig) for sig in MODEL_SIGNATURES) + MODEL_FIXTURE
     model = json.loads(_run_node(tmp_path, "usage-report-share-field.js", body))["whole"]
 
     assert model["modelNames"] == ["alpha", "beta"], "a ranked model with no tokens gets no row"
@@ -1007,7 +993,7 @@ process.stdout.write(JSON.stringify(out));
 """
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_the_model_and_project_tables_rank_on_the_column_the_header_names(
     tmp_path: Path,
 ) -> None:
@@ -1019,7 +1005,7 @@ def test_the_model_and_project_tables_rank_on_the_column_the_header_names(
     """
     source = _source()
     block = _report_block(source)
-    body = "\n".join(_extract_js_function(block, sig) for sig in FACET_TABLE_SIGNATURES)
+    body = "\n".join(extract_js_function(block, sig) for sig in FACET_TABLE_SIGNATURES)
     body += _table_sort_state(source) + FACET_TABLE_FIXTURE
     out = json.loads(_run_node(tmp_path, "usage-report-facet-tables.js", body))
 
@@ -1069,9 +1055,9 @@ def _loader_program(block: str) -> str:
     owed is exactly what these tests are about, so a stub would be the assertion.
     """
     return (LOADER_HARNESS
-            .replace("__SUMMARY_WANTED__", _extract_js_function(
+            .replace("__SUMMARY_WANTED__", extract_js_function(
                 block, "function usageReportSummaryWanted() {"))
-            .replace("__LOADER__", _extract_js_function(
+            .replace("__LOADER__", extract_js_function(
                 block, "async function loadUsageReport(options = {}) {")))
 
 
@@ -1170,7 +1156,7 @@ process.stdout.write(JSON.stringify(out));
 """
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_the_warmers_windows_match_the_tabs_own_across_years(tmp_path: Path) -> None:
     """The warmer builds its keys in Python; the tab builds the same windows in
     JavaScript. A mismatch of one day warms a key nobody asks for and the tab
@@ -1184,7 +1170,7 @@ def test_the_warmers_windows_match_the_tabs_own_across_years(tmp_path: Path) -> 
 
     days = [date(2024, 1, 1) + timedelta(days=n) for n in range(900)]
     helpers = "\n".join(
-        _extract_js_function(_source(), sig)
+        extract_js_function(_source(), sig)
         for sig in (
             "function formatDateKey(date) {",
             "function startOfWeekMonday(date) {",
@@ -1269,7 +1255,7 @@ process.stdout.write(JSON.stringify(out));
 """
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_only_one_stale_reread_is_ever_armed(tmp_path: Path) -> None:
     """Scheduling is where the first attempt leaked timers.
 
@@ -1281,12 +1267,12 @@ def test_only_one_stale_reread_is_ever_armed(tmp_path: Path) -> None:
     block = _report_block(_source())
     body = (
         SCHEDULE_HARNESS
-        .replace("__SERVED__", _extract_js_function(
+        .replace("__SERVED__", extract_js_function(
             block, "function usageReportServedStale(payload) {"))
-        .replace("__SCHEDULE__", _extract_js_function(
+        .replace("__SCHEDULE__", extract_js_function(
             block, "function usageReportScheduleStaleReread(payloads, period, back, server) {"))
-        .replace("__ARM__", _extract_js_function(block, "function usageReportArmStaleReread() {"))
-        .replace("__FIRE__", _extract_js_function(block, "function usageReportFireStaleReread() {"))
+        .replace("__ARM__", extract_js_function(block, "function usageReportArmStaleReread() {"))
+        .replace("__FIRE__", extract_js_function(block, "function usageReportFireStaleReread() {"))
     )
     out = json.loads(_run_node(tmp_path, "usage-report-schedule.js", body))
 
@@ -1358,7 +1344,7 @@ const snap = () => ({ model: usageReportState.model.tag, renders: renders.length
 """
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_a_silent_reread_never_damages_the_report_on_screen(tmp_path: Path) -> None:
     """The re-read is invisible, so every way it can go wrong is silent too.
 
@@ -1370,9 +1356,9 @@ def test_a_silent_reread_never_damages_the_report_on_screen(tmp_path: Path) -> N
     block = _report_block(_source())
     body = (
         REREAD_HARNESS
-        .replace("__REREAD__", _extract_js_function(
+        .replace("__REREAD__", extract_js_function(
             block, "async function usageReportSilentReread(token, period, back, serverId) {"))
-        .replace("__WANTS__", _extract_js_function(
+        .replace("__WANTS__", extract_js_function(
             block, "function usageReportStillWants(token, period, back, serverId) {"))
     )
     out = json.loads(_run_node(tmp_path, "usage-report-reread.js", body))
@@ -1390,7 +1376,7 @@ def test_a_silent_reread_never_damages_the_report_on_screen(tmp_path: Path) -> N
         assert case["loading"] is False
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_an_empty_200_does_not_wedge_the_report_tab(tmp_path: Path) -> None:
     """`fetchJson` resolves to null when an OK response carries no JSON body.
 
@@ -1593,7 +1579,7 @@ __LOADER__
 """
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_a_deferred_summary_cannot_answer_for_a_window_that_moved(tmp_path: Path) -> None:
     """The Summary pair is the half of a load that can outlive it.
 
@@ -1610,13 +1596,13 @@ def test_a_deferred_summary_cannot_answer_for_a_window_that_moved(tmp_path: Path
     block = _report_block(_source())
     body = (
         SUMMARY_RACE_HARNESS
-        .replace("__SUMMARY_WANTED__", _extract_js_function(
+        .replace("__SUMMARY_WANTED__", extract_js_function(
             block, "function usageReportSummaryWanted() {"))
-        .replace("__SUMMARY_KEY__", _extract_js_function(
+        .replace("__SUMMARY_KEY__", extract_js_function(
             block, "function usageReportSummaryKey() {"))
-        .replace("__ENSURE_SUMMARY__", _extract_js_function(
+        .replace("__ENSURE_SUMMARY__", extract_js_function(
             block, "function usageReportEnsureSummary() {"))
-        .replace("__LOADER__", _extract_js_function(
+        .replace("__LOADER__", extract_js_function(
             block, "async function loadUsageReport(options = {}) {"))
     )
     out = json.loads(_run_node(tmp_path, "usage-report-summary-race.js", body))
@@ -1669,13 +1655,13 @@ def test_a_report_served_from_a_stale_entry_reads_again_once() -> None:
     daemon is already doing.
     """
     block = _report_block(_source())
-    schedule = _extract_js_function(
+    schedule = extract_js_function(
         block, "function usageReportScheduleStaleReread(payloads, period, back, server) {"
     )
-    reread = _extract_js_function(
+    reread = extract_js_function(
         block, "async function usageReportSilentReread(token, period, back, serverId) {"
     )
-    loader = _extract_js_function(block, "async function loadUsageReport(options = {}) {")
+    loader = extract_js_function(block, "async function loadUsageReport(options = {}) {")
 
     # Any of the three, not just the fastest one.
     assert "payloads.some(usageReportServedStale)" in schedule
@@ -1689,7 +1675,7 @@ def test_a_report_served_from_a_stale_entry_reads_again_once() -> None:
     )
 
     # A queued re-read describes the window an explicit load is replacing.
-    arm = _extract_js_function(block, "function usageReportArmStaleReread() {")
+    arm = extract_js_function(block, "function usageReportArmStaleReread() {")
     assert "clearTimeout(usageReportState.staleTimer)" in arm
     assert "usageReportArmStaleReread()" in schedule
     assert "clearTimeout(usageReportState.staleTimer)" in loader
@@ -1707,7 +1693,7 @@ def test_the_version_stamp_waits_for_the_full_paint() -> None:
     share cards off a half-empty report -- the one thing the partial paint is
     careful not to do."""
     block = _report_block(_source())
-    version = _extract_js_function(block, "function usageReportLoadVersion() {")
+    version = extract_js_function(block, "function usageReportLoadVersion() {")
     # The whole statement, not the condition and the ordering: asserting those two
     # separately passes for `if (...notices.pending) { }`, which guards nothing.
     assert "if (usageReportState.model.notices.pending) return;" in version
@@ -1721,7 +1707,7 @@ def test_a_source_not_asked_for_yet_is_not_reported_as_unavailable() -> None:
     the analytics land, which is a false claim about the server.
     """
     block = _report_block(_source())
-    banner = _extract_js_function(block, "function usageReportRenderBanner(model) {")
+    banner = extract_js_function(block, "function usageReportRenderBanner(model) {")
     assert "const pending = !!model.notices.pending;" in banner
     assert "model.notices.insightsMissing && !pending" in banner
     assert "model.notices.activeTimeMissing && !pending" in banner
@@ -1738,7 +1724,7 @@ def test_the_report_paints_the_hero_before_asking_for_the_slow_two() -> None:
     it is awaited and painted before the other two are issued.
     """
     block = _report_block(_source())
-    loader = _extract_js_function(block, "async function loadUsageReport(options = {}) {")
+    loader = extract_js_function(block, "async function loadUsageReport(options = {}) {")
     usage_at = loader.index("await settle(request('/api/usage'))")
     paint_at = loader.index("usageReportRenderPartial(")
     insights_at = loader.index("/api/insights?facets=")
@@ -1757,9 +1743,9 @@ def test_the_first_paint_renders_only_what_usage_answers() -> None:
     usageReportRenderLoading() left on them, so the page fills in instead.
     """
     block = _report_block(_source())
-    partial = _extract_js_function(block, "function usageReportRenderPartial(model) {")
-    full = _extract_js_function(block, "function usageReportRender() {")
-    hero = _extract_js_function(block, "function usageReportRenderHero(model) {")
+    partial = extract_js_function(block, "function usageReportRenderPartial(model) {")
+    full = extract_js_function(block, "function usageReportRender() {")
+    hero = extract_js_function(block, "function usageReportRenderHero(model) {")
     assert "usageReportRenderHeroTotals(model)" in partial
     # The activity half is reached through the whole-hero wrapper, which only the
     # full paint calls.
@@ -1788,11 +1774,11 @@ def test_an_unknown_count_prints_a_dash_everywhere_it_is_read() -> None:
     block = _report_block(_source())
     # The activity half of the hero: split out so the first paint can render the
     # totals half from /api/usage alone, without these two tiles.
-    hero = _extract_js_function(block, "function usageReportRenderHeroActivity(model) {")
+    hero = extract_js_function(block, "function usageReportRenderHeroActivity(model) {")
     assert "empty || !model.streaks" in hero
     assert "String(model.streaks.active_days)" in hero, "the zero fallback is gone"
     assert "usageReportFigure(model.sessions, formatNumber)" in hero
-    card = _extract_js_function(block, "function usageReportCardModel(model, tier, mode, overrides) {")
+    card = extract_js_function(block, "function usageReportCardModel(model, tier, mode, overrides) {")
     assert "sessions: usageReportFigure(model.sessions, formatNumber)" in card
     assert "const streaks = model.streaks || null;" in card, "a zero-filled streak block prints 0 of N"
 
@@ -1800,14 +1786,14 @@ def test_an_unknown_count_prints_a_dash_everywhere_it_is_read() -> None:
 # --- delta honesty ----------------------------------------------------------
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_a_delta_outside_the_data_is_never_printed(tmp_path: Path) -> None:
     """Year to date compares against an equal window that predates the records.
 
     The server cannot know the history stops, so the report decides: no delta on
     the year view, and a multiple-of-nothing delta is not a percentage to print.
     """
-    body = _extract_js_function(_source(), "function usageReportShowDelta(model) {")
+    body = extract_js_function(_source(), "function usageReportShowDelta(model) {")
     body += """
 const cases = [
   { period: 'year', comparison: { tokens_pct: 1274922.4 } },
@@ -1861,7 +1847,7 @@ def test_every_line_that_names_a_machine_names_the_selected_one() -> None:
     source = _source()
     block = _report_block(source)
     assert "t('usageReportFooterSrc', { n: sources, machine," in block
-    footer = _extract_js_function(block, "function usageReportRenderFooter(model) {")
+    footer = extract_js_function(block, "function usageReportRenderFooter(model) {")
     assert "const machine = usageReportMachineName();" in footer
     # Only the nickname fallback may still spell the phrase out.
     for lang in I18N_LANGS:
@@ -1891,7 +1877,7 @@ def test_the_version_stamp_is_read_from_the_server_the_report_reads() -> None:
     a remote report stamped from it printed the local build in its footer line.
     The stamp no longer rides the exported PNG (cosyncing review item 8), but
     the footer still names the build the report was read from."""
-    version = _extract_js_function(_source(), "function usageReportLoadVersion() {")
+    version = extract_js_function(_source(), "function usageReportLoadVersion() {")
     assert "getRuntimeVersion" not in version
     assert "fetchJsonWithRetry(server, '/api/version')" in version
     assert "usageReportState.versionServerId" in version, "the answer is keyed to its server"
@@ -1933,7 +1919,7 @@ def test_the_day_map_notice_names_only_the_facets_it_is_missing() -> None:
 
 def test_the_new_sections_render_after_the_day_map() -> None:
     block = _report_block(_source())
-    render = _extract_js_function(block, "function usageReportRender() {")
+    render = extract_js_function(block, "function usageReportRender() {")
     order = [
         "usageReportRenderHeat(model)",
         "usageReportRenderPodium(model)",
@@ -1950,7 +1936,7 @@ def test_the_new_sections_render_after_the_day_map() -> None:
 def test_the_new_sections_are_cleared_before_the_next_load() -> None:
     """A stale podium under a fresh hero is a report that lies about the period."""
     block = _report_block(_source())
-    loading = _extract_js_function(block, "function usageReportRenderLoading() {")
+    loading = extract_js_function(block, "function usageReportRenderLoading() {")
     for element in (
         "usageReportPodium",
         "usageReportGroupNote",
@@ -1985,7 +1971,7 @@ def test_the_report_removes_the_repeated_project_and_footer_copy() -> None:
 def test_the_agent_table_never_invents_a_token_split() -> None:
     """OpenClaw has no output-token column; its row must show a dash, not a guess."""
     block = _report_block(_source())
-    agents = _extract_js_function(block, BUILD_MODEL_SIGNATURE)
+    agents = extract_js_function(block, BUILD_MODEL_SIGNATURE)
     assert "tokensOut: app && app.tokens_out !== undefined" in agents
     # Tokens and cost come from the facet scan, the split from /api/usage: the
     # two are different scans and the page must not blur them into one figure.
@@ -1997,12 +1983,12 @@ def test_weekday_rows_that_have_not_happened_print_no_figure() -> None:
     """A three-day window has not met Thursday; that is not a zero-usage Thursday."""
     block = _report_block(_source())
     assert "elapsedWeekdays" in block
-    when = _extract_js_function(block, "function usageReportRenderWhen(model) {")
+    when = extract_js_function(block, "function usageReportRenderWhen(model) {")
     assert "reached ? formatTokenCount(row.tokens) : USAGE_REPORT_EM" in when
     assert "'0%'" in when
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_reconciliation_separates_the_unattributed_share_from_the_gap(
     tmp_path: Path,
 ) -> None:
@@ -2012,7 +1998,7 @@ def test_reconciliation_separates_the_unattributed_share_from_the_gap(
     unattributed bucket of 5% is not that gap: printing only the bucket
     understates it by half.
     """
-    body = _extract_js_function(
+    body = extract_js_function(
         _source(), "function usageReportProjectShares(facetTotal, rowSum, unattributedTokens) {"
     )
     body += """
@@ -2035,7 +2021,7 @@ process.stdout.write(JSON.stringify(cases.map(([a, b, c]) => usageReportProjectS
     ]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 @pytest.mark.parametrize(
     ("hours", "expected"),
     [
@@ -2051,20 +2037,20 @@ def test_the_night_window_is_read_from_what_the_server_serves(
     tmp_path: Path, hours: list[int], expected: str
 ) -> None:
     source = _source()
-    body = _em_constant(source) + _extract_js_function(
+    body = _em_constant(source) + extract_js_function(
         source, "function usageReportHourLabel(hour) {"
-    ) + _extract_js_function(source, "function usageReportHourWindow(hours) {")
+    ) + extract_js_function(source, "function usageReportHourWindow(hours) {")
     body += f"""
 process.stdout.write(usageReportHourWindow({json.dumps(hours)}));
 """
     assert _run_node(tmp_path, "usage-report-night.js", body) == expected
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_a_small_share_keeps_digits_that_survive_the_eye(tmp_path: Path) -> None:
     """0.4% rounded to 0% reads as a missing slice, which is a different fact."""
     source = _source()
-    body = _em_constant(source) + _extract_js_function(source, "function usageReportShare(fraction) {")
+    body = _em_constant(source) + extract_js_function(source, "function usageReportShare(fraction) {")
     body += """
 const cases = [0.004, 0.097, 0.21, 0.5, null, undefined, NaN];
 process.stdout.write(JSON.stringify(cases.map(usageReportShare)));
@@ -2200,7 +2186,7 @@ const usageReportShare = (f) => (Number(f) * 100).toFixed(1) + '%';
         prelude
         + _em_constant(source)
         + constants
-        + "\n".join(_extract_js_function(source, signature) for signature in CARD_SIGNATURES)
+        + "\n".join(extract_js_function(source, signature) for signature in CARD_SIGNATURES)
         + "\n"
     )
 
@@ -2269,7 +2255,7 @@ def _card_audit(tmp_path: Path, extra: str = "") -> dict:
     return json.loads(_run_node(tmp_path, "usage-report-cards.js", body))
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_share_card_fonts_follow_language_style_changes(tmp_path: Path) -> None:
     report = _card_audit(tmp_path, """
 const out = [];
@@ -2294,10 +2280,10 @@ process.stdout.write(JSON.stringify(out));
         assert all(f' {region}"' in font for font in snapshot["fonts"])
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_share_cards_wait_for_current_font_loads_after_switching_language(tmp_path: Path) -> None:
     body = "const document = { fonts: { ready: Promise.resolve('initial') } };\n"
-    body += _extract_js_function(_source(), "function usageReportCardFonts() {")
+    body += extract_js_function(_source(), "function usageReportCardFonts() {")
     body += """
 const first = usageReportCardFonts();
 document.fonts.ready = Promise.resolve('new language');
@@ -2308,7 +2294,7 @@ process.stdout.write(JSON.stringify({ fresh: first !== second, current: second =
     assert report == {"fresh": True, "current": True}
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_a_card_fits_its_canvas_and_never_runs_under_its_footer(tmp_path: Path) -> None:
     """A card that runs under its own footer is the failure mode of any painter."""
     report = _card_audit(
@@ -2365,7 +2351,7 @@ process.stdout.write(JSON.stringify(report));
         assert model in green, f"{model} never reached the card"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_the_hero_shows_tokens_and_cost_in_the_cost_colour(tmp_path: Path) -> None:
     """Cosyncing review item 6: the two figures a shared card is read for are
     tokens and cost, so they share the hero line -- the cost in the palette's
@@ -2388,7 +2374,7 @@ process.stdout.write(JSON.stringify({
     assert report["cost"] != report["primary"], "the cost must not read as more tokens"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_day_share_cards_use_one_date_and_omit_the_daily_map(tmp_path: Path) -> None:
     report = _card_audit(
         tmp_path,
@@ -2414,7 +2400,7 @@ process.stdout.write(JSON.stringify(out));
         assert not any("2026-09-03 – 2026-09-03" in text for text in card["texts"])
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_the_card_range_line_is_just_the_window(tmp_path: Path) -> None:
     """Cosyncing review item 7: "Sep 1 – Sep 30 · all agent activity on
     mac-studio" restates what the page footer already says, so the card's
@@ -2437,7 +2423,7 @@ process.stdout.write(JSON.stringify({
     assert "{machine}" not in joined, "the placeholder reached the canvas unsubstituted"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_a_year_card_shrinks_before_it_drops_rows(tmp_path: Path) -> None:
     """A 53-column heat map is the tight case; project rows must not pay for it."""
     report = _card_audit(
@@ -2460,7 +2446,7 @@ process.stdout.write(JSON.stringify({
     assert report["yearRows"] >= 1, "the amber card lost its project rows to the heat map"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_a_card_survives_the_facets_an_older_server_omits(tmp_path: Path) -> None:
     """A pre-facet server still gets a card: missing figures print as em dashes."""
     report = _card_audit(
@@ -2490,13 +2476,13 @@ process.stdout.write(JSON.stringify(out));
     assert "— agent time" in joined, "a missing active-time answer printed as 0"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_the_machine_name_still_resolves_for_the_page_footer(tmp_path: Path) -> None:
     """The card no longer names the machine (cosyncing review item 8), but the
     page footer and the nickname hint still do. A remote server prints its
     registry label; the local box prints the translated fallback, since "Local"
     is a UI label and not a name; an owned nickname wins over both."""
-    body = _card_harness(_source()) + _extract_js_function(_source(), "function usageReportMachineName() {")
+    body = _card_harness(_source()) + extract_js_function(_source(), "function usageReportMachineName() {")
     body += """
 const cases = [
   [{ id: 'local', label: 'Local' }, ''],
@@ -2521,7 +2507,7 @@ process.stdout.write(JSON.stringify(out));
     assert "nicknameInput.placeholder = usageReportMachineName()" in _source()
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_the_card_heat_drops_the_week_and_squares_the_month(tmp_path: Path) -> None:
     """The week card drops the heat block -- one row of stretched cells reads
     as a loading artifact. The month card takes the page's presentation
@@ -2585,14 +2571,14 @@ process.stdout.write(JSON.stringify(out));
 def test_the_page_hides_the_day_and_week_card_and_centres_the_month() -> None:
     """Short windows hide the whole daily card; months retain the square grid."""
     source = _source()
-    heat = _extract_js_function(source, "function usageReportRenderHeat(model) {")
+    heat = extract_js_function(source, "function usageReportRenderHeat(model) {")
     week = heat[heat.index("model.period === 'week'") :]
     assert "usageReportLegend').replaceChildren()" in week
     assert "usageReportStreak'), ''" in week
     assert week.index("return;") < heat.index("model.period !== 'year'") - heat.index("model.period === 'week'"), (
         "the week branch must return before the month/year grids are built"
     )
-    controls = _extract_js_function(source, "function usageReportRenderControls() {")
+    controls = extract_js_function(source, "function usageReportRenderControls() {")
     assert "getElementById('usageReportDaysPanel').hidden = ['day', 'week'].includes(usageReportState.period)" in controls
     month_rule = next(line for line in source.splitlines() if line.strip().startswith(".usage-report-month {"))
     assert "repeat(7, 24px)" in month_rule
@@ -2621,7 +2607,7 @@ def test_share_panel_offers_two_tiers_and_three_export_paths() -> None:
 def test_every_export_writes_both_themes_for_the_tier_it_names() -> None:
     """Howard's rule: a download is never one file, and never the on-screen theme."""
     source = _source()
-    export = _extract_js_function(source, "async function usageReportExportCards(tier) {")
+    export = extract_js_function(source, "async function usageReportExportCards(tier) {")
     assert "for (const mode of ['light', 'dark'])" in export
     assert "tiers = tier === 'all' ? ['green', 'amber'] : [tier]" in export
     assert export.count("toBlob") == 1, "one paint-to-file path, so previews and files agree"
@@ -2637,11 +2623,11 @@ def test_a_download_never_names_a_window_it_did_not_paint() -> None:
     previous window's pixels, and the version stamp is rarely in for the first
     paint, so the cards have to be repainted when it lands."""
     source = _source()
-    share = _extract_js_function(source, "async function usageReportRenderShare(model) {")
+    share = extract_js_function(source, "async function usageReportRenderShare(model) {")
     assert share.index("usageReportState.previews = {}") < share.index("await usageReportCardFonts()"), (
         "the preview set has to be retired before the paint goes async"
     )
-    version = _extract_js_function(source, "function usageReportLoadVersion() {")
+    version = extract_js_function(source, "function usageReportLoadVersion() {")
     assert "usageReportRenderShare(usageReportState.model)" in version
 
 
@@ -2651,13 +2637,13 @@ def test_a_landing_load_leaves_a_half_typed_nickname_alone() -> None:
     still typing would otherwise wipe text that has not been committed yet.
     """
     block = _report_block(_source())
-    render = _extract_js_function(block, "function usageReportRender() {")
+    render = extract_js_function(block, "function usageReportRender() {")
     assert "usageReportShareHint()" in render
     assert "usageReportSyncShareInputs()" not in render
-    hint = _extract_js_function(block, "function usageReportShareHint() {")
+    hint = extract_js_function(block, "function usageReportShareHint() {")
     assert ".value" not in hint, "only the placeholder may be written on a render"
     assert "placeholder = usageReportMachineName()" in hint
-    wire = _extract_js_function(block, "function usageReportWireShare() {")
+    wire = extract_js_function(block, "function usageReportWireShare() {")
     assert "usageReportSyncShareInputs()" in wire, "stored prefs still reach the field once, at wire time"
 
 
@@ -2665,13 +2651,13 @@ def test_share_card_colours_follow_the_theme_with_a_literal_fallback() -> None:
     """The card wears the active theme in both exported modes; the literal slate
     palette survives only as the no-stylesheet fallback (and the node tests)."""
     source = _source()
-    palette = _extract_js_function(source, "function usageReportCardPalette(mode) {")
+    palette = extract_js_function(source, "function usageReportCardPalette(mode) {")
     assert "usageReportThemeTokens(theme, dark)" in palette
     assert "getHeatColors(theme, dark)" in palette, "the ramp is the theme's own, not the default scale"
     assert "USAGE_REPORT_CARD_FALLBACK[mode]" in palette
-    tokens = _extract_js_function(source, "function usageReportThemeTokens(theme, dark) {")
+    tokens = extract_js_function(source, "function usageReportThemeTokens(theme, dark) {")
     assert 'html.dark[data-ui-theme="' in tokens, "the dark export must read the theme's dark tokens"
-    fallback = _extract_js_function(source, "const USAGE_REPORT_CARD_FALLBACK = {")
+    fallback = extract_js_function(source, "const USAGE_REPORT_CARD_FALLBACK = {")
     assert "var(--" not in fallback
     assert "heat: DEFAULT_HEAT_COLORS_LIGHT" in fallback
     assert "heat: DEFAULT_HEAT_COLORS_DARK" in fallback
@@ -2688,8 +2674,8 @@ def test_the_prefs_key_follows_the_convention_the_page_already_uses() -> None:
 
 def test_share_prefs_carry_the_nickname_and_the_cost_choice() -> None:
     source = _source()
-    read = _extract_js_function(source, "function usageReportReadPrefs() {")
-    write = _extract_js_function(source, "function usageReportWritePrefs() {")
+    read = extract_js_function(source, "function usageReportReadPrefs() {")
+    write = extract_js_function(source, "function usageReportWritePrefs() {")
     for fn in (read, write):
         assert "nickname" in fn and "includeCost" in fn
     # Cost prints by default (the header is tokens + cost); the toggle is the
@@ -2705,8 +2691,8 @@ def test_a_control_changed_mid_flight_is_applied_late_not_dropped() -> None:
     trace; now the control snaps back and the choice runs when the load lands.
     """
     block = _report_block(_source())
-    loader = _extract_js_function(block, "async function loadUsageReport(options = {}) {")
-    wire = _extract_js_function(block, "function usageReportWire() {")
+    loader = extract_js_function(block, "async function loadUsageReport(options = {}) {")
+    wire = extract_js_function(block, "function usageReportWire() {")
     # One exit, not two. The load used to return early on a total failure and had to
     # remember to settle the queue on both paths; the try/finally collapsed them, so
     # "every exit settles the queue" is now structurally true rather than duplicated.
@@ -2715,7 +2701,7 @@ def test_a_control_changed_mid_flight_is_applied_late_not_dropped() -> None:
     assert "usageReportState.pendingPeriod = button.dataset.period" in wire
     assert "usageReportState.pendingServerId = select.value" in wire
     assert "select.value = usageReportState.serverId" in wire, "the box names the server actually on screen"
-    applied = _extract_js_function(block, "function usageReportApplyPendingChoice() {")
+    applied = extract_js_function(block, "function usageReportApplyPendingChoice() {")
     # A plain load, not a forced one. The queued choice is a period or server the
     # reader has not seen yet, so it wants the cache like any other first load;
     # forcing a recompute made clicking during a load the slowest path in the tab.
@@ -2729,6 +2715,6 @@ def test_a_control_changed_mid_flight_is_applied_late_not_dropped() -> None:
 def test_the_share_panel_is_cleared_before_the_next_load() -> None:
     """Stale previews would export a period the header no longer names."""
     block = _report_block(_source())
-    loading = _extract_js_function(block, "function usageReportRenderLoading() {")
+    loading = extract_js_function(block, "function usageReportRenderLoading() {")
     assert "usageReportClearShare()" in loading
     assert "usageReportState.previews = {}" in block

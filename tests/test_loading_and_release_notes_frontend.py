@@ -11,26 +11,13 @@ from pathlib import Path
 
 import tokdash  # type: ignore[import-untyped]
 
+from support.frontend import extract_js_function
+
+
 STATIC_DIR = Path(tokdash.__file__).parent / "static"
 INDEX_HTML = STATIC_DIR / "index.html"
 RELEASE_NOTES = STATIC_DIR / "release-notes.json"
 THEMES_CSS = STATIC_DIR / "themes.css"
-
-
-def _extract_js_function(source: str, signature: str) -> str:
-    start = source.find(signature)
-    assert start != -1, f"{signature} not found in index.html"
-    body_start = start + len(signature) - 1
-    assert source[body_start] == "{", f"{signature} must end at the function body"
-    depth = 0
-    for index in range(body_start, len(source)):
-        if source[index] == "{":
-            depth += 1
-        elif source[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return source[start : index + 1]
-    raise AssertionError(f"unterminated JavaScript function: {signature}")
 
 
 def test_document_background_covers_the_full_page() -> None:
@@ -104,9 +91,9 @@ def test_release_notes_accessible_drawer_contract() -> None:
 
 def test_release_notes_render_with_text_content_and_lazy_local_fetch() -> None:
     source = INDEX_HTML.read_text(encoding="utf-8")
-    renderer = _extract_js_function(source, "function renderReleaseNotes(payload) {")
-    loader = _extract_js_function(source, "async function loadReleaseNotes() {")
-    opener = _extract_js_function(source, "async function openReleaseNotes() {")
+    renderer = extract_js_function(source, "function renderReleaseNotes(payload) {")
+    loader = extract_js_function(source, "async function loadReleaseNotes() {")
+    opener = extract_js_function(source, "async function openReleaseNotes() {")
 
     assert "itemElement.textContent = item;" in renderer
     assert "replaceChildren" in renderer

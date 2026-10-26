@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -10,30 +9,18 @@ import pytest
 
 import tokdash
 
+from support.frontend import extract_js_function, needs_node
+
+
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 
-pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
-
-
-def _extract_js_function(src: str, signature: str) -> str:
-    start = src.find(signature)
-    assert start >= 0, f"{signature} not found"
-    depth = 0
-    body_start = start + len(signature) - 1 if signature.endswith("{") else src.find("{", start)
-    for index in range(body_start, len(src)):
-        if src[index] == "{":
-            depth += 1
-        elif src[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return src[start : index + 1]
-    raise AssertionError(f"unterminated function: {signature}")
+pytestmark = needs_node
 
 
 def _run(tmp_path: Path, script: str) -> dict:
     source = INDEX_HTML.read_text(encoding="utf-8")
     functions = "\n".join(
-        _extract_js_function(source, signature)
+        extract_js_function(source, signature)
         for signature in (
             "function usageSourceErrors(payload) {",
             "function reconcileUsageRows(rows, windowKey, servers = selectedServers(), cache = lastUsageRowsByServer) {",
@@ -154,11 +141,11 @@ process.stdout.write(JSON.stringify({
 
 def test_refresh_report_is_accessible_and_the_scan_stays_incremental() -> None:
     html = INDEX_HTML.read_text(encoding="utf-8")
-    updater = _extract_js_function(
+    updater = extract_js_function(
         html,
         "async function updateDashboard(customDays = null, dateFrom = null, dateTo = null, options = {}) {",
     )
-    reconcile = _extract_js_function(
+    reconcile = extract_js_function(
         html,
         "function reconcileUsageRows(rows, windowKey, servers = selectedServers(), cache = lastUsageRowsByServer) {",
     )
@@ -261,7 +248,7 @@ def test_the_cached_status_is_wired_into_the_panel_and_every_locale() -> None:
         "read 'cached data — old'"
     )
     # The verdict is only honest if the builder is told whether work was requested.
-    updater = _extract_js_function(
+    updater = extract_js_function(
         html,
         "async function updateDashboard(customDays = null, dateFrom = null, dateTo = null, options = {}) {",
     )

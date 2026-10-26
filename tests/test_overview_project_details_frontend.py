@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -21,29 +20,16 @@ import pytest
 
 import tokdash
 
+from support.frontend import extract_js_function, needs_node
+
+
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 
-pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+pytestmark = needs_node
 
 
 def _source() -> str:
     return INDEX_HTML.read_text(encoding="utf-8")
-
-
-def _extract_js_function(source: str, signature: str) -> str:
-    start = source.find(signature)
-    assert start != -1, f"{signature} not found in index.html"
-    body_start = start + len(signature) - 1
-    assert source[body_start] == "{", f"{signature} must end at the function body"
-    depth = 0
-    for index in range(body_start, len(source)):
-        if source[index] == "{":
-            depth += 1
-        elif source[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return source[start : index + 1]
-    raise AssertionError(f"unterminated JavaScript function: {signature}")
 
 
 def _declaration(source: str, prefix: str) -> str:
@@ -90,7 +76,7 @@ def test_the_section_sits_under_combined_models_and_sorts_every_column() -> None
 def test_the_share_column_sorts_numerically_and_remembered_its_arrows() -> None:
     """Share is a fraction, so a string comparison would rank 9% above 40%."""
     source = _source()
-    state = _extract_js_function(source, "const breakdownSortState = {")
+    state = extract_js_function(source, "const breakdownSortState = {")
     assert "projects: { field: 'tokens', direction: 'desc' }" in state
     numeric = _declaration(source, "const BREAKDOWN_NUMERIC_FIELDS")
     assert "'share'" in numeric, "the share column would sort as text"
@@ -102,10 +88,10 @@ def test_the_share_column_sorts_numerically_and_remembered_its_arrows() -> None:
 def test_a_range_change_clears_it_and_a_failure_says_so() -> None:
     """Two ways the table can lie: yesterday's rows, and a silent failed read."""
     source = _source()
-    cleared = _extract_js_function(source, "function clearOverviewBreakdowns() {")
+    cleared = extract_js_function(source, "function clearOverviewBreakdowns() {")
     assert "clearOverviewFacets();" in cleared, "the new breakdown is not cleared with the others"
 
-    loader = _extract_js_function(source, "async function loadOverviewFacets(customDays, dateFrom, dateTo, options = {}) {")
+    loader = extract_js_function(source, "async function loadOverviewFacets(customDays, dateFrom, dateTo, options = {}) {")
     assert "overviewFacetsState.status = 'error'" in loader
     assert loader.index("catch (error)") < loader.rindex("updateProjectDetailsTable()"), (
         "a failed read must repaint the error row rather than leave the spinner up"
@@ -116,7 +102,7 @@ def test_a_range_change_clears_it_and_a_failure_says_so() -> None:
 
     # It runs in the same deferred tail as the active-time card, so a range the
     # user has already left behind does not open a fifth request.
-    update = _extract_js_function(
+    update = extract_js_function(
         source, "async function updateDashboard(customDays = null, dateFrom = null, dateTo = null, options = {}) {"
     )
     assert "loadOverviewFacets(customDays, dateFrom, dateTo, { force: forceRefresh })" in update
@@ -169,10 +155,10 @@ process.stdout.write(JSON.stringify({
 
 def _merge_source() -> str:
     source = _source()
-    return _extract_js_function(source, "function combineOverviewFacets(payloads) {")
+    return extract_js_function(source, "function combineOverviewFacets(payloads) {")
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_the_facet_is_merged_across_servers_rather_than_replaced_by_one(tmp_path: Path) -> None:
     """The Overview reads every selected server, so the ranks have to be added.
 
@@ -330,7 +316,7 @@ process.stdout.write(JSON.stringify(out));
 def _table_body() -> str:
     source = _source()
     parts = [
-        _extract_js_function(source, sig)
+        extract_js_function(source, sig)
         for sig in (
             "function getBreakdownComparator(field, direction) {",
             "function projectDetailsLoadingRow() {",
@@ -343,14 +329,14 @@ def _table_body() -> str:
     parts.append(_declaration(source, "const BREAKDOWN_NUMERIC_FIELDS"))
     parts.append(_declaration(source, "const MAX_PROJECT_DETAIL_ROWS"))
     parts.append(_declaration(source, "let projectDetailsShowAll"))
-    parts.append(_extract_js_function(source, "const breakdownSortState = {"))
+    parts.append(extract_js_function(source, "const breakdownSortState = {"))
     parts.append(
         "const overviewFacetsState = { key: null, rows: [], toolMessages: null, unattributedTokens: 0, facetTotal: 0, status: 'idle', requestId: 0 };"
     )
     return "\n".join(parts)
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_the_table_prints_the_rank_the_header_promises(tmp_path: Path) -> None:
     source = _table_body()
     out = _run_node(tmp_path, "project-details-table.js", source + TABLE_FIXTURE)

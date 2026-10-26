@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 import unicodedata
 from pathlib import Path
@@ -18,6 +17,9 @@ from pathlib import Path
 import pytest
 
 import tokdash  # type: ignore[import-untyped]
+
+from support.frontend import extract_i18n_literal, needs_node
+
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -43,18 +45,10 @@ TRANSLATED_READMES = (
 OPTIONAL_PLACEHOLDERS = {"{s}"}
 
 
-def _extract_i18n_literal(source: str) -> str:
-    start = source.find("const I18N = {")
-    assert start != -1, "const I18N = { not found in index.html"
-    end = source.find("\n    };", start)
-    assert end != -1, "unterminated I18N object in index.html"
-    return source[start : end + 6]
-
-
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_i18n_language_parity(tmp_path: Path) -> None:
     source = INDEX_HTML.read_text(encoding="utf-8")
-    literal = _extract_i18n_literal(source)
+    literal = extract_i18n_literal(source)
 
     blocks = dict(
         re.findall(r"^      ([a-z]+): \{\n(.*?)^      \},?$", literal, re.M | re.S)

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +12,9 @@ import pytest
 import tokdash
 from tokdash import sessions
 from tokdash.sessions import get_active_time_data
+
+from support.frontend import extract_js_function, needs_node
+
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 
@@ -380,23 +382,6 @@ def test_the_warmer_and_the_route_share_a_cache_key(monkeypatch):
 # --- Dashboard wiring -------------------------------------------------------
 
 
-def _extract_js_function(src: str, signature: str) -> str:
-    start = src.find(signature)
-    assert start >= 0, f"{signature} not found"
-    depth = 0
-    # Start at the signature's own brace: a default like `options = {}` would
-    # otherwise close the body before it opens.
-    body_start = start + len(signature) - 1 if signature.endswith("{") else src.find("{", start)
-    for index in range(body_start, len(src)):
-        if src[index] == "{":
-            depth += 1
-        elif src[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return src[start : index + 1]
-    raise AssertionError(f"unterminated function: {signature}")
-
-
 def test_the_card_sits_after_total_messages_in_a_six_column_row():
     source = INDEX_HTML.read_text(encoding="utf-8")
     kpis = source.split('<!-- KPI cards -->', 1)[1].split("</section>", 1)[0]
@@ -416,7 +401,7 @@ def test_the_card_sits_after_total_messages_in_a_six_column_row():
 def test_the_total_tokens_value_carries_no_unit():
     """The card's own label says "Total Tokens"; the value only costs width."""
     source = INDEX_HTML.read_text(encoding="utf-8")
-    renderer = _extract_js_function(source, "function renderOverviewTokenTotal(value = overviewTotalTokensRaw, staticText = null) {")
+    renderer = extract_js_function(source, "function renderOverviewTokenTotal(value = overviewTotalTokensRaw, staticText = null) {")
 
     assert "formatCompactTokenCount(overviewTotalTokensRaw)" in renderer
     assert "formatReadableTokenCount" not in source
@@ -428,7 +413,7 @@ def test_the_total_tokens_value_carries_no_unit():
         "setKpiExactReadout('totalTokens', 'totalTokensExact'"
         in renderer
     )
-    readout = _extract_js_function(
+    readout = extract_js_function(
         source,
         "function setKpiExactReadout(valueId, tooltipId, text, note = '') {",
     )
@@ -438,8 +423,8 @@ def test_the_total_tokens_value_carries_no_unit():
 def test_the_card_is_rendered_on_every_path_that_can_change_it():
     source = INDEX_HTML.read_text(encoding="utf-8")
 
-    assert "renderOverviewActiveTime();" in _extract_js_function(source, "function renderOverviewTab(data) {")
-    assert "renderOverviewActiveTime();" in _extract_js_function(source, "function applyI18n() {")
+    assert "renderOverviewActiveTime();" in extract_js_function(source, "function renderOverviewTab(data) {")
+    assert "renderOverviewActiveTime();" in extract_js_function(source, "function applyI18n() {")
     assert "loadOverviewActiveTime(customDays, dateFrom, dateTo, { force: forceRefresh })" in source
     # Review sessions count towards active time, so the toggle must refetch.
     toggle = source.split("getElementById('codexReviewToggle')?.addEventListener", 1)[1].split("});", 1)[0]
@@ -448,7 +433,7 @@ def test_the_card_is_rendered_on_every_path_that_can_change_it():
 
 def test_a_stale_reply_cannot_overwrite_a_newer_range():
     source = INDEX_HTML.read_text(encoding="utf-8")
-    loader = _extract_js_function(source, "async function loadOverviewActiveTime(customDays, dateFrom, dateTo, options = {}) {")
+    loader = extract_js_function(source, "async function loadOverviewActiveTime(customDays, dateFrom, dateTo, options = {}) {")
 
     assert "const requestId = ++overviewActiveTimeState.requestId;" in loader
     assert loader.count("if (requestId !== overviewActiveTimeState.requestId) return;") == 2
@@ -457,8 +442,8 @@ def test_a_stale_reply_cannot_overwrite_a_newer_range():
 def test_a_new_range_blanks_the_card_before_it_loads():
     """A cold read takes seconds; the old range's figure must not sit under the new one."""
     source = INDEX_HTML.read_text(encoding="utf-8")
-    invalidate = _extract_js_function(source, "function invalidateOverviewActiveTime(customDays, dateFrom, dateTo) {")
-    loader = _extract_js_function(source, "async function loadOverviewActiveTime(customDays, dateFrom, dateTo, options = {}) {")
+    invalidate = extract_js_function(source, "function invalidateOverviewActiveTime(customDays, dateFrom, dateTo) {")
+    loader = extract_js_function(source, "async function loadOverviewActiveTime(customDays, dateFrom, dateTo, options = {}) {")
 
     assert "if (overviewActiveTimeState.key === requestKey && overviewActiveTimeState.data) return false;" in invalidate
     assert "overviewActiveTimeState.data = null;" in invalidate
@@ -474,7 +459,7 @@ def test_a_new_range_blanks_the_card_before_it_loads():
 def test_the_card_is_cleared_the_moment_the_range_changes():
     """Its fetch waits behind /api/usage; the clear must not wait with it."""
     source = INDEX_HTML.read_text(encoding="utf-8")
-    updater = _extract_js_function(source, "async function updateDashboard(customDays = null, dateFrom = null, dateTo = null, options = {}) {")
+    updater = extract_js_function(source, "async function updateDashboard(customDays = null, dateFrom = null, dateTo = null, options = {}) {")
     before_fetch = updater.split("try {", 1)[0]
 
     assert "invalidateOverviewActiveTime(customDays, dateFrom, dateTo);" in before_fetch
@@ -489,7 +474,7 @@ def test_a_range_change_during_a_load_is_queued_not_dropped():
     fetches in tests/test_dashboard_queue_frontend.py.
     """
     source = INDEX_HTML.read_text(encoding="utf-8")
-    updater = _extract_js_function(source, "async function updateDashboard(customDays = null, dateFrom = null, dateTo = null, options = {}) {")
+    updater = extract_js_function(source, "async function updateDashboard(customDays = null, dateFrom = null, dateTo = null, options = {}) {")
     guard = updater.split("let usageApiUrl;", 1)[0]
     finally_block = updater.split("} finally {", 1)[1]
 
@@ -515,7 +500,7 @@ def test_a_range_change_during_a_load_is_queued_not_dropped():
 
 def test_manual_refresh_reaches_the_server_cache():
     source = INDEX_HTML.read_text(encoding="utf-8")
-    loader = _extract_js_function(source, "async function loadOverviewActiveTime(customDays, dateFrom, dateTo, options = {}) {")
+    loader = extract_js_function(source, "async function loadOverviewActiveTime(customDays, dateFrom, dateTo, options = {}) {")
 
     assert "const refreshParam = force ? '&refresh=1' : '';" in loader
     assert "${reviewParam}${refreshParam}" in loader
@@ -524,7 +509,7 @@ def test_manual_refresh_reaches_the_server_cache():
 def test_an_unchanged_range_still_refetches():
     """The 5-minute auto-refresh must move this card too, not freeze it."""
     source = INDEX_HTML.read_text(encoding="utf-8")
-    loader = _extract_js_function(source, "async function loadOverviewActiveTime(customDays, dateFrom, dateTo, options = {}) {")
+    loader = extract_js_function(source, "async function loadOverviewActiveTime(customDays, dateFrom, dateTo, options = {}) {")
     before_request = loader.split("try {", 1)[0]
 
     assert "return;" not in before_request
@@ -533,7 +518,7 @@ def test_an_unchanged_range_still_refetches():
 def test_the_request_key_identifies_the_servers():
     """Selections of equal size must not collide on "[object Object]"."""
     source = INDEX_HTML.read_text(encoding="utf-8")
-    key_fn = _extract_js_function(source, "function activeTimeRequestKey(customDays, dateFrom, dateTo) {")
+    key_fn = extract_js_function(source, "function activeTimeRequestKey(customDays, dateFrom, dateTo) {")
 
     assert "server.id" in key_fn
     assert ".sort()" in key_fn
@@ -551,7 +536,7 @@ def test_active_time_overview_labels_exist_in_both_languages():
 def test_the_card_shows_agent_time_and_its_delta():
     """Agent time is additive, so several servers need no relabelling."""
     source = INDEX_HTML.read_text(encoding="utf-8")
-    renderer = _extract_js_function(source, "function renderOverviewActiveTime() {")
+    renderer = extract_js_function(source, "function renderOverviewActiveTime() {")
 
     assert "formatDuration(data.active_ms_sum)" in renderer
     assert "formatDuration(data.active_ms)" not in renderer, "the union figure is no longer shown"
@@ -561,7 +546,7 @@ def test_the_card_shows_agent_time_and_its_delta():
     assert "_server_count" not in renderer
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_the_card_says_loading_rather_than_answering_with_a_dash(tmp_path):
     """The card's own request runs behind /api/usage, so it answers a beat later.
 
@@ -603,14 +588,14 @@ function fitKpiValue() {}
 """
         # The card's exact-value readout is written by the shared helper all six
         # KPI cards use, with its own unrounded-duration formatter behind it.
-        + _extract_js_function(
+        + extract_js_function(
             source,
             "function setKpiExactReadout(valueId, tooltipId, text, note = '') {",
         )
         + "\n"
-        + _extract_js_function(source, "function formatExactDuration(ms) {")
+        + extract_js_function(source, "function formatExactDuration(ms) {")
         + "\n"
-        + _extract_js_function(source, "function renderOverviewActiveTime() {")
+        + extract_js_function(source, "function renderOverviewActiveTime() {")
         + """
 const out = {};
 const snapshot = () => ({
@@ -655,7 +640,7 @@ process.stdout.write(JSON.stringify(out));
     assert out["ready"]["text"] == "dur:42"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_equal_sized_server_selections_get_different_keys(tmp_path):
     source = INDEX_HTML.read_text(encoding="utf-8")
     harness = tmp_path / "active-time-key.js"
@@ -664,7 +649,7 @@ def test_equal_sized_server_selections_get_different_keys(tmp_path):
         "let SERVERS = [];\n"
         "function windowKeyFor() { return 'w'; }\n"
         "function selectedServers() { return SERVERS; }\n"
-        + _extract_js_function(source, "function activeTimeRequestKey(customDays, dateFrom, dateTo) {")
+        + extract_js_function(source, "function activeTimeRequestKey(customDays, dateFrom, dateTo) {")
         + "\nconst input = JSON.parse(process.argv[2]);\n"
         + "process.stdout.write(JSON.stringify(input.map((selection) => {\n"
         + "  SERVERS = selection;\n"
@@ -695,9 +680,9 @@ def _combine(tmp_path, payloads):
     source = INDEX_HTML.read_text(encoding="utf-8")
     harness = tmp_path / "active-time.js"
     harness.write_text(
-        _extract_js_function(source, "function pctChange(current, previous) {")
+        extract_js_function(source, "function pctChange(current, previous) {")
         + "\n"
-        + _extract_js_function(source, "function combineActiveTimePayloads(payloads) {")
+        + extract_js_function(source, "function combineActiveTimePayloads(payloads) {")
         + "\nconst input = JSON.parse(process.argv[2]);\n"
         + "process.stdout.write(JSON.stringify(combineActiveTimePayloads(input)));\n",
         encoding="utf-8",
@@ -712,7 +697,7 @@ def _combine(tmp_path, payloads):
     )
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_server_payloads_are_added_up(tmp_path):
     payloads = [
         {"active_ms": 100, "active_ms_sum": 150, "active_gap_cap_ms": 300_000, "unavailable_tools": ["mimo"]},
@@ -728,7 +713,7 @@ def test_server_payloads_are_added_up(tmp_path):
     assert result["comparison"] is None, "no server reported one"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_the_per_tool_rows_are_added_up_the_same_way(tmp_path):
     """The tools table ranks by these rows, so a second server has to add to a
     tool's session count and agent time rather than replace them."""
@@ -763,7 +748,7 @@ def test_the_per_tool_rows_are_added_up_the_same_way(tmp_path):
     assert result["active_ms_sum"] == 180, "the headline still adds every tool"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_the_delta_is_recomputed_from_the_combined_totals(tmp_path):
     """Averaging the servers' percentages would weight a quiet one like a busy one."""
     payloads = [
@@ -790,7 +775,7 @@ def test_the_delta_is_recomputed_from_the_combined_totals(tmp_path):
     assert result["comparison"]["active_ms_pct"] == 60.0
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_a_zero_previous_window_has_no_percentage(tmp_path):
     """First day of use: the card shows a runtime and no delta, not an infinite one."""
     payloads = [

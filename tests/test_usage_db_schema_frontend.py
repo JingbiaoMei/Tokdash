@@ -10,13 +10,14 @@ on. These tests pin the message end to end through the two frontend seams.
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
 
 import tokdash
+
+from support.frontend import extract_js_function, needs_node
+
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 
@@ -27,52 +28,16 @@ SCHEMA_DETAIL = (
     "Tokdash processes using this data directory"
 )
 
-needs_node = pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
-
-
-def _extract_js_function(src: str, signature: str) -> str:
-    """Slice one function out of index.html, parameter defaults included.
-
-    The naive "count braces from the first `{`" approach used elsewhere in the
-    suite stops at the first default-value object literal -- `fetchSelectedServers`
-    declares `options = {}`, so the scan would open and close on the parameter
-    list and return a stub. The parameter list is therefore skipped by matching
-    parentheses first, and only then is the body brace-matched.
-    """
-    start = src.find(signature)
-    assert start >= 0, f"{signature} not found"
-
-    index = src.index("(", start)
-    depth = 0
-    while index < len(src):
-        if src[index] == "(":
-            depth += 1
-        elif src[index] == ")":
-            depth -= 1
-            if depth == 0:
-                break
-        index += 1
-    else:  # pragma: no cover - malformed source
-        raise AssertionError(f"unterminated parameter list: {signature}")
-
-    depth = 0
-    for index in range(src.index("{", index), len(src)):
-        if src[index] == "{":
-            depth += 1
-        elif src[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return src[start : index + 1]
-    raise AssertionError(f"unterminated function: {signature}")
+needs_node = needs_node
 
 
 def _functions() -> str:
     src = INDEX_HTML.read_text(encoding="utf-8")
     return "\n".join(
         [
-            _extract_js_function(src, "function collectServerResults("),
-            _extract_js_function(src, "async function fetchSelectedServers("),
-            _extract_js_function(src, "function dashboardFetchStatusText("),
+            extract_js_function(src, "function collectServerResults("),
+            extract_js_function(src, "async function fetchSelectedServers("),
+            extract_js_function(src, "function dashboardFetchStatusText("),
         ]
     )
 
@@ -228,7 +193,7 @@ def test_status_text_keeps_detail_but_not_for_503(tmp_path: Path) -> None:
 def test_status_line_is_rendered_from_the_shared_helper() -> None:
     """setDashboardFetchStatus must not keep its own copy of the message policy."""
     src = INDEX_HTML.read_text(encoding="utf-8")
-    setter = _extract_js_function(src, "function setDashboardFetchStatus(")
+    setter = extract_js_function(src, "function setDashboardFetchStatus(")
     assert "dashboardFetchStatusText(error)" in setter
     assert "temporaryOverload" not in setter
 
@@ -317,11 +282,11 @@ def _run_quota(tmp_path: Path, scenario: dict):
     src = INDEX_HTML.read_text(encoding="utf-8")
     functions = "\n".join(
         [
-            _extract_js_function(src, "function collectServerResults("),
-            _extract_js_function(src, "function dashboardFetchStatusText("),
-            _extract_js_function(src, "function quotaStatusElement("),
-            _extract_js_function(src, "function setQuotaFetchStatus("),
-            _extract_js_function(src, "async function loadQuota("),
+            extract_js_function(src, "function collectServerResults("),
+            extract_js_function(src, "function dashboardFetchStatusText("),
+            extract_js_function(src, "function quotaStatusElement("),
+            extract_js_function(src, "function setQuotaFetchStatus("),
+            extract_js_function(src, "async function loadQuota("),
         ]
     )
     harness = tmp_path / "quota.js"
@@ -398,7 +363,7 @@ def test_quota_success_clears_a_stale_error(tmp_path: Path) -> None:
 def test_quota_path_has_no_private_settlement_logic() -> None:
     """loadQuota must not grow a second copy of the settlement policy."""
     src = INDEX_HTML.read_text(encoding="utf-8")
-    load_quota = _extract_js_function(src, "async function loadQuota(")
+    load_quota = extract_js_function(src, "async function loadQuota(")
     assert "collectServerResults(servers, settled)" in load_quota
     assert "setQuotaFetchStatus" in load_quota
     # The old private bookkeeping is gone: no direct status writes, no bare
@@ -450,10 +415,10 @@ def _run_refresh(tmp_path: Path, scenario: dict):
     src = INDEX_HTML.read_text(encoding="utf-8")
     functions = "\n".join(
         [
-            _extract_js_function(src, "function dashboardFetchStatusText("),
-            _extract_js_function(src, "function quotaStatusElement("),
-            _extract_js_function(src, "function setQuotaFetchStatus("),
-            _extract_js_function(src, "async function refreshQuotaViaGlobalButton("),
+            extract_js_function(src, "function dashboardFetchStatusText("),
+            extract_js_function(src, "function quotaStatusElement("),
+            extract_js_function(src, "function setQuotaFetchStatus("),
+            extract_js_function(src, "async function refreshQuotaViaGlobalButton("),
         ]
     )
     harness = tmp_path / "refresh.js"
@@ -565,13 +530,13 @@ def _run_write(tmp_path: Path, scenario: dict):
     src = INDEX_HTML.read_text(encoding="utf-8")
     functions = "\n".join(
         [
-            _extract_js_function(src, "function collectServerResults("),
-            _extract_js_function(src, "function dashboardFetchStatusText("),
-            _extract_js_function(src, "function quotaStatusElement("),
-            _extract_js_function(src, "function setQuotaFetchStatus("),
-            _extract_js_function(src, "function setQuotaActionStatus("),
-            _extract_js_function(src, "async function loadQuota("),
-            _extract_js_function(src, "async function setQuotaEnabled("),
+            extract_js_function(src, "function collectServerResults("),
+            extract_js_function(src, "function dashboardFetchStatusText("),
+            extract_js_function(src, "function quotaStatusElement("),
+            extract_js_function(src, "function setQuotaFetchStatus("),
+            extract_js_function(src, "function setQuotaActionStatus("),
+            extract_js_function(src, "async function loadQuota("),
+            extract_js_function(src, "async function setQuotaEnabled("),
         ]
     )
     harness = tmp_path / "write.js"
@@ -613,7 +578,7 @@ def test_all_quota_write_paths_gate_their_acknowledgment() -> None:
         "async function setQuotaInterval(",
     ]
     for signature in writers:
-        body = _extract_js_function(src, signature)
+        body = extract_js_function(src, signature)
         assert "if (await loadQuota({ force: true })) setQuotaActionStatus('saved');" in body, signature
         # The ungated sequence must not come back.
         assert "await loadQuota({ force: true });\n        setQuotaActionStatus('saved');" not in body

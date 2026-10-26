@@ -12,13 +12,15 @@ notice, by having the two halves disagree.
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
 import tokdash  # type: ignore[import-untyped]
+
+from support.frontend import extract_js_function, needs_node
+
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 
@@ -78,22 +80,8 @@ VIEW_FUNCTIONS = [
 ]
 
 
-def _extract_js_function(src: str, signature: str) -> str:
-    start = src.find(signature)
-    assert start >= 0, f"{signature} not found"
-    depth = 0
-    for index in range(src.find("{", start), len(src)):
-        if src[index] == "{":
-            depth += 1
-        elif src[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return src[start : index + 1]
-    raise AssertionError(f"unterminated function: {signature}")
-
-
 def _view_code(src: str) -> str:
-    return "\n".join(_extract_js_function(src, signature) for signature in VIEW_FUNCTIONS)
+    return "\n".join(extract_js_function(src, signature) for signature in VIEW_FUNCTIONS)
 
 
 def _run(tmp_path: Path, name: str, code: str, expression: str, value):
@@ -129,13 +117,13 @@ def _window(account, bucket, used=40.0):
     return {"account": account, "bucket": bucket, "used_percent": used, "bucket_label": "Session"}
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_a_siblings_windows_are_named_after_its_directory(tmp_path):
     src = INDEX_HTML.read_text(encoding="utf-8")
     code = _view_code(src) + "\n" + "\n".join(
         [
-            _extract_js_function(src, "function quotaWindowLabel(provider, bucket) {"),
-            _extract_js_function(src, "function quotaSeriesLabel(item) {"),
+            extract_js_function(src, "function quotaWindowLabel(provider, bucket) {"),
+            extract_js_function(src, "function quotaSeriesLabel(item) {"),
         ]
     )
     windows = [
@@ -188,7 +176,7 @@ def test_a_siblings_windows_are_named_after_its_directory(tmp_path):
     assert legend == ["Claude 5-hour", "Claude-academic 5-hour", "Claude-academic Weekly"]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_a_stored_bucket_id_reads_back_as_the_window_it_measures(tmp_path):
     """The prefix the backend writes and the label code that reads it are one convention.
 
@@ -220,7 +208,7 @@ def test_a_stored_bucket_id_reads_back_as_the_window_it_measures(tmp_path):
     ]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_the_title_only_shows_a_plan_every_shown_install_shares(tmp_path):
     """The plan line and the group headings are one decision, made from one group list."""
     src = INDEX_HTML.read_text(encoding="utf-8")
@@ -273,7 +261,7 @@ def test_the_title_only_shows_a_plan_every_shown_install_shares(tmp_path):
     assert views[3]["headings"] == ["Default · Max 5x", "lab"]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_one_install_renders_exactly_as_it_did_before_profiles(tmp_path):
     src = INDEX_HTML.read_text(encoding="utf-8")
     card = _card(
@@ -291,7 +279,7 @@ def test_one_install_renders_exactly_as_it_did_before_profiles(tmp_path):
     assert card["children"] == [["bar", "session"], ["bar", "weekly_all"]]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_each_install_gets_its_own_heading_bars_and_failure(tmp_path):
     src = INDEX_HTML.read_text(encoding="utf-8")
     card = _card(
@@ -323,7 +311,7 @@ def test_each_install_gets_its_own_heading_bars_and_failure(tmp_path):
     ]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_every_failing_install_is_named_when_none_of_them_reports(tmp_path):
     """Both tokens expired: the card has no window rows at all, and still has to say which
     install is broken rather than print one generic line."""
@@ -355,7 +343,7 @@ def test_every_failing_install_is_named_when_none_of_them_reports(tmp_path):
     ]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 @pytest.mark.parametrize(
     "payload",
     [
@@ -389,7 +377,7 @@ def test_the_card_holds_its_own_error_when_no_installs_are_named(tmp_path, paylo
     ]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_the_card_is_named_after_the_only_install_it_measures(tmp_path):
     """The title follows the installs on screen, in both directions.
 
@@ -448,7 +436,7 @@ def _minimax_card(tmp_path: Path, src: str, name: str, provider):
     return _run(
         tmp_path,
         name,
-        "\n".join(_extract_js_function(src, signature) for signature in MINIMAX_FUNCTIONS),
+        "\n".join(extract_js_function(src, signature) for signature in MINIMAX_FUNCTIONS),
         "(() => { const card = makeEl('card');"
         "const attributed = renderMiniMaxBuckets(card, (input.buckets || []).filter(isQuotaUsageBucket), input);"
         "if (!attributed || !quotaCardErrorIsAttributed(input)) appendQuotaStatusNotice(card, 'minimax', input);"
@@ -461,7 +449,7 @@ def _mm_window(account, used):
     return {"account": account, "bucket": "5h", "used_percent": used, "bucket_label": "5-hour window"}
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_a_failing_region_is_printed_under_that_region(tmp_path):
     """The card keeps the warning and puts it under the Token Plan that owns it.
 
@@ -497,7 +485,7 @@ def test_a_failing_region_is_printed_under_that_region(tmp_path):
     ]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_a_region_failure_still_shows_when_no_regions_are_named(tmp_path):
     """Single region, or a payload with no account list: nothing to attribute, so the
     renderer claims no notice and the caller's card-level one is what the user sees."""
@@ -517,7 +505,7 @@ def test_a_region_failure_still_shows_when_no_regions_are_named(tmp_path):
     assert card["children"] == [["bar", "5h"], ["notice", "fetch_error at 3 minutes ago"]]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_an_unattributed_card_error_goes_above_every_install(tmp_path):
     """With more than one install on the card, appending the notice attributes it by accident.
 
@@ -549,7 +537,7 @@ def test_an_unattributed_card_error_goes_above_every_install(tmp_path):
     ]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_a_card_error_belonging_to_no_listed_region_is_still_printed(tmp_path):
     """A region printing its OWN failure is not the card printing the card's.
 
@@ -590,7 +578,7 @@ def test_a_card_error_belonging_to_no_listed_region_is_still_printed(tmp_path):
     ]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_a_claude_card_error_belonging_to_no_install_is_still_printed(tmp_path):
     """Same rule on the Claude card, where the gap was wider.
 
@@ -629,7 +617,7 @@ def test_a_claude_card_error_belonging_to_no_install_is_still_printed(tmp_path):
     ]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_a_failing_region_with_no_bars_still_gets_its_own_heading(tmp_path):
     """A CN Token Plan whose key was never valid has an `api` status row and no buckets.
 
@@ -666,7 +654,7 @@ def test_a_failing_region_with_no_bars_still_gets_its_own_heading(tmp_path):
     ]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_two_failing_regions_are_both_shown(tmp_path):
     """One rendered region carrying an error used to claim the whole card's attribution.
 
@@ -704,7 +692,7 @@ def test_two_failing_regions_are_both_shown(tmp_path):
 # --- the multi-server views read the same payload ----------------------------------------
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_the_servers_tally_does_not_fault_a_working_subscription(tmp_path):
     """`providers.*.status` is the newest error of ANY account, not a verdict on the card.
 
@@ -727,10 +715,10 @@ def test_the_servers_tally_does_not_fault_a_working_subscription(tmp_path):
         "server-tally",
         "\n".join(
             [
-                _extract_js_function(src, "function quotaEntryFailed(entry) {"),
-                _extract_js_function(src, "function quotaCardErrorIsAttributed(provider) {"),
-                _extract_js_function(src, "function quotaProviderCounts(provider) {"),
-                _extract_js_function(src, "function quotaProviderTally(providers) {"),
+                extract_js_function(src, "function quotaEntryFailed(entry) {"),
+                extract_js_function(src, "function quotaCardErrorIsAttributed(provider) {"),
+                extract_js_function(src, "function quotaProviderCounts(provider) {"),
+                extract_js_function(src, "function quotaProviderTally(providers) {"),
             ]
         ),
         "{ tally: quotaProviderTally(input), each: input.map(quotaProviderCounts) }",
@@ -821,7 +809,7 @@ def _resets(title, expires_at, count=1):
     }
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_one_install_shows_its_resets_under_its_bars(tmp_path):
     """The Codex "Reset Credits" block, fed from Claude's own reset inventory."""
     src = INDEX_HTML.read_text(encoding="utf-8")
@@ -841,7 +829,7 @@ def test_one_install_shows_its_resets_under_its_bars(tmp_path):
     ]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_each_install_shows_only_its_own_resets(tmp_path):
     src = INDEX_HTML.read_text(encoding="utf-8")
     card = _card(
@@ -866,7 +854,7 @@ def test_each_install_shows_only_its_own_resets(tmp_path):
     ]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_a_card_level_reset_is_not_copied_onto_a_sibling(tmp_path):
     """With an `accounts` list, only an install's own entry can put resets under it."""
     src = INDEX_HTML.read_text(encoding="utf-8")
@@ -887,7 +875,7 @@ def test_a_card_level_reset_is_not_copied_onto_a_sibling(tmp_path):
     assert [child[0] for child in card["children"]] == ["heading", "bar", "resets", "heading", "bar"]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_one_installs_card_notice_sits_between_its_bars_and_its_resets(tmp_path):
     """Bars, notice, resets -- the Codex card's order -- so a warning never reads as the resets'."""
     src = INDEX_HTML.read_text(encoding="utf-8")
@@ -906,7 +894,7 @@ def test_one_installs_card_notice_sits_between_its_bars_and_its_resets(tmp_path)
     assert [child[0] for child in card["children"]] == ["bar", "notice", "resets"]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_resets_still_show_when_the_install_reported_no_windows(tmp_path):
     src = INDEX_HTML.read_text(encoding="utf-8")
     card = _card(

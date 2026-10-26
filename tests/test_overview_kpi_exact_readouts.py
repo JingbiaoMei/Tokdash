@@ -15,13 +15,14 @@ restate the card's own rounded figure with false precision.
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
 
 import tokdash  # type: ignore[import-untyped]
+
+from support.frontend import extract_js_function, needs_node
+
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 
@@ -38,21 +39,6 @@ KPI_READOUTS = (
 # The Tailwind colour each card's value is painted in, which its readout mirrors.
 # Cost's #34d399 is absent with its readout.
 KPI_TONES = ("#818cf8", "#c084fc", "#38bdf8", "#22d3ee", "#fcd34d")
-
-
-def _extract_js_function(source: str, signature: str) -> str:
-    start = source.find(signature)
-    assert start != -1, f"{signature} not found in index.html"
-    depth = 0
-    body_start = start + len(signature) - 1
-    for index in range(body_start, len(source)):
-        if source[index] == "{":
-            depth += 1
-        elif source[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return source[start : index + 1]
-    raise AssertionError(f"unterminated JavaScript function: {signature}")
 
 
 def _tooltip_rule(source: str) -> str:
@@ -148,7 +134,7 @@ def test_values_start_unfocusable_and_readouts_start_hidden() -> None:
             f'id="{tooltip_id}" class="overview-token-exact-tooltip"' in source
             and "hidden>-</div>" in source.split(f'id="{tooltip_id}"')[1][:200]
         ), f"{tooltip_id} should start hidden"
-    readout = _extract_js_function(
+    readout = extract_js_function(
         source, "function setKpiExactReadout(valueId, tooltipId, text, note = '') {"
     )
     assert "valueElement.tabIndex = 0" in readout
@@ -156,7 +142,7 @@ def test_values_start_unfocusable_and_readouts_start_hidden() -> None:
     assert "tooltip.hidden = true" in readout
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@needs_node
 def test_exact_duration_formatter_reports_the_seconds_the_card_drops(tmp_path: Path) -> None:
     """The agent-time readout is the only exact formatter left.
 
@@ -169,9 +155,9 @@ def test_exact_duration_formatter_reports_the_seconds_the_card_drops(tmp_path: P
     harness = tmp_path / "kpi-readout.js"
     harness.write_text(
         "function langLocale() { return 'en-US'; }\n"
-        + _extract_js_function(source, "function formatDuration(ms, exact = false) {")
+        + extract_js_function(source, "function formatDuration(ms, exact = false) {")
         + "\n"
-        + _extract_js_function(source, "function formatExactDuration(ms) {")
+        + extract_js_function(source, "function formatExactDuration(ms) {")
         + "\nprocess.stdout.write(JSON.stringify({"
         " hms: formatExactDuration(6954017),"
         " ms: formatExactDuration(45000),"

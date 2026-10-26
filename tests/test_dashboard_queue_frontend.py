@@ -9,32 +9,18 @@ any of that, so these run the extracted function against controllable promises.
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
 
 import tokdash
 
+from support.frontend import extract_js_function, needs_node
+
+
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 
-pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
-
-
-def _extract_js_function(src: str, signature: str) -> str:
-    start = src.find(signature)
-    assert start >= 0, f"{signature} not found"
-    depth = 0
-    body_start = start + len(signature) - 1 if signature.endswith("{") else src.find("{", start)
-    for index in range(body_start, len(src)):
-        if src[index] == "{":
-            depth += 1
-        elif src[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return src[start : index + 1]
-    raise AssertionError(f"unterminated function: {signature}")
+pytestmark = needs_node
 
 
 HARNESS = """
@@ -331,7 +317,7 @@ main();
 def _dashboard_functions() -> str:
     source = INDEX_HTML.read_text(encoding="utf-8")
     return "\n".join(
-        _extract_js_function(source, signature)
+        extract_js_function(source, signature)
         for signature in (
             "function windowKeyFor(customDays, dateFrom, dateTo) {",
             "function usageServerKeyFor(servers = selectedServers()) {",
@@ -362,7 +348,7 @@ def _run(tmp_path: Path, scenario: str) -> dict:
 def test_a_server_switch_invalidates_facets_before_usage_arrives(tmp_path: Path) -> None:
     source = INDEX_HTML.read_text(encoding="utf-8")
     functions = _dashboard_functions() + "\n" + "\n".join(
-        _extract_js_function(source, signature)
+        extract_js_function(source, signature)
         for signature in (
             "function clearOverviewBreakdowns() {",
             "function clearOverviewFacets() {",

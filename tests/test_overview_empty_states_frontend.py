@@ -28,48 +28,20 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
 
 import tokdash
+
+from support.frontend import extract_js_function, needs_node
+
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 COUNTERS_JS = INDEX_HTML.parent / "js" / "animations" / "counters.js"
 ANIME_JS = INDEX_HTML.parent / "js" / "anime.esm.js"
 
-pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
-
-
-def _extract_js_function(src: str, signature: str) -> str:
-    start = src.find(signature)
-    assert start >= 0, f"{signature} not found"
-    # Skip the parameter list: a default such as `value = x` or `options = {}`
-    # puts braces inside parentheses, and counting those as the body truncates
-    # the function at the default value.
-    parens = 0
-    body_start = -1
-    for index in range(start, len(src)):
-        char = src[index]
-        if char == "(":
-            parens += 1
-        elif char == ")":
-            parens -= 1
-        elif char == "{" and parens == 0:
-            body_start = index
-            break
-    assert body_start >= 0, f"no body for {signature}"
-    depth = 0
-    for index in range(body_start, len(src)):
-        if src[index] == "{":
-            depth += 1
-        elif src[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return src[start : index + 1]
-    raise AssertionError(f"unterminated function: {signature}")
+pytestmark = needs_node
 
 
 HARNESS_HEAD = """
@@ -509,7 +481,7 @@ FUNCTIONS_UNDER_TEST = (
 def _run(tmp_path: Path, scenario: str) -> dict:
     source = INDEX_HTML.read_text(encoding="utf-8")
     functions = "\n".join(
-        _extract_js_function(source, signature) for signature in FUNCTIONS_UNDER_TEST
+        extract_js_function(source, signature) for signature in FUNCTIONS_UNDER_TEST
     )
     # `function` declarations cannot be reassigned under the module wrapper.
     functions = functions.replace(

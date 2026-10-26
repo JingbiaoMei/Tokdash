@@ -15,7 +15,7 @@ import pytest
 from tokdash.sources.quota import antigravity, claude, codex, grok, kimi, minimax, zai
 from tokdash.usage_store import _codex_window_used_percent_from_raw
 
-_FIXTURE_DIR = Path(__file__).parent / "fixtures" / "quota"
+_FIXTURE_DIR = Path(__file__).parents[1] / "fixtures" / "quota"
 
 
 def test_zai_api_collects_credit_windows_from_zcode_config(monkeypatch, tmp_path):

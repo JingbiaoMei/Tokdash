@@ -22,7 +22,7 @@ from tokdash.sources.quota.types import QuotaSnapshot
 from tokdash.usage_store import UsageEntryStore
 
 FIXTURE = (
-    Path(__file__).resolve().parents[1]
+    Path(__file__).resolve().parents[2]
     / "companion"
     / "contract"
     / "fixtures"

@@ -293,10 +293,10 @@ never trigger a global parse again.
 
 ## Tests
 
-`tests/test_usage_cache_identity.py` holds this contract, including mutation
+`tests/usage/test_usage_cache_identity.py` holds this contract, including mutation
 checks that install the forbidden defect and assert the symptom it causes:
 pricing back in the parse signature, a skipped repricing pass, a repriced fixed
 cost, a module-hash parser identity, and a pricing identity committed before its
-rows. `tests/test_session_cache_pricing.py` is the equivalent for the session
+rows. `tests/pricing/test_session_cache_pricing.py` is the equivalent for the session
 cache, which reached the same place from the other direction — it prices on read
 rather than rewriting rows, because its costs are not aggregated in SQL.

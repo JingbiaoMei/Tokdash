@@ -10,7 +10,7 @@ from tokdash import clientpaths, osinfo
 from tokdash.pricing import PricingDatabase
 from tokdash.sources.coding_tools import BaseParser, QoderIdeParser
 
-FIXTURES = Path(__file__).parent / "fixtures" / "qoder"
+FIXTURES = Path(__file__).parents[1] / "fixtures" / "qoder"
 CN_ROOT = FIXTURES / "localdb_cn"
 INTL_ROOT = FIXTURES / "localdb_intl"
 DB_SUFFIX = Path("SharedClientCache") / "cache" / "db" / "local.db"

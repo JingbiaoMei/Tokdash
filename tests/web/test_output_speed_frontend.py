@@ -505,7 +505,7 @@ def test_range_changes_invalidate_speed_without_charging_the_report(tmp_path):
     On the speed page the shared range router loads speed and never the Overview;
     off it, the range goes to the Overview loader and speed is not asked. A kept
     view (the window already loaded) is left alone. That the report's own load
-    never invalidates speed is run in tests/test_usage_report_frontend.py.
+    never invalidates speed is run in tests/web/test_usage_report_frontend.py.
     """
     out = _run_node(tmp_path, 'standalone_invalidate', _standalone_loader_js() + '''
 const fields = () => {
@@ -918,7 +918,7 @@ def test_queued_overview_work_is_not_dispatched_on_the_speed_page(tmp_path):
 def test_every_element_the_speed_code_reaches_for_exists():
     """A missing id is silent in a browser and loud here.
 
-    tests/test_frontend_element_ids.py checks every getElementById target; the
+    tests/web/test_frontend_element_ids.py checks every getElementById target; the
     speed code also reaches for elements through querySelector('#id'), which that
     scan does not read, so those are checked here. The grouping control keeps
     its own label.
@@ -954,7 +954,7 @@ def test_standalone_speed_activation_sets_its_gate_before_loading(tmp_path):
     every speed request goes through a gate that reads that flag. Leaving retires
     what the page had in flight, and opening the Report or the Overview asks it
     for nothing. (That the report's own load never dispatches speed is run in
-    tests/test_usage_report_frontend.py.)
+    tests/web/test_usage_report_frontend.py.)
     """
     program = activate_dashboard_tab_program("""
 const out = {};
@@ -1697,7 +1697,7 @@ def _i18n_keys() -> dict[str, set[str]]:
 def test_every_speed_string_ships_in_all_six_languages():
     """The speed keys the language-parity test cannot see.
 
-    tests/test_i18n_languages.py::test_i18n_language_parity collects keys written
+    tests/web/test_i18n_languages.py::test_i18n_language_parity collects keys written
     as a bare t('key') or a data-i18n attribute. A key passed with values,
     t('key', {...}), picked by a ternary, held in a lookup table or returned by
     a helper is invisible to it, so those are collected and checked here.

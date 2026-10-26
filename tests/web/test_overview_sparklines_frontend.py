@@ -46,7 +46,7 @@ from support.frontend import needs_node, run_node
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 MODULE_START = "// ===== Overview sparklines"
-LIVE_CONTRACT = Path(__file__).parent / "fixtures" / "overview_sparklines" / "live_contract.json"
+LIVE_CONTRACT = Path(__file__).parents[1] / "fixtures" / "overview_sparklines" / "live_contract.json"
 MODULE_END = "    function renderOverviewTab(data) {"
 METRICS = ("tokens", "cost", "messages", "agent_time", "cache_hit_rate", "top_model")
 

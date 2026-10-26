@@ -132,7 +132,7 @@ def test_picker_lists_every_theme_in_order() -> None:
 # per-language on purpose: a reworded README stops matching and fails loudly
 # instead of passing unchecked.
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 README_THEME_COUNT_PHRASE = {
     "README.md": "style themes",

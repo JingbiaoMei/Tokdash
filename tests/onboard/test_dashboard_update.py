@@ -731,7 +731,7 @@ def test_control_imports_on_platforms_without_fcntl():
         "assert c._helper_source_path().is_file()\n"
         "print('ok')\n"
     )
-    env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")}
+    env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src")}
     proc = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, env=env, timeout=60)
     assert proc.returncode == 0, proc.stderr
     assert "ok" in proc.stdout

@@ -13,7 +13,7 @@ from tokdash.speed_mode import collect_timings
 
 @pytest.fixture
 def corpus(tmp_path,monkeypatch):
-    sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
+    sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'scripts'))
     import speed_fixtures, output_speed_expansion_fixtures
     from bench_tokdash_server import _prune_parsers
     root=tmp_path/'corpus';data=tmp_path/'data'

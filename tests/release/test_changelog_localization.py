@@ -23,7 +23,7 @@ from pathlib import Path
 from support.frontend import needs_node
 from support.i18n_profile import release_notes_script, run_page
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 STATIC_DIR = REPO_ROOT / "src" / "tokdash" / "static"
 INDEX_HTML = STATIC_DIR / "index.html"
 RELEASE_NOTES_EN = STATIC_DIR / "release-notes.json"

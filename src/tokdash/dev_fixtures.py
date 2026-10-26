@@ -974,7 +974,7 @@ def dense_insights(
     """Synthetic `/api/insights` payload, folded by the production fold functions.
 
     The rows are invented; the folds are not. That is what keeps this from
-    drifting out of the shape contract `tests/test_insights_api.py` pins, which
+    drifting out of the shape contract `tests/api/test_insights_api.py` pins, which
     is the reason the route used to refuse rather than improvise. Real usage
     history is never read while a fixture is active.
     """

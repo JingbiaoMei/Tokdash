@@ -59,7 +59,7 @@ _FOOTER = "No command given, so nothing was started. Run `tokdash serve`."
 
 # The verbs the CLI accepts, in the order the parser advertises them. Single
 # source of truth: `build_parser` builds its `choices` from this, and the card
-# below is checked against it (tests/test_cli_help.py), so a new verb cannot be
+# below is checked against it (tests/onboard/test_cli_help.py), so a new verb cannot be
 # added to one and forgotten in the other.
 COMMAND_VERBS = (
     "serve",

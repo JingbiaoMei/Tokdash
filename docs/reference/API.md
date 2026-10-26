@@ -1214,7 +1214,7 @@ scan plus a session-record read.
 - **Fixture mode.** Under `--dev-fixture dense` this route answers from the seeded fixture,
   which invents rows and folds them with the same `insights._fold_*` helpers production uses,
   then marks the payload with `fixture`. Real usage history is never read while a fixture is
-  active, and the facet shapes are pinned by `tests/test_insights_api.py`.
+  active, and the facet shapes are pinned by `tests/api/test_insights_api.py`.
 
 ---
 

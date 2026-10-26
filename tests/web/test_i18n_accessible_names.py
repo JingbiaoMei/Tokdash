@@ -42,7 +42,7 @@ from support.i18n_profile import (
 
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # HTML elements that never have a closing tag.
 VOID_ELEMENTS = {
@@ -659,14 +659,14 @@ def test_no_line_welds_two_elements_together(static_html: str) -> None:
 
 
 def test_parity_test_covers_the_aria_form() -> None:
-    """tests/test_i18n_languages.py must check data-i18n-aria keys too.
+    """tests/web/test_i18n_languages.py must check data-i18n-aria keys too.
 
     Without ``-aria`` in that regex, a typo in any of the aria keys would
     pass CI and be announced as a raw key name. This runs the parity
     test's own regex against one element per marker form, so a narrowing
     of the pattern is caught here rather than in the dictionary.
     """
-    parity = (REPO_ROOT / "tests" / "test_i18n_languages.py").read_text(
+    parity = (REPO_ROOT / "tests" / "web" / "test_i18n_languages.py").read_text(
         encoding="utf-8"
     )
     match = re.search(r"re\.findall\(\s*r'(data-i18n[^']*)'", parity)

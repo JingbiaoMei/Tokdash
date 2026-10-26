@@ -40,7 +40,7 @@ Fixes (uncommitted in this worktree's working tree, branch
   Running; Access-denied gets an elevated-shell hint.
 
 Unit tests are green on WSL: `PYTHONPATH=src python3 -m pytest
-tests/test_winsched.py tests/test_onboard.py tests/test_cli_serve.py`
+tests/onboard/test_winsched.py tests/onboard/test_onboard.py tests/onboard/test_cli_serve.py`
 (216 passed). If you want to re-run them here, install the deps in a venv
 first; they are OS-agnostic (schtasks is monkeypatched).
 
@@ -185,13 +185,13 @@ Fix (in this worktree's working tree):
   `port_holder_process` is now a thin wrapper.
 - `live_test.ps1`: after re-setup, asserts the task state is Running and the
   port is held by pythonw (would have caught the stale false-positive).
-- `tests/test_winsched.py`: 6 new tests — release-gate kill/no-kill/timeout
+- `tests/onboard/test_winsched.py`: 6 new tests — release-gate kill/no-kill/timeout
   paths, holder-name helper, and a full re-setup regression test asserting
   `end < taskkill < create < run` ordering with a stale pythonw holding the
   port.
 
-Unit tests: `PYTHONPATH=src python3 -m pytest tests/test_winsched.py
-tests/test_onboard.py tests/test_cli_serve.py` (228 passed); full suite
+Unit tests: `PYTHONPATH=src python3 -m pytest tests/onboard/test_winsched.py
+tests/onboard/test_onboard.py tests/onboard/test_cli_serve.py` (228 passed); full suite
 1244 passed, 2 pre-existing companion-packaging failures (also fail on main).
 
 Re-run the same script: the two new "re-setup: ..." checks and `doctor` are

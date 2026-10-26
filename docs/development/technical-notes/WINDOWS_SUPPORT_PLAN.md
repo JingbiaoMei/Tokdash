@@ -86,7 +86,7 @@ remaining real-Windows validation work.
 | 7 | Headless/browser-open detection | `src/tokdash/cli.py:_has_display()` (`cli.py:193-214`) | Already OK — note only. The Linux branch gates on `DISPLAY`/`WAYLAND_DISPLAY`; for any non-Linux platform (`sys.platform.startswith("linux")` is `False`) it already returns `True` (`cli.py:212-214`), which is the right behavior for Windows desktop sessions. No change needed. |
 | 8 | Statusline templates are bash-only | `docs/guides/statusline/statusline-minimal.sh`, `docs/guides/statusline/statusline-full.sh` (both `curl`+`jq`, `#!/usr/bin/env bash`) | Claude Code on Windows can still run a bash script under WSL/Git Bash, but a native PowerShell statusline template is missing for users running Claude Code natively on Windows. |
 | 9 | CI is Ubuntu-only | `.github/workflows/ci.yml` (`runs-on: ubuntu-latest`, matrix `python-version: ["3.10", "3.12"]`) | No automated signal at all for Windows regressions; every gap above can silently break without CI catching it. |
-| 10 | Tests assume POSIX/systemd/launchd | `tests/test_onboard.py` (monkeypatches `systemd`/`launchd` modules directly), `tests/test_usage_store.py` (locking behavior assumes `fcntl` semantics), plus any test that builds paths assuming POSIX separators | Needs skip-markers for backend-specific tests (e.g. `@pytest.mark.skipif(os_kind() != "windows", ...)` for a future `winsched` backend) and new Windows-specific tests once Tier 1/2 land. |
+| 10 | Tests assume POSIX/systemd/launchd | `tests/onboard/test_onboard.py` (monkeypatches `systemd`/`launchd` modules directly), `tests/usage/test_usage_store.py` (locking behavior assumes `fcntl` semantics), plus any test that builds paths assuming POSIX separators | Needs skip-markers for backend-specific tests (e.g. `@pytest.mark.skipif(os_kind() != "windows", ...)` for a future `winsched` backend) and new Windows-specific tests once Tier 1/2 land. |
 | 11 | Docs/metadata did not mention Windows | Before `v1.0.5`, `README.md` listed Linux/WSL2 and macOS only, and `pyproject.toml` had no Windows OS classifier. | Cosmetic but user-facing: nothing told a Windows user whether tokdash worked for them, and PyPI's classifier list did not advertise Windows support. |
 
 ## 4. Tiered plan
@@ -169,7 +169,7 @@ what systemd/launchd already provide on Linux/macOS.
 - [x] Wire `tokdash setup` / `tokdash doctor` / `tokdash uninstall` additively for the
       `winsched` service type, including manifest read/write.
 - [x] New tests covering the winsched backend (rendering, ownership marker detection,
-      install/uninstall planning) mirroring `tests/test_onboard.py`'s systemd/launchd
+      install/uninstall planning) mirroring `tests/onboard/test_onboard.py`'s systemd/launchd
       coverage.
 
 ### Tier 3 — Polish

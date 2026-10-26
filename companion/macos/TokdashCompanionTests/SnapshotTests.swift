@@ -401,7 +401,7 @@ final class SnapshotTests: XCTestCase {
     ///
     /// The fixture is a healthy `~/.claude` beside a permanently broken
     /// `~/.claude-academic`, and it is generated from the server's own payload
-    /// (`tests/test_companion_contract_accounts.py` regenerates and diffs it), so decoding
+    /// (`tests/companion/test_companion_contract_accounts.py` regenerates and diffs it), so decoding
     /// drift shows up here rather than in the field. `weekly_scoped_opus` is the row that
     /// matters: Claude only reports it once Opus has been used, so it carries an older
     /// `captured_at` than the cycle the sibling's failure landed in. Judged against

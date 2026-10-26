@@ -16,17 +16,17 @@ export TOKDASH_DATA_DIR="${TOKDASH_DATA_DIR:-/tmp/tui-rev5-dev}"
 export PYTHONPATH=src:tests
 PY="${PY:-python3}"
 
-"$PY" -m pytest tests/test_tui_app.py tests/test_tui_charts.py \
-  tests/test_tui_data.py tests/test_tui_formatting.py tests/test_tui_import_discipline.py \
-  tests/test_tui_ranges.py tests/test_tui_remote.py tests/test_tui_report.py \
-  tests/test_tui_overview_pane.py tests/test_tui_sessions_pane.py \
-  tests/test_tui_stats_pane.py tests/test_tui_report_pane.py \
-  tests/test_tui_speed_pane.py tests/test_tui_speed_series.py tests/test_tui_speed_builds.py \
-  tests/test_tui_quota_pane.py tests/test_tui_pricing_pane.py \
-  tests/test_tui_range_strip.py tests/test_tui_selected_state.py tests/test_tui_navigation.py \
-  tests/test_tui_source_colours.py tests/test_tui_layout.py \
-  tests/test_tui_resize_refit.py tests/test_tui_footer_fit.py \
-  tests/test_tui_terminal_colour.py -q "$@"
+"$PY" -m pytest tests/tui/test_tui_app.py tests/tui/test_tui_charts.py \
+  tests/tui/test_tui_data.py tests/tui/test_tui_formatting.py tests/tui/test_tui_import_discipline.py \
+  tests/tui/test_tui_ranges.py tests/tui/test_tui_remote.py tests/tui/test_tui_report.py \
+  tests/tui/test_tui_overview_pane.py tests/tui/test_tui_sessions_pane.py \
+  tests/tui/test_tui_stats_pane.py tests/tui/test_tui_report_pane.py \
+  tests/tui/test_tui_speed_pane.py tests/tui/test_tui_speed_series.py tests/tui/test_tui_speed_builds.py \
+  tests/tui/test_tui_quota_pane.py tests/tui/test_tui_pricing_pane.py \
+  tests/tui/test_tui_range_strip.py tests/tui/test_tui_selected_state.py tests/tui/test_tui_navigation.py \
+  tests/tui/test_tui_source_colours.py tests/tui/test_tui_layout.py \
+  tests/tui/test_tui_resize_refit.py tests/tui/test_tui_footer_fit.py \
+  tests/tui/test_tui_terminal_colour.py -q "$@"
 status=$?
 
 # The reviewers' regression files, run one pytest process each. They all share

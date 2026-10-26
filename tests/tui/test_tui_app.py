@@ -183,7 +183,7 @@ def _outcome(payload, status="hit", age=0.0):
     return FetchOutcome(value=copy.deepcopy(payload), status=status, age_seconds=age)
 
 
-# Quota fixtures mirror tests/test_tui_charts.py's REAL quota_table-shaped
+# Quota fixtures mirror tests/tui/test_tui_charts.py's REAL quota_table-shaped
 # payloads (normalized bucket keys, *_api sources, codex reset credits, a
 # 2-account claude provider that must fold). Built around the live epoch so
 # the app's time.time() reset countdown and 24h trend window both land.

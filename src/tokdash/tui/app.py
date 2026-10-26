@@ -3813,7 +3813,7 @@ class TokdashApp(App):
         # An unconditional repaint would repaint the Speed pane for every resize
         # -- a repaint the panes that name the series a reader picked (rather
         # than the one a snapshot lists first) cannot tell from the relabel they
-        # refuse. tests/test_tui_speed_series.py pins that.
+        # refuse. tests/tui/test_tui_speed_series.py pins that.
         self.call_after_refresh(self._refit_after_layout)
 
     def _refit_after_layout(self) -> None:

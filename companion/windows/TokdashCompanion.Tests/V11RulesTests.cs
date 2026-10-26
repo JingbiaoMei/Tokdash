@@ -10,7 +10,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace TokdashCompanion.Tests;
 
 /// <summary>
-/// Windows mirror of <c>tests/test_companion_contract_v11.py</c>: the v1.1 display rules
+/// Windows mirror of <c>tests/companion/test_companion_contract_v11.py</c>: the v1.1 display rules
 /// transcribed from <c>COMPANION_API.md</c> and run against the shared fixtures, pinning
 /// exactly what the <c>expected/</c> files pin. Formatting/period/glance/badge/credits.
 /// English locale + the quota payload timestamp as the frozen clock throughout.

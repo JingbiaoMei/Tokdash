@@ -20,32 +20,19 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 from pathlib import Path
 
-
-import tokdash
-
-from support.frontend import extract_js_function, needs_node
-
-
-INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
-
-needs_node = needs_node
+from support.frontend import extract_js_function, index_source, needs_node, run_node
 
 
 def _source() -> str:
-    return INDEX_HTML.read_text(encoding="utf-8")
+    return index_source()
 
 
 def _run_js(tmp_path: Path, name: str, script: str, arg: str | None = None) -> str:
     harness = tmp_path / f"{name}.js"
     harness.write_text(script, encoding="utf-8")
-    command = ["node", str(harness)] + ([arg] if arg is not None else [])
-    result = subprocess.run(
-        command, check=True, capture_output=True, encoding="utf-8"
-    )
-    return result.stdout
+    return run_node(harness, *([arg] if arg is not None else []))
 
 
 def _banner_script(source: str) -> str:
@@ -595,15 +582,15 @@ def test_the_notice_does_not_cover_the_header_controls() -> None:
 def test_every_locale_carries_the_cdn_keys() -> None:
     """The notice is translated, not English-only.
 
-    Covered structurally here because the parity test in
-    test_i18n_languages.py already checks the key sets match across languages;
-    this guards against the keys being dropped from the object entirely.
+    The banner looks these keys up through a variable (and the date trigger's
+    title through a ternary), so the parity test in test_i18n_languages.py,
+    which only sees literal t('...') calls, cannot tell if one is dropped from
+    the dictionary. cdnThreeFailed is called literally, so parity has it.
     """
     source = _source()
     for key in (
         "cdnTailwindFailed",
         "cdnChartFailed",
-        "cdnThreeFailed",
         "cdnFlatpickrFailed",
         "cdnFontsFailed",
     ):

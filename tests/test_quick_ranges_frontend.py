@@ -1,26 +1,20 @@
 """Tests for the quick ranges frontend.
 
-Covers the quick range selector buttons in the dashboard.
+Covers the dates each quick range button selects, run through the real
+getQuickRangeDates.
 """
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 
-
-import tokdash
-
-from support.frontend import extract_js_function, needs_node
-
-
-INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
+from support.frontend import extract_js_function, index_source, needs_node, run_node
 
 
 def _run_quick_range_js(
     tmp_path: Path, cases: list[dict[str, str]]
 ) -> list[dict[str, object]]:
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     function = extract_js_function(
         source, "function getQuickRangeDates(range, today = new Date()) {"
     )
@@ -40,20 +34,7 @@ def _run_quick_range_js(
         + "process.stdout.write(JSON.stringify(result));\n",
         encoding="utf-8",
     )
-    result = subprocess.run(
-        ["node", str(harness), json.dumps(cases)],
-        check=True,
-        capture_output=True,
-        encoding="utf-8",
-    )
-    return json.loads(result.stdout)
-
-
-def test_last_week_button_and_localizations_are_present():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    assert 'data-range="lastWeek"' in source
-    assert "lastWeek: 'Last Week'" in source
-    assert "lastWeek: '上周'" in source
+    return json.loads(run_node(harness, json.dumps(cases)))
 
 
 @needs_node

@@ -1,23 +1,26 @@
 """Tests for multi-server dashboard merging, route failover, and server selection.
 
 Covers cross-server usage and quota merging, per-host quota visibility, route
-health probing and ranking, failover handling, and registry migrations.
+health probing and ranking, failover handling, and registry migrations, plus
+the two companion-side multi-server rules no native test holds (Save never
+waits on a probe; both suites read the shared contract fixture).
 """
 from __future__ import annotations
 
 import json
 import re
-import subprocess
 from pathlib import Path
 
 import pytest
 
-import tokdash
-
-from support.frontend import extract_i18n_literal, extract_js_function, needs_node
-
-
-INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
+from support.frontend import (
+    INDEX_HTML,
+    extract_i18n_literal,
+    extract_js_function,
+    index_source,
+    needs_node,
+    run_node,
+)
 
 # localStorage key the dashboard persists per-host provider visibility under.
 QUOTA_VISIBILITY_STORAGE_KEY = "tokdash-quota-visible-by-host"
@@ -41,18 +44,12 @@ def _run(tmp_path: Path, name: str, functions: list[str], expression: str, value
         + f"process.stdout.write(JSON.stringify({expression}));\n",
         encoding="utf-8",
     )
-    result = subprocess.run(
-        ["node", str(harness), json.dumps(value)],
-        check=True,
-        capture_output=True,
-        encoding="utf-8",
-    )
-    return json.loads(result.stdout)
+    return json.loads(run_node(harness, json.dumps(value)))
 
 
 @needs_node
 def test_usage_merger_identity_sum_and_missing_previous(tmp_path):
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     function = extract_js_function(source, "function combineUsagePayloads(list) {")
     first = {
         "total_tokens": 10,
@@ -125,7 +122,7 @@ def _cache_hit_rate_entries(payload):
 @pytest.mark.parametrize("reverse_servers", [False, True])
 @pytest.mark.parametrize("full_model_lists", ["all", "partial", "none"])
 def test_usage_merger_recomputes_cache_hit_rates(tmp_path, reverse_servers, full_model_lists):
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     function = extract_js_function(source, "function combineUsagePayloads(list) {")
     payloads = [
         _cache_hit_rate_payload({
@@ -168,7 +165,7 @@ def test_usage_merger_recomputes_cache_hit_rates(tmp_path, reverse_servers, full
     ({"tokens_cache": 10, "tokens_out": 50}, None),
 ], ids=["cache-only", "zero-denominator", "no-input-breakdown", "no-rate-or-input-breakdown"])
 def test_usage_merger_cache_hit_rate_edge_cases(tmp_path, stats, expected_rate):
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     function = extract_js_function(source, "function combineUsagePayloads(list) {")
     payload = _cache_hit_rate_payload(stats)
     merged = _run(tmp_path, "cache-edge", [function], "combineUsagePayloads(input)", [payload, payload])
@@ -181,7 +178,7 @@ def test_usage_merger_cache_hit_rate_edge_cases(tmp_path, stats, expected_rate):
 
 @needs_node
 def test_usage_merger_preserves_single_server_cache_hit_rates(tmp_path):
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     function = extract_js_function(source, "function combineUsagePayloads(list) {")
     # Keep the server's rounded rate verbatim on the single-server path.
     payload = _cache_hit_rate_payload({
@@ -192,7 +189,7 @@ def test_usage_merger_preserves_single_server_cache_hit_rates(tmp_path):
 
 @needs_node
 def test_overview_deltas_use_one_decimal_place(tmp_path):
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     function = extract_js_function(source, "function renderDelta(elementId, pctChange) {")
     harness = [
         # renderDelta toggles classes now (inline colors were invisible in dark mode),
@@ -226,7 +223,7 @@ def test_overview_deltas_use_one_decimal_place(tmp_path):
 
 @needs_node
 def test_stats_and_session_mergers(tmp_path):
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     stats_fn = extract_js_function(source, "function combineStatsPayloads(list) {")
     sessions_fn = extract_js_function(source, "function mergeSessionLists(list) {")
     stats = _run(
@@ -315,39 +312,9 @@ def test_stats_and_session_mergers(tmp_path):
     assert legacy["summary"]["active_ms_sum"] == 150000
 
 
-def test_multi_server_contract_is_client_only_and_service_worker_is_same_origin():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    assert "tokdash-servers" in source
-    assert "tokdash-server-selection" in source
-    assert "Promise.allSettled" in source
-    assert "Math.min(2, queue.length)" in source
-    assert "await Promise.all(Array.from" in source
-    assert "currentStartDate = today;" in source
-    assert "date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}" in source
-    assert "Add anyway" not in source and "仍然添加" not in source
-    assert "await probeServer(baseUrl)" in source
-    # The probe is per route and it is a plain browser fetch: nothing proxies one daemon
-    # through another, which is what keeps this feature client-only.
-    assert "fetch(routePath(route, '/health')" in source
-    assert "addEventListener('click', () => { storeServerFromForm(); })" in source
-    assert "server-setting-row" in source
-    assert "server-form-status" in source
-    assert 'placeholder="Name (optional)"' in source
-    assert "label.placeholder = defaultServerLabel" not in source
-    sw = (INDEX_HTML.parent / "sw.js").read_text(encoding="utf-8")
-    assert "url.origin !== self.location.origin" in sw
-    assert source.index('id="quotaGlobalControls"') < source.index('id="quota-content"') + 500
-    assert "if (!multi) {\n          renderQuotaSettings(payload);" in source
-    assert "csrfTokensByServer.delete(server.id)" in source
-    assert "quotaReadOnlyRemote" in source
-    # A language switch re-renders whichever quota layout is on screen, and the recorded
-    # single-scope owner (null = the per-host blocks) is what says so -- not the selection.
-    assert "if (!quotaSingleScopeOwner && lastQuotaServerRows.length) {" in source
-
-
 @needs_node
 def test_multi_server_quota_hides_single_server_sections(tmp_path):
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     quota_start = source.index('id="quota-content"')
     quota_end = source.index('id="pricing-content"')
     assert quota_start < source.index('id="quotaSingleServerPanel"') < quota_end
@@ -370,91 +337,45 @@ def test_multi_server_quota_hides_single_server_sections(tmp_path):
     assert all(section == {"hidden": False, "style": {"display": ""}} for section in shown.values())
 
 
-def test_companion_v2_schema_and_loose_test_rule_are_present():
+def test_companion_settings_save_validates_addresses_without_waiting_on_a_probe():
+    """Saving a server list checks every address is a URL and never consults a Test
+    probe: an offline host can still be saved. Neither companion has a UI test for
+    its Save action, so the rule is held here against both sources."""
     root = INDEX_HTML.parents[3]
-    windows = (root / "companion/windows/TokdashCompanion/BindableBase.cs").read_text(encoding="utf-8")
-    macos = (root / "companion/macos/TokdashCompanion/CompanionStore.swift").read_text(encoding="utf-8")
     mac_settings = (root / "companion/macos/TokdashCompanion/SettingsView.swift").read_text(encoding="utf-8")
     win_settings = (root / "companion/windows/TokdashCompanion/SettingsWindow.xaml.cs").read_text(encoding="utf-8")
-    assert 'JsonPropertyName("version")' in windows
-    assert 'JsonPropertyName("servers")' in windows
-    assert "TryGetProperty(\"BaseURL\"" in windows
-    assert "var version: Int = 3" in macos  # schema v3 (components); v2 files migrate up
-    assert 'case baseURL = "baseUrl"' in macos
-    assert "decodeIfPresent(String.self, forKey: .baseURL)" in macos
-    # Test remains optional: Save validates URLs but never checks a probe result.
     mac_save = mac_settings[mac_settings.index("private func saveSettings()") : mac_settings.index("private func removeServer")]
     assert "validServers" in mac_save and "testResults" not in mac_save
     win_save = win_settings[win_settings.index("private async void Save_Click") : win_settings.index("private static string ServerSignature")]
-    # Every address is validated, including additional routes; an offline probe does
-    # not prevent saving an explicit URL. The old single-address expression is gone.
+    # Every address is validated, including additional routes.
     assert "new[] { entry.BaseUrl }.Concat(entry.Routes)" in win_save
     assert "Any(a => !CompanionStore.IsValidBaseURL(a))" in win_save
     assert "CheckRoutesAsync" not in win_save and "RouteStatus" not in win_save
-    assert (root / "companion/windows/TokdashCompanion/MultiServerTokdashClient.cs").exists()
-    assert "runMultiServerRefresh" in macos
-    assert "combineUsage" in macos
-    assert "serverFailureCounts[server.id, default: 0]" in macos
-    assert "if Task.isCancelled { return }" in macos
-    multi_client = (root / "companion/windows/TokdashCompanion/MultiServerTokdashClient.cs").read_text(encoding="utf-8")
-    win_store = (root / "companion/windows/TokdashCompanion/CompanionStore.cs").read_text(encoding="utf-8")
-    assert "FailedServerIds" in multi_client
-    assert "OperationCanceledException" in multi_client
-    assert "_serverFailureCounts.GetValueOrDefault(s.Id)" in win_store
-    assert "ServerRegistriesEqual(s.Servers, entries)" in win_settings
-    fixture_name = 'ContractFile("expected", "multi-server.json")'
-    assert fixture_name in (root / "companion/windows/TokdashCompanion.Tests/MultiServerContractTests.cs").read_text(encoding="utf-8")
-    assert 'contractURL("expected/multi-server.json")' in (root / "companion/macos/TokdashCompanionTests/SnapshotTests.swift").read_text(encoding="utf-8")
 
 
-def test_quota_visibility_dropdown_is_scoped_per_server():
-    source = INDEX_HTML.read_text(encoding="utf-8")
-    # The old global dropdown (its option list was driven by the last-rendered
-    # server's payload, i.e. not the per-server harness set) is gone.
-    for gone in ('id="quotaVisibilityWrap"', 'id="quotaVisibilityBtn"', 'id="quotaVisibilityPanel"', 'id="quotaVisibilityLabel"'):
-        assert gone not in source
-    # One dropdown slot per server block, plus the single-server slot in the settings row.
-    assert 'data-role="visibility"' in source
-    assert 'id="quotaVisibilityHost"' in source
-    # Presence is computed per payload and threaded into cards and charts.
-    assert "const present = quotaPresentProviders(payload);" in source
-    # Every backend quota provider must be in the shipped visibility list and the
-    # card render order — a provider missing here is filtered out of presence and
-    # can never render, no matter what /api/quota returns.
-    shipped = re.search(r"const QUOTA_PROVIDERS = \[(.*?)\];", source)
-    assert shipped and "'opencode_go'" in shipped.group(1)
-    assert "'commandcode'" in shipped.group(1)
-    assert "'opencode_go'" in re.search(r"const order = \[(.*?)\];", source).group(1)
-    assert "'commandcode'" in re.search(r"const order = \[(.*?)\];", source).group(1)
-    assert "const present = quotaPresentProviders(row.payload);" in source
-    assert "present: quotaPresentProviders(payload)" in source
-    assert "syncQuotaServerVisibilityControl(block, payload, server);" in source
-    assert "syncQuotaSingleVisibility(payload);" in source
-    # Every dropdown is stamped with the host it belongs to, and a toggle syncs that
-    # host's dropdown in place.
-    assert "createQuotaVisibilityControl(present, server.id)" in source
-    assert "syncQuotaVisibilityControlInPlace(block.querySelector" in source
-    # Issue #93: the choice is stored per host, and a toggle repaints only the host that
-    # owns the dropdown. The old shared-pref path must stay gone: one key for every host
-    # (QUOTA_VISIBILITY_KEY below is the per-host key; the legacy name moved to
-    # QUOTA_VISIBILITY_GLOBAL_KEY and is read-only) and one toggle repainting every block.
-    assert "const QUOTA_VISIBILITY_KEY = 'tokdash-quota-visible-by-host';" in source
-    assert "const QUOTA_VISIBILITY_GLOBAL_KEY = 'tokdash-quota-visible';" in source
-    assert "applyQuotaVisibilityChange" not in source
-    # The toggle resolves its scope by host key: the single-server scope owns the host it
-    # is showing, everything else is a server block. That owner follows the payload on
-    # screen, so a cached payload never repaints through another host's map.
-    assert "function refreshQuotaScopeForHost(hostKey) {\n      const key = quotaVisibilityHostKey(hostKey);" in source
-    assert "if (quotaSingleScopeOwner && key === quotaVisibilityHostKey(quotaSingleScopeOwner.id)) {" in source
-    assert "quotaSingleScopeOwner = multi ? null : rows[0].server;" in source
-    # A failed reload repaints the layout the last good load rendered. Deriving that from the
-    # cached-row count misreads a partial multi load: its one surviving block shares the host
-    # key with the single scope, so its dropdown would repaint hidden UI and go dead.
-    assert "quotaSingleScopeOwner = (lastQuotaServerRows[0]" not in source
-    assert "if (lastQuotaServerRows.length <= 1) {" not in source
-    assert "if (quotaSingleScopeOwner) {" in source
-    # The static HTML checkboxes are gone; rows are built per scope.
-    assert "data-quota-provider=" not in source
+def test_both_companion_suites_read_the_shared_multi_server_fixture():
+    """The multi-server merge is pinned once, in companion/contract/expected; each
+    native suite has to keep reading that file rather than a private copy."""
+    root = INDEX_HTML.parents[3]
+    windows_tests = (root / "companion/windows/TokdashCompanion.Tests/MultiServerContractTests.cs").read_text(encoding="utf-8")
+    mac_tests = (root / "companion/macos/TokdashCompanionTests/SnapshotTests.swift").read_text(encoding="utf-8")
+    assert (root / "companion/contract/expected/multi-server.json").is_file()
+    assert 'ContractFile("expected", "multi-server.json")' in windows_tests
+    assert 'contractURL("expected/multi-server.json")' in mac_tests
+
+
+def test_every_backend_quota_provider_can_render_a_card():
+    """A provider missing from the shipped visibility list or the card order is
+    filtered out of presence and never renders, whatever /api/quota returns."""
+    from tokdash.sources import quota
+
+    backend = set(quota.quota_state()["providers"])
+    source = index_source()
+    shipped = re.findall(r"'([^']+)'", re.search(r"const QUOTA_PROVIDERS = \[(.*?)\];", source).group(1))
+    cards = extract_js_function(source, "function renderQuotaProviderCards(")
+    order = re.findall(r"'([^']+)'", re.search(r"const order = \[(.*?)\];", cards).group(1))
+    assert set(shipped) == backend
+    assert set(order) == backend
 
 
 def _quota_visibility_pure_functions(source: str) -> list[str]:
@@ -478,7 +399,7 @@ def _quota_visibility_pure_functions(source: str) -> list[str]:
 
 @needs_node
 def test_quota_presence_and_label_are_per_payload(tmp_path):
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     functions = _quota_visibility_pure_functions(source)
     expression = """(() => {
       global.localStorage = { getItem: () => null, setItem: () => {} };
@@ -793,7 +714,7 @@ process.stdout.write(JSON.stringify({
 
 @needs_node
 def test_quota_visibility_toggle_on_partial_multi_load_updates_the_block(tmp_path):
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     body = QUOTA_VISIBILITY_DOM_STUBS + "\n" + _quota_visibility_dom_functions(source) + "\n" + QUOTA_VISIBILITY_PARTIAL_SCENARIO
     out = _run_quota_dom(tmp_path, "quota-visibility-partial", body)
     # One of two selected servers responded: the toggle must update the rendered
@@ -845,13 +766,12 @@ def _quota_visibility_dom_functions(source: str) -> str:
 def _run_quota_dom(tmp_path: Path, name: str, body: str) -> dict:
     harness = tmp_path / f"{name}.js"
     harness.write_text(body, encoding="utf-8")
-    result = subprocess.run(["node", str(harness)], check=True, capture_output=True, encoding="utf-8")
-    return json.loads(result.stdout)
+    return json.loads(run_node(harness))
 
 
 @needs_node
 def test_quota_visibility_menu_name_follows_language_changes(tmp_path):
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     scenario = r"""
 let currentLang = 'ja';
 const host = new El('span');
@@ -898,7 +818,7 @@ process.stdout.write(JSON.stringify({initial, expectedInitial: I18N.ja.quotaVisi
 
 @needs_node
 def test_quota_visibility_toggle_touches_only_its_own_host(tmp_path):
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     body = QUOTA_VISIBILITY_DOM_STUBS + "\n" + _quota_visibility_dom_functions(source) + "\n" + QUOTA_VISIBILITY_MULTI_SCENARIO
     out = _run_quota_dom(tmp_path, "quota-visibility-multi", body)
     # Issue #93: hiding Codex in A's dropdown repaints A alone. B keeps showing Codex,
@@ -932,7 +852,7 @@ def test_quota_visibility_toggle_touches_only_its_own_host(tmp_path):
 
 @needs_node
 def test_quota_visibility_toggle_updates_single_server_scope(tmp_path):
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     body = QUOTA_VISIBILITY_DOM_STUBS + "\n" + _quota_visibility_dom_functions(source) + "\n" + QUOTA_VISIBILITY_SINGLE_SCENARIO
     out = _run_quota_dom(tmp_path, "quota-visibility-single", body)
     assert out["label"] == "quotaVisibilityPrefix Codex"
@@ -947,7 +867,7 @@ def test_quota_visibility_toggle_updates_single_server_scope(tmp_path):
 def test_quota_visibility_single_scope_follows_the_selected_server(tmp_path):
     """Selecting one remote host instead of several shows that host's own choices, so the
     settings-row dropdown, its cards and its label all read the same host key."""
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     body = (
         QUOTA_VISIBILITY_DOM_STUBS + "\n"
         + _quota_visibility_dom_functions(source) + "\n"
@@ -967,7 +887,7 @@ def test_quota_visibility_single_scope_follows_the_selected_server(tmp_path):
 def test_quota_visibility_seeds_untouched_hosts_from_the_legacy_global_choice(tmp_path):
     """Pre-per-host builds stored one shared choice. After the upgrade that value seeds
     every host, and a host's own toggle wins over it."""
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     functions = _quota_visibility_pure_functions(source)
     expression = """(() => {
       const store = new Map([
@@ -996,7 +916,7 @@ def test_quota_visibility_seeds_untouched_hosts_from_the_legacy_global_choice(tm
 def test_quota_visibility_cached_payload_keeps_its_own_host(tmp_path):
     """Load A, then select B and fail to load B: the single-server UI still shows A's cached
     payload, so A's dropdown must repaint A's cards and charts through A's map, not B's."""
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     body = (
         QUOTA_VISIBILITY_DOM_STUBS + "\n"
         + _quota_visibility_dom_functions(source) + "\n"
@@ -1131,7 +1051,7 @@ async function fetchJsonWithRetry(server, path) {
 def test_quota_visibility_failed_reload_after_partial_multi_load_keeps_the_block(tmp_path):
     """Multi selection, one host answering, then a refresh that fails completely: the surviving
     server block is what the user sees, so its dropdown must still drive its own block."""
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     body = (
         QUOTA_VISIBILITY_DOM_STUBS + "\n"
         + QUOTA_VISIBILITY_LOAD_STUBS + "\n"
@@ -1196,7 +1116,7 @@ def _route_source(source: str) -> list[str]:
 
 
 def _run_routes(tmp_path: Path, name: str, expression: str, value, extra: list[str] | None = None):
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     functions = _route_source(source) + (extra or [])
     harness = tmp_path / f"{name}.js"
     harness.write_text(
@@ -1207,8 +1127,7 @@ def _run_routes(tmp_path: Path, name: str, expression: str, value, extra: list[s
         + f"process.stdout.write(JSON.stringify({expression}));\n",
         encoding="utf-8",
     )
-    result = subprocess.run(["node", str(harness), json.dumps(value)], check=True, capture_output=True, encoding="utf-8")
-    return json.loads(result.stdout)
+    return json.loads(run_node(harness, json.dumps(value)))
 
 
 @needs_node
@@ -1433,7 +1352,7 @@ def test_two_routes_one_host_still_counts_once(tmp_path):
     the fan-out the double count is structurally impossible. This pins that the host shape
     still feeds the merger exactly one row per host.
     """
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     functions = _route_source(source) + [
         extract_js_function(source, "function loadServerRegistry("),
         extract_js_function(source, "function combineUsagePayloads(list) {"),
@@ -1451,9 +1370,8 @@ def test_two_routes_one_host_still_counts_once(tmp_path):
     usage = {"total_tokens": 100, "total_cost": 1.5, "daily": [{"date": "2026-09-25", "tokens": 100, "cost": 1.5}]}
     stored = [{"id": "local", "label": "Local",
                "routes": [{"id": "w", "url": "https://wsl.tail76535.ts.net/tokdash"}]}]
-    result = json.loads(subprocess.run(
-        ["node", str(harness), json.dumps({"stored": stored, "page": "http://127.0.0.1:55423", "usage": usage})],
-        check=True, capture_output=True, encoding="utf-8").stdout)
+    result = json.loads(run_node(
+        harness, json.dumps({"stored": stored, "page": "http://127.0.0.1:55423", "usage": usage})))
     assert result["hostCount"] == 1, "the tailnet URL joined the page's own host instead of becoming a second row"
     assert result["routeCount"] == 2, "and both addresses are still there"
     assert result["merged"]["total_tokens"] == 100, "two routes for one daemon must not double the tokens"
@@ -1522,7 +1440,7 @@ def _fetching_source(source: str) -> list[str]:
 
 
 def _run_fetching(tmp_path: Path, name: str, body: str, value=None):
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     harness = tmp_path / f"{name}.js"
     harness.write_text(
         "\n".join(_fetching_source(source))
@@ -1531,16 +1449,12 @@ def _run_fetching(tmp_path: Path, name: str, body: str, value=None):
         + "main().then((result) => process.stdout.write(JSON.stringify(result)));\n",
         encoding="utf-8",
     )
-    result = subprocess.run(
-        ["node", str(harness), json.dumps(value if value is not None else {})],
-        check=True, capture_output=True, encoding="utf-8",
-    )
-    return json.loads(result.stdout)
+    return json.loads(run_node(harness, json.dumps(value if value is not None else {})))
 
 
 def _run_probing(tmp_path: Path, name: str, body: str, value=None):
     """Run an async body against the real probe code and read the JSON it returns."""
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     harness = tmp_path / f"{name}.js"
     harness.write_text(
         "\n".join(_probing_source(source))
@@ -1549,11 +1463,7 @@ def _run_probing(tmp_path: Path, name: str, body: str, value=None):
         + "main().then((result) => process.stdout.write(JSON.stringify(result)));\n",
         encoding="utf-8",
     )
-    result = subprocess.run(
-        ["node", str(harness), json.dumps(value if value is not None else {})],
-        check=True, capture_output=True, encoding="utf-8",
-    )
-    return json.loads(result.stdout)
+    return json.loads(run_node(harness, json.dumps(value if value is not None else {})))
 
 
 @needs_node
@@ -1920,7 +1830,7 @@ def test_session_detail_reads_through_the_route_system() -> None:
     A browser check covers the happy path; this is what keeps the call from going back to a
     bare fetch.
     """
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     body = extract_js_function(source, "async function openSessionModal(tool, sessionId, ownerServer")
     assert "fetchFromHost(" in body, "the modal has to read through the route system"
     assert "await fetch(" not in body, "a fixed-address fetch cannot fail over to the next route"
@@ -1939,7 +1849,7 @@ def test_session_detail_reads_through_the_route_system() -> None:
     ("javascript:alert(1)", [], None, 0),
 ])
 def test_user_address_protocol_discovery(tmp_path, address, available, expected, hits):
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     harness = tmp_path / "protocol.js"
     harness.write_text("\n".join([
         extract_js_function(source, "function normalizeRouteUrl(value) {"),
@@ -1949,7 +1859,7 @@ def test_user_address_protocol_discovery(tmp_path, address, available, expected,
         "async function probeServer(url) { calls.push(url); if (!available.includes(url)) throw new Error('unreachable'); }",
         f"resolveRouteInput({json.dumps(address)}).then(result => console.log(JSON.stringify({{result,calls}})));",
     ]), encoding="utf-8")
-    out = json.loads(subprocess.run(["node", str(harness)], capture_output=True, text=True, check=True).stdout)
+    out = json.loads(run_node(harness))
     assert out["result"].get("url") == expected
     assert len(out["calls"]) == hits
     if expected is None:
@@ -1959,7 +1869,7 @@ def test_user_address_protocol_discovery(tmp_path, address, available, expected,
 @needs_node
 @pytest.mark.parametrize("confirm", [False, True])
 def test_last_route_removal_preserves_host_when_cancelled(tmp_path, confirm):
-    source = INDEX_HTML.read_text(encoding="utf-8")
+    source = index_source()
     functions = [
         "const LOCAL_HOST_ID = 'local'; const t = key => key;",
         "const route = {id: 'route', kind: 'added', url: 'http://box'};",

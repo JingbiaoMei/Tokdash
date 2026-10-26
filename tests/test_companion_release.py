@@ -180,14 +180,25 @@ def test_every_external_action_is_pinned_to_a_commit() -> None:
 
 
 def test_every_actions_artifact_upload_has_one_day_retention() -> None:
+    # PyYAML is not a runtime dependency; CI has it through uvicorn[standard] in
+    # requirements-dev.txt. Imported here so only this test needs it.
+    import yaml
+
     for workflow in WORKFLOWS.glob("*.yml"):
-        lines = workflow.read_text(encoding="utf-8").splitlines()
-        for index, line in enumerate(lines):
-            if "actions/upload-artifact@" not in line:
-                continue
-            block = "\n".join(lines[index : index + 12])
-            assert "retention-days: 1" in block, (
-                f"{workflow.name} upload-artifact step must retain for one day"
+        text = workflow.read_text(encoding="utf-8")
+        jobs = yaml.safe_load(text).get("jobs") or {}
+        uploads = [
+            step
+            for job in jobs.values()
+            for step in job.get("steps") or []
+            if str(step.get("uses", "")).startswith("actions/upload-artifact@")
+        ]
+        # Every upload the file mentions is a step the walk above found, so one
+        # tucked somewhere else cannot slip past the retention check.
+        assert len(uploads) == text.count("actions/upload-artifact@"), workflow.name
+        for step in uploads:
+            assert (step.get("with") or {}).get("retention-days") == 1, (
+                f"{workflow.name}: upload-artifact step {step.get('name')!r} must retain for one day"
             )
 
 

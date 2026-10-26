@@ -12,17 +12,11 @@ notice, by having the two halves disagree.
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 
 import pytest
 
-import tokdash  # type: ignore[import-untyped]
-
-from support.frontend import extract_js_function, needs_node
-
-
-INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
+from support.frontend import extract_js_function, index_source, needs_node, run_node
 
 # A stand-in for the dashboard's globals: translations, the element factory, and a bar
 # renderer cheap enough to assert against. Rendering tests care about which headings and
@@ -93,10 +87,7 @@ def _run(tmp_path: Path, name: str, code: str, expression: str, value):
         + f"process.stdout.write(JSON.stringify({expression}));\n",
         encoding="utf-8",
     )
-    result = subprocess.run(
-        ["node", str(harness), json.dumps(value)], check=True, capture_output=True, encoding="utf-8"
-    )
-    return json.loads(result.stdout)
+    return json.loads(run_node(harness, json.dumps(value)))
 
 
 def _card(tmp_path: Path, src: str, name: str, provider):
@@ -119,7 +110,7 @@ def _window(account, bucket, used=40.0):
 
 @needs_node
 def test_a_siblings_windows_are_named_after_its_directory(tmp_path):
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     code = _view_code(src) + "\n" + "\n".join(
         [
             extract_js_function(src, "function quotaWindowLabel(provider, bucket) {"),
@@ -185,7 +176,7 @@ def test_a_stored_bucket_id_reads_back_as_the_window_it_measures(tmp_path):
     """
     from tokdash.sources.quota.claude import ClaudeProfile
 
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     profiles = [ClaudeProfile("default", Path("."), True)] + [
         ClaudeProfile(name, Path(f"~/.claude-{name}"))
         for name in ("academic", "lab", "weekly_all")  # the last owns a window-name prefix
@@ -211,7 +202,7 @@ def test_a_stored_bucket_id_reads_back_as_the_window_it_measures(tmp_path):
 @needs_node
 def test_the_title_only_shows_a_plan_every_shown_install_shares(tmp_path):
     """The plan line and the group headings are one decision, made from one group list."""
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     same = {
         "plan": "Max 5x",
         "buckets": [_window("default", "session"), _window("academic", "academic_session")],
@@ -263,7 +254,7 @@ def test_the_title_only_shows_a_plan_every_shown_install_shares(tmp_path):
 
 @needs_node
 def test_one_install_renders_exactly_as_it_did_before_profiles(tmp_path):
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     card = _card(
         tmp_path,
         src,
@@ -281,7 +272,7 @@ def test_one_install_renders_exactly_as_it_did_before_profiles(tmp_path):
 
 @needs_node
 def test_each_install_gets_its_own_heading_bars_and_failure(tmp_path):
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     card = _card(
         tmp_path,
         src,
@@ -315,7 +306,7 @@ def test_each_install_gets_its_own_heading_bars_and_failure(tmp_path):
 def test_every_failing_install_is_named_when_none_of_them_reports(tmp_path):
     """Both tokens expired: the card has no window rows at all, and still has to say which
     install is broken rather than print one generic line."""
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     card = _card(
         tmp_path,
         src,
@@ -362,7 +353,7 @@ def test_the_card_holds_its_own_error_when_no_installs_are_named(tmp_path, paylo
     Nothing can then say which install an error belongs to, so the card prints it once,
     after the installs it did render, rather than onto whichever one happens to be first.
     """
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     card = _card(tmp_path, src, "no-account-list", payload)
 
     expected = (
@@ -385,7 +376,7 @@ def test_the_card_is_named_after_the_only_install_it_measures(tmp_path):
     and a card measuring nothing but a sibling must not stay labelled for a default install
     that is not there.
     """
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     cases = [
         # Only the sibling has anything to show.
         {"buckets": [_window("academic", "academic_session")], "accounts": [{"account": "academic", "plan": "Pro"}]},
@@ -457,7 +448,7 @@ def test_a_failing_region_is_printed_under_that_region(tmp_path):
     card-level notice only when that count is zero -- so the stale China plan is visible
     without a second copy of the same error landing over the global plan's bars.
     """
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     card = _minimax_card(
         tmp_path,
         src,
@@ -489,7 +480,7 @@ def test_a_failing_region_is_printed_under_that_region(tmp_path):
 def test_a_region_failure_still_shows_when_no_regions_are_named(tmp_path):
     """Single region, or a payload with no account list: nothing to attribute, so the
     renderer claims no notice and the caller's card-level one is what the user sees."""
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     card = _minimax_card(
         tmp_path,
         src,
@@ -515,7 +506,7 @@ def test_an_unattributed_card_error_goes_above_every_install(tmp_path):
     direction, that this card exists to stop making. Above every heading it can only be read
     as belonging to the card.
     """
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     card = _card(
         tmp_path,
         src,
@@ -548,7 +539,7 @@ def test_a_card_error_belonging_to_no_listed_region_is_still_printed(tmp_path):
     the newer and more serious error, the one saying the credentials cannot be read at all,
     printed nowhere on the card. The count answers a different question than attribution.
     """
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     card = _minimax_card(
         tmp_path,
         src,
@@ -587,7 +578,7 @@ def test_a_claude_card_error_belonging_to_no_install_is_still_printed(tmp_path):
     while the Servers tab counted the very same provider as needing attention. The gate is
     attribution, not the presence of a list.
     """
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     card = _card(
         tmp_path,
         src,
@@ -627,7 +618,7 @@ def test_a_failing_region_with_no_bars_still_gets_its_own_heading(tmp_path):
     error. Unioning `provider.accounts` in, as the Claude card already does, gives the region
     a heading of its own to sit under.
     """
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     card = _minimax_card(
         tmp_path,
         src,
@@ -661,7 +652,7 @@ def test_two_failing_regions_are_both_shown(tmp_path):
     `attributed = 1` suppressed the card-level notice, and the second account's newer error
     then displayed nowhere at all.
     """
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     card = _minimax_card(
         tmp_path,
         src,
@@ -709,7 +700,7 @@ def test_the_servers_tally_does_not_fault_a_working_subscription(tmp_path):
     defines a failed group -- reading `status` alone counts two expired sign-ins as one
     working provider.
     """
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     result = _run(
         tmp_path,
         "server-tally",
@@ -812,7 +803,7 @@ def _resets(title, expires_at, count=1):
 @needs_node
 def test_one_install_shows_its_resets_under_its_bars(tmp_path):
     """The Codex "Reset Credits" block, fed from Claude's own reset inventory."""
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     card = _card(
         tmp_path,
         src,
@@ -831,7 +822,7 @@ def test_one_install_shows_its_resets_under_its_bars(tmp_path):
 
 @needs_node
 def test_each_install_shows_only_its_own_resets(tmp_path):
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     card = _card(
         tmp_path,
         src,
@@ -857,7 +848,7 @@ def test_each_install_shows_only_its_own_resets(tmp_path):
 @needs_node
 def test_a_card_level_reset_is_not_copied_onto_a_sibling(tmp_path):
     """With an `accounts` list, only an install's own entry can put resets under it."""
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     card = _card(
         tmp_path,
         src,
@@ -878,7 +869,7 @@ def test_a_card_level_reset_is_not_copied_onto_a_sibling(tmp_path):
 @needs_node
 def test_one_installs_card_notice_sits_between_its_bars_and_its_resets(tmp_path):
     """Bars, notice, resets -- the Codex card's order -- so a warning never reads as the resets'."""
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     card = _card(
         tmp_path,
         src,
@@ -896,7 +887,7 @@ def test_one_installs_card_notice_sits_between_its_bars_and_its_resets(tmp_path)
 
 @needs_node
 def test_resets_still_show_when_the_install_reported_no_windows(tmp_path):
-    src = INDEX_HTML.read_text(encoding="utf-8")
+    src = index_source()
     card = _card(
         tmp_path,
         src,

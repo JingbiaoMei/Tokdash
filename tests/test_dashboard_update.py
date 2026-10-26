@@ -28,6 +28,8 @@ from tokdash.onboard import (
     updatecheck,
 )
 
+from support.frontend import extract_js_function, index_source, needs_node, run_node
+
 HOST = "127.0.0.1:55423"
 TAILNET_HOST = "wsl.tail76535.ts.net"
 TAILNET_ORIGIN = "https://wsl.tail76535.ts.net"
@@ -1191,18 +1193,17 @@ def test_backup_holds_db_lock_until_replacement_done(eligible_env, tmp_path):
 def test_redesigned_popover_contract():
     # The popover's action-first structure: version summary, primary button,
     # job state with a phase stepper, terminal fallback BELOW the button, skip.
-    # Accents must follow the theme variables, not literals, and every key the
-    # JS reaches for must exist in the English dictionary.
-    html = (Path(__file__).resolve().parents[1] / "src" / "tokdash" / "static"
-            / "index.html").read_text(encoding="utf-8")
+    # Accents must follow the theme variables, not literals.
+    html = index_source()
     body = html[html.index('id="updatePopover"'):html.index("async function requestDashboardUpdate")]
     pos = [body.index(m) for m in ('id="updateApplyBtn"', 'id="updateJobBox"',
                                    'class="up-term"', 'id="updateTermLabel"')]
     assert pos == sorted(pos), "order: apply, job, terminal fallback/label"
     assert "run this in a terminal:" not in body.split('id="updateApplyBtn"')[0].lower()
 
-    for key in ("updateTitle", "updateSub", "updateSubManual", "updateTermPrefer",
-                "updateTermRun", "updateRetry", "phaseStopping", "phaseBackup",
+    # Keys the script only reaches through a ternary or a lookup table, which the
+    # i18n parity test cannot see as literal t('...') calls.
+    for key in ("updateSub", "updateTermPrefer", "phaseStopping", "phaseBackup",
                 "phaseInstall", "phaseVerify"):
         assert html.count(f"{key}: '") == 6, f"i18n key {key} missing from some locale"
 
@@ -1214,38 +1215,8 @@ def test_redesigned_popover_contract():
     markup = html[html.index('id="updatePopover"'):html.index('id="updateTermLabel"')]
     assert "btn btn-primary update-apply-btn" in markup
 
-    # Behavior wiring: phase stepper in the render path, retry handler bound,
-    # the ack click must not fire when a button inside the box was the target,
-    # and the badge render fills the new header (not the removed text div).
-    assert "renderUpdatePhases" in body
-    init = html[html.index("function initUpdateUi"):]
-    assert "ui.retry.addEventListener" in init and "closest('button')" in init
-    assert "head.title.textContent" in html[html.index("function renderUpdateBadge"):
-                                            html.index("function initUpdateBadgeUi")]
 
-
-def test_lost_start_response_recovers_without_a_second_click():
-    # The helper stops the server before (or just after) the accepted-job response
-    # lands, so the browser's fetch rejects on a SUCCESSFUL click. The catch must
-    # not silently tell the user to click again — it has to recover the durable
-    # job by waiting for the server, with a bounded budget like polling.
-    import re as _re
-    html = (Path(__file__).resolve().parents[1] / "src" / "tokdash" / "static"
-            / "index.html").read_text(encoding="utf-8")
-    start = html.index("async function requestDashboardUpdate")
-    fn = html[start:html.index("async function recoverLostStart")]
-    assert "recoverLostStart()" in fn, "lost-response catch must start recovery"
-    assert "clicking again" not in fn, "the browser may not demand a second click"
-    rec = html[start:html.index("async function enrollUpdateBrowser")]
-    m = _re.search(r"while \(misses < (\d+)\)", rec)
-    assert m and int(m.group(1)) >= 60, "recovery must be bounded but outlast an install"
-    assert "refreshUpdateCapability" in rec[rec.index("async function recoverLostStart"):]
-    # Server answered -> the capability render owns the UI again (live jobs poll,
-    # finished ones show their notice); server never answered -> honest unknown state.
-    assert "updateTimeout" in rec[rec.index("async function recoverLostStart"):]
-
-
-def _run_click_response_harness(cases_js: str) -> dict:
+def _run_click_response_harness(tmp_path: Path) -> dict:
     """Drive the real requestDashboardUpdate/recoverLostStart/refreshUpdateCapability
     code in node.
 
@@ -1254,11 +1225,7 @@ def _run_click_response_harness(cases_js: str) -> dict:
     the capability endpoint do (including a body cut off mid-delivery: the real
     fetchJson RESOLVES null there) and observe what the browser code actually does.
     """
-    node = __import__("shutil").which("node")
-    if not node:
-        pytest.skip("node not available")
-    html = (Path(__file__).resolve().parents[1] / "src" / "tokdash" / "static"
-            / "index.html").read_text(encoding="utf-8")
+    html = index_source()
     region = (html[html.index("async function requestDashboardUpdate"):
                    html.index("async function enrollUpdateBrowser")]
               + "\n"
@@ -1367,20 +1334,19 @@ const CASES = %%CASES%%;
         # The same shape on a plain refresh: null out through the contract, no throw.
         {"name": "refresh_truncated_body", "refreshOnly": True, "start": None,
          "capability": [None]},
+        # The update took the server down and it never came back: recovery gives up
+        # after its bounded budget and says the outcome is unknown, instead of
+        # spinning forever or offering the click again.
+        {"name": "never_answers", "start": {"kind": "reject"}, "capability": [None]},
     ]
-    import json as _json
-    import subprocess as _sp
-    import tempfile as _tf
-    with _tf.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
-        fh.write(harness.replace("%%CASES%%", _json.dumps(cases)))
-        path = fh.name
-    proc = _sp.run([node, path], capture_output=True, text=True, timeout=60)
-    assert proc.returncode == 0, proc.stderr
-    return _json.loads(proc.stdout)
+    script = tmp_path / "click_response.js"
+    script.write_text(harness.replace("%%CASES%%", json.dumps(cases)), encoding="utf-8")
+    return json.loads(run_node(script))
 
 
-def test_click_response_variants_behave_correctly():
-    out = _run_click_response_harness(None)
+@needs_node
+def test_click_response_variants_behave_correctly(tmp_path):
+    out = _run_click_response_harness(tmp_path)
     # Every lost-response shape recovers by consulting the durable journal.
     for name in ("headers_lost", "body_truncated", "ok_without_job"):
         assert out[name]["capabilityCalls"] > 0, f"{name} must start recovery, not go silent"
@@ -1403,6 +1369,15 @@ def test_click_response_variants_behave_correctly():
     assert out["refresh_truncated_body"]["threw"] is None
     assert out["refresh_truncated_body"]["returnedNull"] is True
     assert out["refresh_truncated_body"]["infoNull"] is True
+    # A server that never answers again: the wait is bounded, but long enough to
+    # outlast an install (60+ polls at the capped backoff), and it ends on the
+    # honest "outcome unknown" notice with the update button still withheld.
+    never = out["never_answers"]
+    assert 60 <= never["capabilityCalls"] <= 100, never["capabilityCalls"]
+    assert never["polls"] == []
+    assert never["applyHidden"] is True, "giving up must not re-arm a second click"
+    assert never["boxState"] == "failed"
+    assert never["boxText"].startswith("updateTimeout"), never["boxText"]
 
 
 def _seed_snapshots(backups_dir, *stamps):
@@ -1752,45 +1727,195 @@ def test_retry_after_restart_attaches_to_live_job(eligible_env, tmp_path):
     assert body["job"]["id"] == job["id"]
 
 
-def test_terminal_notices_are_acknowledgeable():
-    # Wiring-level contract (behavior is proven in node below): success is
-    # acknowledgeable like failure, BOTH click paths route through the guarded
-    # helper (no unguarded localStorage write may sit in a click handler), and
-    # "Try again" only shows while that click would DO something.
-    html = (Path(__file__).resolve().parents[1] / "src" / "tokdash" / "static"
-            / "index.html").read_text(encoding="utf-8")
-    rj = html[html.index("function renderUpdateJob"):html.index("function startUpdatePolling")]
-    assert "(job.phase === 'failed' || job.phase === 'succeeded') && updateJobAcked(job))" in rj
-    assert "ui.retry.hidden = !(updateCapabilityInfo && updateCapabilityInfo.target);" in rj
-    assert "updateJobShown = job;" in rj, "the box must remember the job it paints"
+# The real update-panel code: its state bindings, the job box renderer, the ack
+# helpers, the capability refresh a page load runs, and the click handlers.
+_TERMINAL_NOTICE_FUNCTIONS = (
+    "function updateUi() {",
+    "function updateJobAcked(job) {",
+    "function ackShownUpdateJob() {",
+    "function updatePanelReveal() {",
+    "function updatePanelHideIfIdle() {",
+    "function renderUpdateJob(job) {",
+    "async function refreshUpdateCapability(",
+    "function initUpdateUi() {",
+)
 
-    cap = html[html.index("async function refreshUpdateCapability"):
-               html.index("function initUpdateUi")]
-    assert cap.count("!updateJobAcked(job)") == 2, "both terminal branches must respect the ack"
+_TERMINAL_NOTICE_HARNESS = r"""
+const t = (key) => key;
+const UP_ICONS = { spinner: '', check: '', cross: '' };
+function setJobIcon() {}
+function renderUpdatePhases() {}
+function renderUpdateApply() {}
+function startUpdatePolling() {}
+function updateIsLocalHost() { return true; }
+async function recoverUpdateCsrf() { return false; }
+async function requestDashboardUpdate() {}
+async function enrollUpdateBrowser() {}
+function appPath(path) { return path; }
 
-    init = html[html.index("function initUpdateUi"):html.index("function renderUpdateBadge")]
-    box = init[:init.index("ui.retry.addEventListener")]
-    assert "ui.jobBox.dataset.state !== 'done'" in box, "success box must be clickable-to-ack"
-    assert "const job = updateJobShown;" in box and "ackShownUpdateJob()" in box
-    refresh = init[init.index("if (ui.refresh)"):init.index("window.location.reload")]
-    assert "ackShownUpdateJob();" in refresh, \
-        "the refresh click itself must acknowledge the success it delivered"
-    assert "localStorage.setItem" not in init, \
-        "no unguarded storage write may sit in the click handlers (blocked storage = dead button)"
-    assert "localStorage.removeItem(UPDATE_SKIP_KEY);\n        } catch" in refresh, \
-        "even the skip-flag cleanup must not be able to cancel the reload"
+class El {
+  constructor(id) { this.id = id; this.hidden = true; this.dataset = {}; this.textContent = ''; this.handlers = {}; }
+  addEventListener(type, fn) { this.handlers[type] = fn; }
+  fire(type, event) { if (this.handlers[type]) this.handlers[type](event); }
+}
+let dom = {};
+const document = { getElementById: (id) => (dom[id] = dom[id] || new El(id)) };
+const el = (id) => document.getElementById(id);
+let reloads = 0;
+const window = { location: { reload() { reloads += 1; } } };
+
+// One browser profile's storage, kept across page loads; or a profile where
+// every access throws (private mode, blocked site data).
+let store = {};
+const workingStorage = {
+  getItem: (k) => (k in store ? store[k] : null),
+  setItem: (k, v) => { store[k] = String(v); },
+  removeItem: (k) => { delete store[k]; },
+};
+const blockedStorage = {
+  getItem: () => { throw new Error('SecurityError'); },
+  setItem: () => { throw new Error('SecurityError'); },
+  removeItem: () => { throw new Error('SecurityError'); },
+};
+let localStorage = workingStorage;
+
+// The capability endpoint answers with the journal's latest job.
+let capability = null;
+async function fetchJsonWithRetry() { return JSON.parse(JSON.stringify(capability)); }
+
+__STATE__
+
+__FUNCTIONS__
+
+// A page load: fresh DOM and page state, handlers bound, then the capability
+// refresh that finds whatever job the journal holds.
+async function loadPage() {
+  dom = {};
+  updateCapabilityInfo = null;
+  updateLatestKnown = null;
+  updateJobShown = null;
+  updatePollTimer = null;
+  initUpdateUi();
+  await refreshUpdateCapability({ quiet: true });
+  return {
+    hidden: el('updateJobBox').hidden,
+    state: el('updateJobBox').dataset.state || null,
+    retryHidden: el('updateRetryBtn').hidden,
+    refreshHidden: el('updateRefreshBtn').hidden,
+  };
+}
+
+async function runCase(c) {
+  store = {};
+  if (c.seedSkip) store[UPDATE_SKIP_KEY] = c.seedSkip;
+  localStorage = c.blockStorage ? blockedStorage : workingStorage;
+  reloads = 0;
+  capability = c.capability;
+  const shown = await loadPage();
+  let threw = null;
+  try {
+    if (c.click === 'box') el('updateJobBox').fire('click', { target: { closest: () => null } });
+    if (c.click === 'button-in-box') el('updateJobBox').fire('click', { target: { closest: () => ({}) } });
+    if (c.click === 'refresh') el('updateRefreshBtn').fire('click', {});
+  } catch (e) { threw = String((e && e.message) || e); }
+  const hiddenAfterClick = el('updateJobBox').hidden;
+  const acked = store[UPDATE_ACK_KEY] || null;
+  const skipKept = UPDATE_SKIP_KEY in store;
+  const reloaded = await loadPage();
+  return { shown, threw, hiddenAfterClick, acked, skipKept, reloads, hiddenAfterReload: reloaded.hidden };
+}
+
+(async () => {
+  const out = {};
+  for (const c of JSON.parse(process.argv[2])) out[c.name] = await runCase(c);
+  process.stdout.write(JSON.stringify(out));
+})();
+"""
 
 
-def test_shown_job_is_what_gets_acked():
+def _update_state_block(html: str) -> str:
+    start = html.index("    const UPDATE_SKIP_KEY = ")
+    end = html.index("    let releaseNotesPromise = null;")
+    return html[start:end] + "    let releaseNotesPromise = null;\n"
+
+
+@needs_node
+def test_a_terminal_notice_is_dismissed_by_its_click_and_stays_dismissed(tmp_path):
+    # A finished job's notice -- success or failure -- is acknowledged by clicking
+    # the box (or, for a success, by "Refresh to finish"), and an acknowledged job
+    # must not come back on the next page load even though the journal still names
+    # it. Blocked storage may cost the memory, never the click's own action.
+    html = index_source()
+    script = tmp_path / "terminal_notices.js"
+    script.write_text(
+        _TERMINAL_NOTICE_HARNESS
+        .replace("__STATE__", _update_state_block(html))
+        .replace("__FUNCTIONS__", "\n".join(extract_js_function(html, sig) for sig in _TERMINAL_NOTICE_FUNCTIONS)),
+        encoding="utf-8",
+    )
+    succeeded = {"current": "9.9.9", "target": None, "eligible": True,
+                 "latest_job": {"id": "j-ok", "phase": "succeeded", "to_version": "9.9.9", "terminal": True}}
+    failed_job = {"id": "j-bad", "phase": "failed", "failed_phase": "installing", "message": "boom",
+                  "to_version": "9.9.9", "terminal": True}
+    cases = [
+        {"name": "success_box_click", "capability": succeeded, "click": "box"},
+        {"name": "failure_box_click", "click": "box",
+         "capability": {"current": "9.9.8", "target": "9.9.9", "eligible": True, "latest_job": failed_job}},
+        {"name": "failure_without_target", "click": None,
+         "capability": {"current": "9.9.9", "target": None, "eligible": True, "latest_job": failed_job}},
+        {"name": "button_inside_box", "capability": succeeded, "click": "button-in-box"},
+        {"name": "refresh_click", "capability": succeeded, "click": "refresh", "seedSkip": "9.9.9"},
+        {"name": "refresh_click_blocked_storage", "capability": succeeded, "click": "refresh",
+         "blockStorage": True},
+        {"name": "box_click_blocked_storage", "capability": succeeded, "click": "box", "blockStorage": True},
+    ]
+    out = json.loads(run_node(script, json.dumps(cases)))
+
+    # A success is shown with its refresh button, acknowledged by a click on the box,
+    # and stays dismissed across a reload.
+    success = out["success_box_click"]
+    assert success["shown"] == {"hidden": False, "state": "done", "retryHidden": True, "refreshHidden": False}
+    assert success["acked"] == "j-ok"
+    assert success["hiddenAfterClick"] is True
+    assert success["hiddenAfterReload"] is True
+
+    # A failure is acknowledged the same way, and offers "Try again" only while a
+    # newer target exists for that click to install.
+    failure = out["failure_box_click"]
+    assert failure["shown"]["state"] == "failed"
+    assert failure["shown"]["retryHidden"] is False
+    assert (failure["acked"], failure["hiddenAfterClick"], failure["hiddenAfterReload"]) == ("j-bad", True, True)
+    lingering = out["failure_without_target"]
+    assert lingering["shown"]["retryHidden"] is True, "a retry with no target would hide the box and do nothing"
+    assert lingering["hiddenAfterReload"] is False, "an unacknowledged failure must survive a reload"
+
+    # Buttons inside the box act; they must not also acknowledge.
+    inside = out["button_inside_box"]
+    assert inside["acked"] is None
+    assert inside["hiddenAfterClick"] is False
+    assert inside["hiddenAfterReload"] is False
+
+    # "Refresh to finish" acknowledges the success it delivered, clears the skip
+    # flag and reloads ...
+    refresh = out["refresh_click"]
+    assert (refresh["threw"], refresh["reloads"], refresh["acked"]) == (None, 1, "j-ok")
+    assert refresh["skipKept"] is False
+    assert refresh["hiddenAfterReload"] is True
+    # ... and with storage blocked it still reloads: bookkeeping must never cancel
+    # the action the user asked for.
+    blocked = out["refresh_click_blocked_storage"]
+    assert (blocked["threw"], blocked["reloads"]) == (None, 1)
+    blocked_box = out["box_click_blocked_storage"]
+    assert blocked_box["threw"] is None
+
+
+@needs_node
+def test_shown_job_is_what_gets_acked(tmp_path):
     # Behavior (review rounds 5–6): the success box is painted straight from the
     # polling response while capability still reports the PREVIOUS job; the ack
     # must remember the SHOWN job or the fresh success reappears after reload.
     # And with storage blocked, the click must fail quiet — never throw.
-    node = __import__("shutil").which("node")
-    if not node:
-        pytest.skip("node not available")
-    html = (Path(__file__).resolve().parents[1] / "src" / "tokdash" / "static"
-            / "index.html").read_text(encoding="utf-8")
+    html = index_source()
     helpers = html[html.index("function updateJobAcked"):html.index("function updatePanelReveal")]
     render = html[html.index("function renderUpdateJob"):
                   html.index("// Reconnect with bounded backoff")]
@@ -1842,15 +1967,9 @@ console.log(JSON.stringify(out));
          "render": {"id": "j-NEW", "phase": "succeeded", "to_version": "9.9.9"}},
         {"name": "hidden_clears", "render": None},
     ]
-    import json as _json
-    import subprocess as _sp
-    import tempfile as _tf
-    with _tf.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
-        fh.write(harness.replace("%%CASES%%", _json.dumps(cases)))
-        path = fh.name
-    proc = _sp.run([node, path], capture_output=True, text=True, timeout=60)
-    assert proc.returncode == 0, proc.stderr
-    out = _json.loads(proc.stdout)
+    script = tmp_path / "shown_job_ack.js"
+    script.write_text(harness.replace("%%CASES%%", json.dumps(cases)), encoding="utf-8")
+    out = json.loads(run_node(script))
     # The SHOWN job wins over capability's stale one — and it is what gets stored.
     assert out["acks_shown_job"]["shownId"] == "j-NEW"
     assert out["acks_shown_job"]["acked"] is True

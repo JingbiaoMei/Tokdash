@@ -1655,9 +1655,13 @@ def test_the_shared_window_steps_the_visible_pane_and_marks_the_rest(monkeypatch
             lambda: ("today", "2026-09-19", "2026-09-19") in calls.usage_full,
         )
         assert app._win.label == "Yesterday" and app._win.shift == 1
-        # The active-time job carried the pair too.
-        assert any(t[:3] == ("today", "2026-09-19", "2026-09-19")
-                   for t in calls.active_full)
+        # The active-time job carried the pair too. Overview asks for it only
+        # once the usage answer is painted, so it is waited for, not read off.
+        assert await wait_for(
+            app, pilot,
+            lambda: any(t[:3] == ("today", "2026-09-19", "2026-09-19")
+                        for t in calls.active_full),
+        )
         # Only the visible pane re-read; Report waits for the tab.
         assert len(calls.usage) == before + 1, calls.usage
         assert "report" in app._stranded

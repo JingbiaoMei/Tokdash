@@ -650,7 +650,7 @@ def _short_timer(node, horizon: float) -> bool:
     return False
 
 
-async def quiesce(pilot, budget: float):
+async def quiesce(pilot, budget: float) -> bool:
     """Return once the app is idle, or after ``PATIENCE`` seconds at the most.
 
     Idle means three polls running with nothing in ``_busy`` and every message
@@ -662,6 +662,9 @@ async def quiesce(pilot, budget: float):
     Only a busy poll sleeps, to hand the worker threads the GIL; an idle one
     just drains the screen. A fixed sleep per poll would cost each step three
     timer ticks, which on Windows are ~15 ms however short the request.
+
+    Answers whether the app went idle, so a failure can say that the wait ran
+    out instead of leaving that to be guessed.
     """
     deadline = time.monotonic() + max(budget, PATIENCE)
     quiet = 0
@@ -670,11 +673,12 @@ async def quiesce(pilot, budget: float):
         await pilot.pause(0.002 if busy else 0)
         busy = _busy(pilot.app, budget)
         quiet = 0 if busy else quiet + 1
+    return quiet >= 3
 
 
-async def settle(pilot, times=3):
+async def settle(pilot, times=3) -> bool:
     """Let the step settle: ``times`` quarter-seconds was the old fixed sleep."""
-    await quiesce(pilot, 0.25 * times)
+    return await quiesce(pilot, 0.25 * times)
 
 
 def screen_lines(app):
@@ -698,6 +702,42 @@ def visible(app, selector: str) -> str:
     return "\n".join(
         line[region.x:region.right] for line in lines[region.y:region.bottom]
     )
+
+
+def frame_report(app, pane: str, selectors: tuple[str, ...]) -> str:
+    """Where a pane's widgets sit and what the fit chain holds, for a failure message.
+
+    A footer showing through a widget's region can be a pane that was never
+    fitted, a body taller than its pane, or a frame caught between layouts. The
+    regions, the pane's scroll and the fit state are what tell those apart.
+    """
+    lines: list[str] = []
+    try:
+        box = app.query_one(f"#pane-{pane}")
+        lines.append(
+            f"pane #pane-{pane}: region={box.region} height={box.styles.height} "
+            f"scroll_y={box.scroll_y} max_scroll_y={box.max_scroll_y} "
+            f"virtual={box.virtual_size}"
+        )
+        for selector in selectors:
+            widget = app.query_one(selector)
+            lines.append(f"{selector}: region={widget.region} display={widget.display} "
+                         f"height={widget.styles.height}")
+        lines.append(
+            f"strip_rows={app._strip_rows} fit_stamp={app._fit_stamp} "
+            f"fit_rearms={app._fit_rearms} fit_pending={app._fit_pending} "
+            f"refits_due={[getattr(r, '__name__', r) for r in app._refits_due]} "
+            f"open_loads={app._open_loads.get(pane)}"
+        )
+        lines.append(f"body fitted={app._body_fitted.get(pane)} now={app._body_stamp(pane)}")
+        if pane == "speed":
+            lines.append(f"series painted={app._sp_series_painted} "
+                         f"now={app._speed_series_stamp()}")
+        lines.append("screen:")
+        lines.extend(f"{row:2d}|{text}" for row, text in enumerate(screen_lines(app)))
+    except Exception as exc:  # noqa: BLE001 -- the report must not hide the failure
+        lines.append(f"(report stopped: {exc!r})")
+    return "\n".join(lines)
 
 
 def rows_of(table: DataTable) -> list[list[str]]:

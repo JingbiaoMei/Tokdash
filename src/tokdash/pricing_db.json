@@ -1,6 +1,6 @@
 {
-  "version": "2.0.38",
-  "lastUpdated": "2026-10-23T04:27:20Z",
+  "version": "2.0.39",
+  "lastUpdated": "2026-10-29T12:13:31Z",
   "note": "Comprehensive pricing database with all Moonshot, MiniMax, GLM, and OpenAI models from OpenRouter. Cache pricing estimated at 10% of input for cache_read, 100% of input for cache_write.",
   "aliases": {
     "Qwen/Qwen3.8-Flash-Next": "qwen3.8-flash",
@@ -1154,6 +1154,24 @@
       "cache_write": 2.5,
       "unit": "per_million_tokens",
       "source": "openrouter.ai/openai/gpt-6.1-sol-pro"
+    },
+    "gpt-6.1-terra": {
+      "provider": "openai",
+      "input": 1.0,
+      "output": 5.0,
+      "cache_read": 0.05,
+      "cache_write": 1.25,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-6.1-terra"
+    },
+    "gpt-6.1-terra-pro": {
+      "provider": "openai",
+      "input": 1.0,
+      "output": 5.0,
+      "cache_read": 0.05,
+      "cache_write": 1.25,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-6.1-terra-pro"
     },
     "_comment_anthropic": "=== Anthropic Claude Models ===",
     "claude-fable-5": {
@@ -3168,6 +3186,15 @@
       "unit": "per_million_tokens",
       "source": "openrouter.ai/moonshotai/kimi-k2.5",
       "note": "Alias for kimi-k2.5 (k2p5 naming variation)"
+    },
+    "kimi-k3.1-pro": {
+      "provider": "moonshotai",
+      "input": 2.0,
+      "output": 10.0,
+      "cache_read": 0.2,
+      "cache_write": 2.0,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/moonshotai/kimi-k3.1-pro"
     },
     "antigravity-gemini-3-pro": {
       "provider": "google",

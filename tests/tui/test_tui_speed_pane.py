@@ -25,6 +25,7 @@ from tokdash.tui.app import TokdashApp  # noqa: E402
 from support.tui import (  # noqa: E402
     SHARED_MODEL,
     api,  # noqa: F401  (the fixture these tests ask pytest for)
+    frame_report,
     headers_of,
     month_of_buckets,
     _open,
@@ -334,9 +335,24 @@ def test_the_timing_set_control_reveals_the_measurements_it_promises(api):
 
     async def body(app, pilot):
         app.action_show_pane("speed")
-        await settle(pilot, 2)
+        settled = await settle(pilot, 2)
         # Closed: nothing measured, and the pane says which key changes that.
-        assert "press x" in visible(app, "#sp-detail"), visible(app, "#sp-detail")
+        shown = visible(app, "#sp-detail")
+        if "press x" not in shown:
+            # macOS CI has three times found the status strip's text here. Say
+            # where everything was, then look again past the 1 s status tick, so
+            # the next failure tells an unfitted pane from an overfull one and a
+            # passing frame from a stuck one.
+            parts = ("#sp-head", "#sp-note", "#sp-controls", "#sp-selectors",
+                     "#sp-series", "#sp-chart", "#sp-table", "#sp-detail", "#status")
+            first = frame_report(app, "speed", parts)
+            await pilot.pause(1.5)
+            pytest.fail(
+                f"#sp-detail showed {shown!r} (settled={settled})\n"
+                f"--- at the check\n{first}\n"
+                f"--- 1.5 s later, #sp-detail shows {visible(app, '#sp-detail')!r}\n"
+                f"{frame_report(app, 'speed', parts)}"
+            )
         assert "hidden by the timing filter" in visible(app, "#sp-note")
         await pilot.press("x")
         await settle(pilot, 3)

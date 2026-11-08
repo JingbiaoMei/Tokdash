@@ -5,6 +5,7 @@
   "aliases": {
     "Qwen/Qwen3.8-Flash-Next": "qwen3.8-flash",
     "antigravity-gemini-3.8-flash-n": "gemini-3.8-flash",
+    "antigravity-gemini-4-argon-b": "gemini-4-argon",
     "ark-code": "seed-2.0-code",
     "claude-sonnet-5-20260630": "claude-sonnet-5",
     "cloudflare/glm-5.2": "glm-5.2",
@@ -24,6 +25,7 @@
     "gemini-3-flash-a": "antigravity-gemini-3-flash",
     "gemini-3.7-flash-control": "gemini-3.7-flash",
     "gemini-3.8-flash-n": "gemini-3.8-flash",
+    "gemini-4-argon-b": "gemini-4-argon",
     "glm-5-1": "glm-5.1",
     "glm-5-2": "glm-5.2",
     "glm-5-3": "glm-5.3",

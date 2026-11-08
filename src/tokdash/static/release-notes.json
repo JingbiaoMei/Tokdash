@@ -1,6 +1,26 @@
 {
-  "current": "2.7.1",
+  "current": "2.7.2",
   "releases": [
+    {
+      "version": "2.7.2",
+      "date": "2026-11-08",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "Pricing DB 2.0.40 adds seven models: gpt-6.1-terra, gpt-6.1-terra-pro, kimi-k3.1-pro, gemini-omni-1.1-flash, gemini-omni-1.2-flash, glm-5.3-flashx-legal, and hy4. Existing model rates are unchanged."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "Gemini 4 Argon used through Antigravity ACP now receives the same cost estimate as standalone Argon and appears under the same model. Previously stored $0.00 entries are corrected automatically during normal sync.",
+            "The terminal dashboard keeps Overview activity captions and Speed hour-detail rows visible when status text changes height. Activity captions also retain their final line instead of being clipped by padding.",
+            "The ZCode sessions table now shows its newest-first sort arrow as soon as it opens."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.7.1",
       "date": "2026-10-25",

@@ -1,11 +1,15 @@
 """Tests for Antigravity CLI usage parsing."""
 
+import json
 import sqlite3
 import time
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from tokdash import clientpaths
-from tokdash.compute import _collect_parser_file
+from tokdash.compute import _collect_parser_file, _sync_usage_store
 from tokdash.pricing import PricingDatabase
 from tokdash.sources import coding_tools
 from tokdash.sources.coding_tools import BaseParser, _sig_cache
@@ -590,6 +594,61 @@ def test_antigravity_cli_file_replace_sync_reparses_only_changed_db(monkeypatch,
     assert store.sync_files("antigravity_cli", files_v2, parser={"v": 1}, parse_file_entries=parse_file) is True
     assert calls == ["a.db", "b.db", "b.db"]
     assert store.aggregate_entries(sources=["antigravity_cli"])["total_messages"] == 2
+
+
+def test_antigravity_acp_argon_alias_reprices_stored_usage_without_reparsing(monkeypatch, tmp_path):
+    """An alias update must reach old $0 ACP rows without rereading conversations."""
+    _prepare_antigravity_home(monkeypatch, tmp_path)
+    acp_home = tmp_path / "host" / "antigravity-acp"
+    conversations = acp_home / "conversations"
+    conversations.mkdir(parents=True)
+    monkeypatch.setenv("ANTIGRAVITY_HOME", str(acp_home))
+    _create_antigravity_db(
+        conversations / "argon-acp.db",
+        [(1, _encode_gen_metadata_blob(
+            model="gemini-4-argon-b",
+            seconds=1_800_030_000,
+            nanos=0,
+            input_tokens=1000,
+            output_tokens=200,
+            cache_read_tokens=400,
+            cache_write_tokens=50,
+        ))],
+    )
+
+    current_pricing = PricingDatabase()
+    expected = current_pricing.get_cost("gemini-4-argon", 1000, 200, 400, 50)
+    assert expected > 0
+    # Model the pre-fix pricing DB: the canonical rates existed, but the ACP
+    # alias did not. Keep all billing buckets so repricing can reconstruct them.
+    legacy_path = tmp_path / "legacy-pricing.json"
+    legacy_path.write_text(json.dumps({
+        "models": {"gemini-4-argon": current_pricing.pricing["gemini-4-argon"]},
+    }), encoding="utf-8")
+    legacy_pricing = PricingDatabase(db_path=legacy_path)
+    parser = _get_parser_class()(legacy_pricing)
+    tracker = SimpleNamespace(pricing_db=legacy_pricing, parsers={"antigravity_cli": parser})
+    store, _sources = _sync_usage_store(tracker)
+    before = store.query_entries(sources=["antigravity_cli"])
+    assert len(before) == 1
+    assert before[0]["model"] == "gemini-4-argon-b"
+    assert before[0]["cost"] == 0
+    source_signature = store.source_signature("antigravity_cli")
+
+    # New parses and old cached rows must both use the canonical model's rates.
+    current_parser = _get_parser_class()(current_pricing)
+    assert current_parser.collect(None, None)[0]["cost"] == pytest.approx(expected)
+    monkeypatch.setattr(
+        current_parser, "_parse_all",
+        lambda: pytest.fail("a pricing alias update must not reparse source logs"),
+    )
+    tracker.pricing_db = current_pricing
+    tracker.parsers["antigravity_cli"] = current_parser
+    updated_store, _sources = _sync_usage_store(tracker)
+    after = updated_store.query_entries(sources=["antigravity_cli"])
+    assert after == [dict(before[0], cost=pytest.approx(expected))]
+    assert updated_store.aggregate_entries(sources=["antigravity_cli"])["total_cost"] == pytest.approx(expected)
+    assert updated_store.source_signature("antigravity_cli") == source_signature
 
 
 def test_antigravity_cli_signature_scan_only_stats_db_and_sidecars(monkeypatch, tmp_path):

@@ -28,6 +28,16 @@ SYNC_CASES = [
     "gemini-3-flash-a",          # alias -> gemini-3-flash
     "gemini-3.8-flash-n",        # alias -> gemini-3.8-flash
     "antigravity-gemini-3.8-flash-n",  # provider strip + alias -> gemini-3.8-flash
+    "gemini-4-argon-b",         # ACP alias -> gemini-4-argon
+    "google/gemini-4-argon-b",
+    "openrouter/google/gemini-4-argon-b",
+    "antigravity-gemini-4-argon-b",
+    "Google/GEMINI_4_ARGON_B",
+    "gemini-4-argon-b-latest",
+    "gemini-4-argon-c",         # unknown suffixes must stay distinct
+    "gemini-4-argon-bb",
+    "gemini-3.8-flash-b",
+    "command-a",
     "kimi/kimi-k2p6",            # Kimi collapse -> kimi-k2.6
     "k2p6",                      # alias + collapse -> kimi-k2.6
     "kimi-coding/k2p5",          # -> kimi-k2.5

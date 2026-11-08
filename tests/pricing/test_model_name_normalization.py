@@ -52,6 +52,23 @@ def test_alias_variants_normalization():
     assert normalize_model_name("vol-engine/kimi-2.5") == "kimi-k2.5"
 
 
+def test_gemini_4_argon_acp_variant_normalization():
+    for model in [
+        "gemini-4-argon-b",
+        "google/gemini-4-argon-b",
+        "openrouter/google/gemini-4-argon-b",
+        "antigravity-gemini-4-argon-b",
+        "Google/GEMINI_4_ARGON_B",
+        "gemini-4-argon-b-latest",
+    ]:
+        assert normalize_model_name(model) == "gemini-4-argon", model
+
+
+def test_unknown_antigravity_suffixes_remain_distinct():
+    for model in ["gemini-4-argon-c", "gemini-4-argon-bb", "gemini-3.8-flash-b"]:
+        assert normalize_model_name(model) == model
+
+
 def test_kimi_k25_variants():
     """All provider/name combinations for kimi-k2.5 must collapse to one key."""
     expected = "kimi-k2.5"

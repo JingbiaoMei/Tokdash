@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.7.2 - 2026-11-08
+
+### Added
+
+- Pricing DB 2.0.40 adds seven models since 2.0.38: `gpt-6.1-terra`, `gpt-6.1-terra-pro`, `kimi-k3.1-pro`, `gemini-omni-1.1-flash`, `gemini-omni-1.2-flash`, `glm-5.3-flashx-legal`, and `hy4`. Existing model rates are unchanged. (#282, #283)
+
+### Fixed
+
+- Antigravity ACP's `gemini-4-argon-b` now uses the existing `gemini-4-argon` rates, including cache reads and writes, and groups with standalone Argon usage in both the backend and dashboard. Previously stored $0.00 rows are repriced during normal sync without rereading conversation logs. Explicit aliases cover the bare and `antigravity-`-prefixed IDs; unknown suffixes remain distinct. (#285, closes #284, thanks @wangfh5)
+- The terminal dashboard rechecks Overview and Speed geometry after the layout requested by a paint has landed. Activity captions and Speed hour-detail rows stay visible when a status strip changes height, and the activity band's height includes its own padding so the final caption line is not clipped. (#271)
+- The ZCode sessions table shows its default newest-first sort arrow immediately, before any column is clicked. (#274)
+
+### Changed
+
+- Reorganized tests by feature area, with shared frontend and TUI helpers and stronger behavioral coverage for session panels, escaping, reporting, localization, and dashboard updates. (#262, #263, #264, #265, #266, #267, #269, #270, #272)
+- Improved CI reliability with deterministic quota and TUI tests, isolated pricing-cache references, compute slots released to the semaphore that lent them, updated companion test paths, and a compatible pytest upper bound. (#268, #273, #276, #277, #278, #279)
+- Removed unused TUI CSS selectors. (#275)
+
 ## 2.7.1 - 2026-10-25
 
 ### Added

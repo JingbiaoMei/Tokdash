@@ -3,6 +3,16 @@
   "source": "release-notes.json",
   "comment": "简体中文更新日志。项与 release-notes.json 按下标一一对齐；未翻译的版本回落英文。",
   "releases": {
+    "2.7.2": {
+      "added": [
+        "定价数据库升级到 2.0.40，新增七个模型：gpt-6.1-terra、gpt-6.1-terra-pro、kimi-k3.1-pro、gemini-omni-1.1-flash、gemini-omni-1.2-flash、glm-5.3-flashx-legal 和 hy4。既有模型的价格保持不变。"
+      ],
+      "fixed": [
+        "通过 Antigravity ACP 使用的 Gemini 4 Argon 现在会按独立客户端中的 Argon 价格估算费用，并归入同一个模型。此前已存储的 $0.00 用量记录会在正常同步时自动修正。",
+        "终端仪表盘中，状态文字改变高度时，Overview 的活跃度图说明和 Speed 的小时详情行会保持可见。活跃度图说明的最后一行也不会再被内边距裁掉。",
+        "ZCode 会话表一打开就会显示按时间从新到旧排序的箭头。"
+      ]
+    },
     "2.7.1": {
       "added": [
         "Overview 新增了「项目详情」表：按你工作过的项目列出各自的用量，以及在本区间内的占比。没有记录项目的用量会在表格下方单独说明，而不再默默漏掉。",

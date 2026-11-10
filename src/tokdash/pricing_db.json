@@ -1,6 +1,6 @@
 {
-  "version": "2.0.40",
-  "lastUpdated": "2026-11-06T06:14:10Z",
+  "version": "2.0.41",
+  "lastUpdated": "2026-11-10T06:58:28Z",
   "note": "Comprehensive pricing database with all Moonshot, MiniMax, GLM, and OpenAI models from OpenRouter. Cache pricing estimated at 10% of input for cache_read, 100% of input for cache_write.",
   "aliases": {
     "Qwen/Qwen3.8-Flash-Next": "qwen3.8-flash",
@@ -1447,6 +1447,15 @@
       "cache_write": 0.125,
       "unit": "per_million_tokens",
       "source": "openrouter.ai/anthropic/claude-haiku-5.5"
+    },
+    "claude-fable-5.2": {
+      "provider": "anthropic",
+      "input": 8.0,
+      "output": 40.0,
+      "cache_read": 0.2,
+      "cache_write": 10.0,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/anthropic/claude-fable-5.2"
     },
     "_comment_deepseek": "=== DeepSeek Models ===",
     "deepseek-chat": {
@@ -3441,6 +3450,15 @@
       "cache_write": 1.25,
       "unit": "per_million_tokens",
       "source": "openrouter.ai/meta/muse-spark-open"
+    },
+    "muse-ember": {
+      "provider": "meta",
+      "input": 0.1,
+      "output": 0.5,
+      "cache_read": 0.004,
+      "cache_write": 0.125,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/meta/muse-ember"
     },
     "_comment_nvidia": "=== NVIDIA Models ===",
     "nemotron-3-nano-30b-a3b": {

@@ -3,12 +3,12 @@
   "releases": [
     {
       "version": "2.7.2",
-      "date": "2026-11-08",
+      "date": "2026-11-10",
       "sections": [
         {
           "type": "added",
           "items": [
-            "Pricing DB 2.0.40 adds seven models: gpt-6.1-terra, gpt-6.1-terra-pro, kimi-k3.1-pro, gemini-omni-1.1-flash, gemini-omni-1.2-flash, glm-5.3-flashx-legal, and hy4. Existing model rates are unchanged."
+            "Pricing DB 2.0.41 adds nine models: gpt-6.1-terra, gpt-6.1-terra-pro, kimi-k3.1-pro, gemini-omni-1.1-flash, gemini-omni-1.2-flash, glm-5.3-flashx-legal, hy4, claude-fable-5.2, and muse-ember. Existing model rates are unchanged."
           ]
         },
         {

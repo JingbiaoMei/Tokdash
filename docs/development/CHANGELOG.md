@@ -4,11 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## 2.7.2 - 2026-11-08
+## 2.7.2 - 2026-11-10
 
 ### Added
 
-- Pricing DB 2.0.40 adds seven models since 2.0.38: `gpt-6.1-terra`, `gpt-6.1-terra-pro`, `kimi-k3.1-pro`, `gemini-omni-1.1-flash`, `gemini-omni-1.2-flash`, `glm-5.3-flashx-legal`, and `hy4`. Existing model rates are unchanged. (#282, #283)
+- Pricing DB 2.0.41 adds nine models since 2.0.38: `gpt-6.1-terra`, `gpt-6.1-terra-pro`, `kimi-k3.1-pro`, `gemini-omni-1.1-flash`, `gemini-omni-1.2-flash`, `glm-5.3-flashx-legal`, `hy4`, `claude-fable-5.2`, and `muse-ember`. Existing model rates are unchanged. (#282, #283, #287)
 
 ### Fixed
 

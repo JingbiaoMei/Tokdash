@@ -5,7 +5,7 @@
   "releases": {
     "2.7.2": {
       "added": [
-        "定价数据库升级到 2.0.40，新增七个模型：gpt-6.1-terra、gpt-6.1-terra-pro、kimi-k3.1-pro、gemini-omni-1.1-flash、gemini-omni-1.2-flash、glm-5.3-flashx-legal 和 hy4。既有模型的价格保持不变。"
+        "定价数据库升级到 2.0.41，新增九个模型：gpt-6.1-terra、gpt-6.1-terra-pro、kimi-k3.1-pro、gemini-omni-1.1-flash、gemini-omni-1.2-flash、glm-5.3-flashx-legal、hy4、claude-fable-5.2 和 muse-ember。既有模型的价格保持不变。"
       ],
       "fixed": [
         "通过 Antigravity ACP 使用的 Gemini 4 Argon 现在会按独立客户端中的 Argon 价格估算费用，并归入同一个模型。此前已存储的 $0.00 用量记录会在正常同步时自动修正。",

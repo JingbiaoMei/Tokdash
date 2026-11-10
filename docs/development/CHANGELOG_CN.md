@@ -7,11 +7,11 @@
   [CHANGELOG.md](https://github.com/JingbiaoMei/Tokdash/blob/main/docs/development/CHANGELOG.md)，本页面在每节末尾附上对应的 PR。
 - 未收录的版本表示尚未翻译，应用内同样回落英文。
 
-## 2.7.2 - 2026-11-08
+## 2.7.2 - 2026-11-10
 
 ### 新增
 
-- 定价数据库升级到 2.0.40，新增七个模型：gpt-6.1-terra、gpt-6.1-terra-pro、kimi-k3.1-pro、gemini-omni-1.1-flash、gemini-omni-1.2-flash、glm-5.3-flashx-legal 和 hy4。既有模型的价格保持不变。
+- 定价数据库升级到 2.0.41，新增九个模型：gpt-6.1-terra、gpt-6.1-terra-pro、kimi-k3.1-pro、gemini-omni-1.1-flash、gemini-omni-1.2-flash、glm-5.3-flashx-legal、hy4、claude-fable-5.2 和 muse-ember。既有模型的价格保持不变。
 
 ### 修复
 
@@ -19,7 +19,7 @@
 - 终端仪表盘中，状态文字改变高度时，Overview 的活跃度图说明和 Speed 的小时详情行会保持可见。活跃度图说明的最后一行也不会再被内边距裁掉。
 - ZCode 会话表一打开就会显示按时间从新到旧排序的箭头。
 
-相关 PR：#282、#283、#285、#271、#274、#262、#263、#264、#265、#266、#267、#269、#270、#272、#268、#273、#276、#277、#278、#279、#275
+相关 PR：#282、#283、#287、#285、#271、#274、#262、#263、#264、#265、#266、#267、#269、#270、#272、#268、#273、#276、#277、#278、#279、#275
 
 ## 2.7.1 - 2026-10-25
 

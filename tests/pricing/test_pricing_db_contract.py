@@ -369,6 +369,30 @@ def test_mythos_5_1_matches_fable_5_1_pricing():
         assert abs(cost - fable) < 1e-12, f"{model!r} should match Fable 5.1 pricing"
 
 
+def test_fable_5_2_family_pricing_and_aliases():
+    """Fable 5.2 / Mythos 5.2 must resolve at $8/$40 (cache $0.20/$10), fast mode at 2x."""
+    db = PricingDatabase()
+
+    standard = _cost(8.0, 40.0, 0.20, 10.0)
+    for model in [
+        "claude-fable-5.2", "claude-fable-5-2", "fable-5.2", "fable-5-2", "fable5.2",
+        "anthropic/claude-fable-5.2", "claude-mythos-5.2", "claude-mythos-5-2", "mythos-5.2",
+    ]:
+        cost = db.get_cost(model, 1000, 2000, 3000, 4000)
+        assert abs(cost - standard) < 1e-12, f"{model!r} should resolve to Fable 5.2 pricing"
+    for model in ["claude-fable-5-2-fast", "claude-mythos-5-2-fast"]:
+        fast = db.get_cost(model, 1000, 2000, 3000, 4000)
+        assert abs(fast - _cost(16.0, 80.0, 0.40, 20.0)) < 1e-12, f"{model!r} should be 2x standard"
+
+
+def test_sonnet_5_5_cache_read_pricing():
+    """Sonnet 5.5 cache hits are 0.05x input ($0.10/M), not 0.1x."""
+    db = PricingDatabase()
+
+    cost = db.get_cost("claude-sonnet-5-5", 1000, 2000, 3000, 4000)
+    assert abs(cost - _cost(2.0, 10.0, 0.10, 2.5)) < 1e-12
+
+
 def test_fable_5_aliases_and_pricing():
     """Fable 5 aliases must resolve to the published input/output pricing."""
     db = PricingDatabase()

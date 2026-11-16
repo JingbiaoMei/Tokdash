@@ -20,8 +20,11 @@
     "fable-5": "claude-fable-5",
     "fable-5-1": "claude-fable-5.1",
     "fable-5.1": "claude-fable-5.1",
+    "fable-5-2": "claude-fable-5.2",
+    "fable-5.2": "claude-fable-5.2",
     "fable5": "claude-fable-5",
     "fable5.1": "claude-fable-5.1",
+    "fable5.2": "claude-fable-5.2",
     "gemini-3-flash-a": "antigravity-gemini-3-flash",
     "gemini-3.7-flash-control": "gemini-3.7-flash",
     "gemini-3.8-flash-n": "gemini-3.8-flash",
@@ -54,6 +57,8 @@
     "moonshotai/k3-256k": "kimi-k3-256k",
     "mythos-5-1": "claude-mythos-5.1",
     "mythos-5.1": "claude-mythos-5.1",
+    "mythos-5-2": "claude-mythos-5.2",
+    "mythos-5.2": "claude-mythos-5.2",
     "opus-4.7": "claude-opus-4.7",
     "opus-4.8": "claude-opus-4.8",
     "opus-5": "claude-opus-5",
@@ -1434,10 +1439,11 @@
       "provider": "anthropic",
       "input": 2.0,
       "output": 10.0,
-      "cache_read": 0.2,
+      "cache_read": 0.1,
       "cache_write": 2.5,
       "unit": "per_million_tokens",
-      "source": "openrouter.ai/anthropic/claude-sonnet-5.5"
+      "note": "Cache hits are 0.05x input ($0.10), not the usual 0.1x.",
+      "source": "platform.claude.com/docs/en/about-claude/pricing"
     },
     "claude-haiku-5.5": {
       "provider": "anthropic",
@@ -1446,7 +1452,8 @@
       "cache_read": 0.01,
       "cache_write": 0.125,
       "unit": "per_million_tokens",
-      "source": "openrouter.ai/anthropic/claude-haiku-5.5"
+      "note": "Prompts up to 100K tokens. Prompts over 100K bill at $0.50/$2.50 (cache $0.05/$0.625), which a flat per-model rate cannot express.",
+      "source": "platform.claude.com/docs/en/about-claude/pricing"
     },
     "claude-fable-5.2": {
       "provider": "anthropic",
@@ -1455,7 +1462,38 @@
       "cache_read": 0.2,
       "cache_write": 10.0,
       "unit": "per_million_tokens",
-      "source": "openrouter.ai/anthropic/claude-fable-5.2"
+      "note": "1M context at standard pricing (no long-context tier). cache_write is the 5-minute rate; 1-hour writes are $16.",
+      "source": "platform.claude.com/docs/en/about-claude/pricing"
+    },
+    "claude-fable-5.2-fast": {
+      "provider": "anthropic",
+      "input": 16.0,
+      "output": 80.0,
+      "cache_read": 0.4,
+      "cache_write": 20.0,
+      "unit": "per_million_tokens",
+      "note": "Fast mode, 2x standard claude-fable-5.2 rates.",
+      "source": "platform.claude.com/docs/en/about-claude/pricing"
+    },
+    "claude-mythos-5.2": {
+      "provider": "anthropic",
+      "input": 8.0,
+      "output": 40.0,
+      "cache_read": 0.2,
+      "cache_write": 10.0,
+      "unit": "per_million_tokens",
+      "note": "Limited availability. Same pricing as claude-fable-5.2.",
+      "source": "platform.claude.com/docs/en/about-claude/pricing"
+    },
+    "claude-mythos-5.2-fast": {
+      "provider": "anthropic",
+      "input": 16.0,
+      "output": 80.0,
+      "cache_read": 0.4,
+      "cache_write": 20.0,
+      "unit": "per_million_tokens",
+      "note": "Fast mode, 2x standard claude-mythos-5.2 rates.",
+      "source": "platform.claude.com/docs/en/about-claude/pricing"
     },
     "_comment_deepseek": "=== DeepSeek Models ===",
     "deepseek-chat": {

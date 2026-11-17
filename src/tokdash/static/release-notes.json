@@ -1,6 +1,25 @@
 {
-  "current": "2.7.2",
+  "current": "2.7.3",
   "releases": [
+    {
+      "version": "2.7.3",
+      "date": "2026-11-16",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "Pricing DB 2.0.42 adds claude-fable-5.2-fast, claude-mythos-5.2, claude-mythos-5.2-fast, ernie-light-dt-1.0-intl, gemini-4-carbon and gemini-4-hydrogen, and claude-fable-5.2 now takes its rates from Anthropic's pricing page. The fable-5.2 and mythos-5.2 short names resolve to them."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "Claude Sonnet 5.5 cache reads are now priced at $0.10 per million tokens, matching Anthropic's pricing page. Previously they were counted at $0.20, which overstated cache cost."
+          ]
+        }
+      ]
+    },
+
     {
       "version": "2.7.2",
       "date": "2026-11-10",

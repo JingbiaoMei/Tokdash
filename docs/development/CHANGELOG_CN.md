@@ -7,6 +7,18 @@
   [CHANGELOG.md](https://github.com/JingbiaoMei/Tokdash/blob/main/docs/development/CHANGELOG.md)，本页面在每节末尾附上对应的 PR。
 - 未收录的版本表示尚未翻译，应用内同样回落英文。
 
+## 2.7.3 - 2026-11-16
+
+### 新增
+
+- 定价数据库升级到 2.0.42，新增 claude-fable-5.2-fast、claude-mythos-5.2、claude-mythos-5.2-fast、ernie-light-dt-1.0-intl、gemini-4-carbon 和 gemini-4-hydrogen；claude-fable-5.2 的价格改为以 Anthropic 官方定价页为准。fable-5.2、mythos-5.2 等简写也会正确计价。
+
+### 修复
+
+- Claude Sonnet 5.5 的缓存读取价格改为每百万 token 0.10 美元，与 Anthropic 官方定价页一致。此前按 0.20 美元计算，会高估缓存费用。
+
+相关 PR：#290、#291
+
 ## 2.7.2 - 2026-11-10
 
 ### 新增

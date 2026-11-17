@@ -3,6 +3,15 @@
   "source": "release-notes.json",
   "comment": "简体中文更新日志。项与 release-notes.json 按下标一一对齐；未翻译的版本回落英文。",
   "releases": {
+    "2.7.3": {
+      "added": [
+        "定价数据库升级到 2.0.42，新增 claude-fable-5.2-fast、claude-mythos-5.2、claude-mythos-5.2-fast、ernie-light-dt-1.0-intl、gemini-4-carbon 和 gemini-4-hydrogen；claude-fable-5.2 的价格改为以 Anthropic 官方定价页为准。fable-5.2、mythos-5.2 等简写也会正确计价。"
+      ],
+      "fixed": [
+        "Claude Sonnet 5.5 的缓存读取价格改为每百万 token 0.10 美元，与 Anthropic 官方定价页一致。此前按 0.20 美元计算，会高估缓存费用。"
+      ]
+    },
+
     "2.7.2": {
       "added": [
         "定价数据库升级到 2.0.41，新增九个模型：gpt-6.1-terra、gpt-6.1-terra-pro、kimi-k3.1-pro、gemini-omni-1.1-flash、gemini-omni-1.2-flash、glm-5.3-flashx-legal、hy4、claude-fable-5.2 和 muse-ember。既有模型的价格保持不变。"

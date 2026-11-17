@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.7.3 - 2026-11-16
+
+### Added
+
+- Pricing DB 2.0.42: `claude-fable-5.2` is now sourced from Anthropic's pricing page ($8 / $40 per MTok, cache $0.20 read / $10 five-minute write), and `claude-mythos-5.2` joins at the same rates. Fast-mode entries `claude-fable-5.2-fast` and `claude-mythos-5.2-fast` are priced at 2x ($16 / $80), modelled like `claude-opus-5.5-fast`. New aliases `fable-5.2`, `fable-5-2`, `fable5.2`, `mythos-5.2` and `mythos-5-2`. The bot scan also adds `ernie-light-dt-1.0-intl`, `gemini-4-carbon` and `gemini-4-hydrogen`. (#290, #291, thanks @lushuyu)
+
+### Fixed
+
+- `claude-sonnet-5.5` cache reads are $0.10 per MTok (0.05x input), not the $0.20 the OpenRouter scan reported, so Sonnet 5.5 cache cost was overstated by 2x. `claude-haiku-5.5` now notes its over-100K-token prompt tier ($0.50 / $2.50), which a flat per-model rate does not apply. (#291)
+
 ## 2.7.2 - 2026-11-10
 
 ### Added

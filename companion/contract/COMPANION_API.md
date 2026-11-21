@@ -539,9 +539,12 @@ only clears `status_detail` once a *newer* successful observation exists and all
 credentials in a cycle share one `captured_at`. Conversely, treating every row of
 a failed provider as fresh would alert on stale numbers.
 
-`status_detail` is one of `unavailable`, `fetch_error`, or `stale_token` (the
-only values the server writes). Treat any other non-empty value as a failure
-too, and an absent/empty value as healthy.
+`status_detail` is one of `unavailable`, `fetch_error`, `stale_token`, or
+`network_blocked` (the only values the server writes). `network_blocked` means
+the provider refused the network the poll came from (Claude's HTTP 403
+"Request not allowed"), so unlike `stale_token` it does not mean the sign-in
+expired. Treat any other non-empty value as a failure too, and an absent/empty
+value as healthy.
 
 ### Accounts
 

@@ -7691,6 +7691,7 @@
         consumptionUnitDay: '% of window consumed per day',
         consumptionUnitHour: '% of window consumed per hour',
         quotaStaleToken: 'Sign-in token expired — open {app} once to refresh it. Tokdash never refreshes tokens itself.',
+        quotaNetworkBlocked: 'The {app} quota API refused requests from this network (HTTP 403), usually a region block. Your sign-in is fine; if you use a proxy, the Tokdash service needs it too.',
         quotaProviderIssue: 'Unable to refresh quota ({status}). Last checked {time}.',
         quotaUpdatedAgo: 'Updated {time}',
         quotaRemainingPct: '{pct}% left',
@@ -8482,6 +8483,7 @@
         consumptionUnitDay: '每天消耗的窗口百分比',
         consumptionUnitHour: '每小时消耗的窗口百分比',
         quotaStaleToken: '登录令牌已过期 — 请打开一次 {app} 以刷新它。Tokdash 不会自动刷新令牌。',
+        quotaNetworkBlocked: '{app} 的额度接口拒绝了来自当前网络的请求（HTTP 403），通常是地区限制，与登录无关。如果你通过代理访问，Tokdash 服务也需要使用该代理。',
         quotaProviderIssue: '无法刷新额度（{status}）。上次检查时间：{time}。',
         quotaUpdatedAgo: '更新于 {time}',
         quotaRemainingPct: '剩余 {pct}%',
@@ -9274,6 +9276,7 @@
         consumptionUnitDay: 'ウィンドウ消費率（1 日あたり %）',
         consumptionUnitHour: 'ウィンドウ消費率（1 時間あたり %）',
         quotaStaleToken: 'サインイントークンの有効期限が切れました — {app} を一度開いて更新してください。Tokdash 自身はトークンを更新しません。',
+        quotaNetworkBlocked: '{app} のクォータ API がこのネットワークからのリクエストを拒否しました（HTTP 403）。通常は地域制限によるもので、サインインは問題ありません。プロキシ経由で接続している場合は、Tokdash サービスにも同じプロキシを設定してください。',
         quotaProviderIssue: 'クォータを更新できません（{status}）。最終確認: {time}。',
         quotaUpdatedAgo: '更新: {time}',
         quotaRemainingPct: '残り {pct}%',
@@ -10066,6 +10069,7 @@
         consumptionUnitDay: '1일당 창 소비 비율(%)',
         consumptionUnitHour: '1시간당 창 소비 비율(%)',
         quotaStaleToken: '로그인 토큰 만료 — {app}을(를) 한 번 열어 갱신하세요. Tokdash는 토큰을 자체적으로 갱신하지 않습니다.',
+        quotaNetworkBlocked: '{app} 할당량 API가 현재 네트워크의 요청을 거부했습니다(HTTP 403). 보통 지역 제한 때문이며 로그인에는 문제가 없습니다. 프록시를 통해 접속한다면 Tokdash 서비스에도 같은 프록시를 설정하세요.',
         quotaProviderIssue: '쿼터를 새로고침할 수 없음 ({status}). 마지막 확인: {time}.',
         quotaUpdatedAgo: '{time}에 업데이트됨',
         quotaRemainingPct: '{pct}% 남음',
@@ -10858,6 +10862,7 @@
         consumptionUnitDay: '% de la ventana consumido por día',
         consumptionUnitHour: '% de la ventana consumido por hora',
         quotaStaleToken: 'Token de sesión caducado — abre {app} una vez para renovarlo. Tokdash nunca renueva tokens por sí mismo.',
+        quotaNetworkBlocked: 'La API de cuota de {app} rechazó las solicitudes desde esta red (HTTP 403), normalmente por un bloqueo regional. Tu sesión está bien; si usas un proxy, el servicio de Tokdash también lo necesita.',
         quotaProviderIssue: 'No se pudo actualizar la cuota ({status}). Última comprobación: {time}.',
         quotaUpdatedAgo: 'Actualizado {time}',
         quotaRemainingPct: 'queda {pct}%',
@@ -11650,6 +11655,7 @@
         consumptionUnitDay: '% da janela consumido por dia',
         consumptionUnitHour: '% da janela consumido por hora',
         quotaStaleToken: 'Token de login expirado — abra {app} uma vez para renová-lo. O Tokdash nunca renova tokens por conta própria.',
+        quotaNetworkBlocked: 'A API de cota do {app} recusou as solicitações desta rede (HTTP 403), geralmente por bloqueio regional. Seu login está ok; se você usa um proxy, o serviço do Tokdash também precisa dele.',
         quotaProviderIssue: 'Não foi possível atualizar a cota ({status}). Última verificação: {time}.',
         quotaUpdatedAgo: 'Atualizado {time}',
         quotaRemainingPct: 'resta {pct}%',
@@ -19990,11 +19996,17 @@
       if (!detail || detail === 'ok') return;
       const box = document.createElement('div');
       box.className = 'text-xs mt-3 p-2 rounded';
-      if (detail === 'stale_token') {
+      // Both name something the user has to fix outside Tokdash, so both get the amber call
+      // to action. They must not share copy: a refused network (`network_blocked`, a 403
+      // from Anthropic's edge) has a sign-in that works, and "open Claude Code to refresh
+      // it" was the advice that sent people looking at the wrong thing.
+      const actionKey = detail === 'stale_token' ? 'quotaStaleToken'
+        : detail === 'network_blocked' ? 'quotaNetworkBlocked' : null;
+      if (actionKey) {
         box.style.background = 'color-mix(in srgb, #D97706 16%, transparent)';
         box.style.color = '#D97706';
         box.style.fontWeight = '600';
-        box.textContent = t('quotaStaleToken').replace('{app}', quotaProviderLabel(providerKey));
+        box.textContent = t(actionKey).replace('{app}', quotaProviderLabel(providerKey));
       } else {
         box.style.color = 'var(--color-muted)';
         box.textContent = t('quotaProviderIssue')

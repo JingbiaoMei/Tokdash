@@ -94,6 +94,30 @@ def test_pricing_lookup_gemini_3_8_flash_n_matches_base():
     assert abs(base - prefixed) < 1e-12
 
 
+def test_pricing_lookup_gemini_4_argon_b_matches_base():
+    """The ACP kernel's model id uses the same rates as standalone Argon."""
+    db = PricingDatabase()
+    base = db.get_cost("gemini-4-argon", 1000, 2000, 300, 400)
+    assert base > 0.0
+
+    for model in [
+        "gemini-4-argon-b",
+        "google/gemini-4-argon-b",
+        "openrouter/google/gemini-4-argon-b",
+        "antigravity-gemini-4-argon-b",
+        "google/antigravity-gemini-4-argon-b",
+        "Google/GEMINI_4_ARGON_B",
+        "gemini-4-argon-b-latest",
+    ]:
+        assert abs(db.get_cost(model, 1000, 2000, 300, 400) - base) < 1e-12, model
+
+
+def test_pricing_lookup_does_not_guess_other_antigravity_suffixes():
+    db = PricingDatabase()
+    for model in ["gemini-4-argon-c", "gemini-4-argon-bb", "gemini-3.8-flash-b"]:
+        assert db._resolve_pricing(model) is None, model
+
+
 def test_pricing_lookup_strips_six_digit_date_suffixes():
     """YYMMDD release snapshots (e.g. glm-5-2-260617 = 2026-06-17) resolve to base.
 

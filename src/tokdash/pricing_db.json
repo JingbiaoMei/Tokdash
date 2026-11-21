@@ -1,10 +1,11 @@
 {
-  "version": "2.0.39",
-  "lastUpdated": "2026-10-29T12:13:31Z",
+  "version": "2.0.43",
+  "lastUpdated": "2026-11-20T06:54:01Z",
   "note": "Comprehensive pricing database with all Moonshot, MiniMax, GLM, and OpenAI models from OpenRouter. Cache pricing estimated at 10% of input for cache_read, 100% of input for cache_write.",
   "aliases": {
     "Qwen/Qwen3.8-Flash-Next": "qwen3.8-flash",
     "antigravity-gemini-3.8-flash-n": "gemini-3.8-flash",
+    "antigravity-gemini-4-argon-b": "gemini-4-argon",
     "ark-code": "seed-2.0-code",
     "claude-sonnet-5-20260630": "claude-sonnet-5",
     "cloudflare/glm-5.2": "glm-5.2",
@@ -19,11 +20,15 @@
     "fable-5": "claude-fable-5",
     "fable-5-1": "claude-fable-5.1",
     "fable-5.1": "claude-fable-5.1",
+    "fable-5-2": "claude-fable-5.2",
+    "fable-5.2": "claude-fable-5.2",
     "fable5": "claude-fable-5",
     "fable5.1": "claude-fable-5.1",
+    "fable5.2": "claude-fable-5.2",
     "gemini-3-flash-a": "antigravity-gemini-3-flash",
     "gemini-3.7-flash-control": "gemini-3.7-flash",
     "gemini-3.8-flash-n": "gemini-3.8-flash",
+    "gemini-4-argon-b": "gemini-4-argon",
     "glm-5-1": "glm-5.1",
     "glm-5-2": "glm-5.2",
     "glm-5-3": "glm-5.3",
@@ -52,6 +57,8 @@
     "moonshotai/k3-256k": "kimi-k3-256k",
     "mythos-5-1": "claude-mythos-5.1",
     "mythos-5.1": "claude-mythos-5.1",
+    "mythos-5-2": "claude-mythos-5.2",
+    "mythos-5.2": "claude-mythos-5.2",
     "opus-4.7": "claude-opus-4.7",
     "opus-4.8": "claude-opus-4.8",
     "opus-5": "claude-opus-5",
@@ -420,6 +427,15 @@
       "cache_write": 2.8,
       "unit": "per_million_tokens",
       "source": "openrouter.ai/z-ai/glm-5.3-prime"
+    },
+    "glm-5.3-flashx-legal": {
+      "provider": "z-ai",
+      "input": 0.37,
+      "output": 1.25,
+      "cache_read": 0.075,
+      "cache_write": 0.37,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/z-ai/glm-5.3-flashx-legal"
     },
     "_comment_openai": "=== OpenAI Models ===",
     "gpt-3.5-turbo": {
@@ -1173,6 +1189,42 @@
       "unit": "per_million_tokens",
       "source": "openrouter.ai/openai/gpt-6.1-terra-pro"
     },
+    "gpt-6.2-astra": {
+      "provider": "openai",
+      "input": 8.0,
+      "output": 40.0,
+      "cache_read": 0.4,
+      "cache_write": 10.0,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-6.2-astra"
+    },
+    "gpt-6.2-astra-pro": {
+      "provider": "openai",
+      "input": 8.0,
+      "output": 40.0,
+      "cache_read": 0.4,
+      "cache_write": 10.0,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-6.2-astra-pro"
+    },
+    "gpt-6.2-sol": {
+      "provider": "openai",
+      "input": 2.0,
+      "output": 10.0,
+      "cache_read": 0.1,
+      "cache_write": 2.5,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-6.2-sol"
+    },
+    "gpt-6.2-sol-pro": {
+      "provider": "openai",
+      "input": 2.0,
+      "output": 10.0,
+      "cache_read": 0.1,
+      "cache_write": 2.5,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-6.2-sol-pro"
+    },
     "_comment_anthropic": "=== Anthropic Claude Models ===",
     "claude-fable-5": {
       "provider": "anthropic",
@@ -1423,10 +1475,11 @@
       "provider": "anthropic",
       "input": 2.0,
       "output": 10.0,
-      "cache_read": 0.2,
+      "cache_read": 0.1,
       "cache_write": 2.5,
       "unit": "per_million_tokens",
-      "source": "openrouter.ai/anthropic/claude-sonnet-5.5"
+      "note": "Cache hits are 0.05x input ($0.10), not the usual 0.1x.",
+      "source": "platform.claude.com/docs/en/about-claude/pricing"
     },
     "claude-haiku-5.5": {
       "provider": "anthropic",
@@ -1435,7 +1488,48 @@
       "cache_read": 0.01,
       "cache_write": 0.125,
       "unit": "per_million_tokens",
-      "source": "openrouter.ai/anthropic/claude-haiku-5.5"
+      "note": "Prompts up to 100K tokens. Prompts over 100K bill at $0.50/$2.50 (cache $0.05/$0.625), which a flat per-model rate cannot express.",
+      "source": "platform.claude.com/docs/en/about-claude/pricing"
+    },
+    "claude-fable-5.2": {
+      "provider": "anthropic",
+      "input": 8.0,
+      "output": 40.0,
+      "cache_read": 0.2,
+      "cache_write": 10.0,
+      "unit": "per_million_tokens",
+      "note": "1M context at standard pricing (no long-context tier). cache_write is the 5-minute rate; 1-hour writes are $16.",
+      "source": "platform.claude.com/docs/en/about-claude/pricing"
+    },
+    "claude-fable-5.2-fast": {
+      "provider": "anthropic",
+      "input": 16.0,
+      "output": 80.0,
+      "cache_read": 0.4,
+      "cache_write": 20.0,
+      "unit": "per_million_tokens",
+      "note": "Fast mode, 2x standard claude-fable-5.2 rates.",
+      "source": "platform.claude.com/docs/en/about-claude/pricing"
+    },
+    "claude-mythos-5.2": {
+      "provider": "anthropic",
+      "input": 8.0,
+      "output": 40.0,
+      "cache_read": 0.2,
+      "cache_write": 10.0,
+      "unit": "per_million_tokens",
+      "note": "Limited availability. Same pricing as claude-fable-5.2.",
+      "source": "platform.claude.com/docs/en/about-claude/pricing"
+    },
+    "claude-mythos-5.2-fast": {
+      "provider": "anthropic",
+      "input": 16.0,
+      "output": 80.0,
+      "cache_read": 0.4,
+      "cache_write": 20.0,
+      "unit": "per_million_tokens",
+      "note": "Fast mode, 2x standard claude-mythos-5.2 rates.",
+      "source": "platform.claude.com/docs/en/about-claude/pricing"
     },
     "_comment_deepseek": "=== DeepSeek Models ===",
     "deepseek-chat": {
@@ -2542,6 +2636,15 @@
       "unit": "per_million_tokens",
       "source": "openrouter.ai/qwen/qwen3.8-max-prime"
     },
+    "qwen4-max": {
+      "provider": "qwen",
+      "input": 1.425,
+      "output": 4.275,
+      "cache_read": 0.07125,
+      "cache_write": 1.78125,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/qwen/qwen4-max"
+    },
     "_comment_meituan": "=== Meituan Models ===",
     "longcat-2.0": {
       "provider": "meituan",
@@ -2690,6 +2793,24 @@
       "unit": "per_million_tokens",
       "source": "openrouter.ai/tencent/hy4-preview"
     },
+    "hy4": {
+      "provider": "tencent",
+      "input": 0.417,
+      "output": 1.2505,
+      "cache_read": 0.021,
+      "cache_write": 0.417,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/tencent/hy4"
+    },
+    "hy4-flash": {
+      "provider": "tencent",
+      "input": 0.035,
+      "output": 0.1405,
+      "cache_read": 0.0015,
+      "cache_write": 0.035,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/tencent/hy4-flash"
+    },
     "_comment_xai": "=== xAI Grok Models ===",
     "grok-4.20": {
       "provider": "xai",
@@ -2801,6 +2922,15 @@
       "cache_write": 0.42,
       "unit": "per_million_tokens",
       "source": "openrouter.ai/baidu/ernie-4.5-vl-424b-a47b"
+    },
+    "ernie-light-dt-1.0-intl": {
+      "provider": "baidu",
+      "input": 1.13,
+      "output": 3.94,
+      "cache_read": 0.113,
+      "cache_write": 1.13,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/baidu/ernie-light-dt-1.0-intl"
     },
     "_comment_mistral": "=== Mistral Models ===",
     "codestral-2508": {
@@ -2991,6 +3121,15 @@
       "cache_write": 0.68,
       "unit": "per_million_tokens",
       "source": "openrouter.ai/mistralai/mistral-large-4-0"
+    },
+    "pixtral-large-2502": {
+      "provider": "mistral",
+      "input": 2.0,
+      "output": 6.0,
+      "cache_read": 0.2,
+      "cache_write": 2.0,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/mistralai/pixtral-large-2502"
     },
     "_comment_cohere": "=== Cohere Models ===",
     "command-a": {
@@ -3259,6 +3398,51 @@
       "unit": "per_million_tokens",
       "source": "openrouter.ai/google/gemini-4-argon"
     },
+    "gemini-omni-1.1-flash": {
+      "provider": "google",
+      "input": 1.5,
+      "output": 9.0,
+      "cache_read": 0.375,
+      "cache_write": 1.5,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/google/gemini-omni-1.1-flash"
+    },
+    "gemini-omni-1.2-flash": {
+      "provider": "google",
+      "input": 1.5,
+      "output": 9.0,
+      "cache_read": 0.375,
+      "cache_write": 1.5,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/google/gemini-omni-1.2-flash"
+    },
+    "gemini-4-carbon": {
+      "provider": "google",
+      "input": 2.0,
+      "output": 10.0,
+      "cache_read": 0.1,
+      "cache_write": 0.1875,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/google/gemini-4-carbon"
+    },
+    "gemini-4-hydrogen": {
+      "provider": "google",
+      "input": 1.5,
+      "output": 7.5,
+      "cache_read": 0.075,
+      "cache_write": 0.083333,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/google/gemini-4-hydrogen"
+    },
+    "gemini-4-neon": {
+      "provider": "google",
+      "input": 3.0,
+      "output": 15.0,
+      "cache_read": 0.15,
+      "cache_write": 0.083333,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/google/gemini-4-neon"
+    },
     "_comment_meta": "=== Meta Models ===",
     "llama-3.1-70b-instruct": {
       "provider": "meta",
@@ -3403,6 +3587,15 @@
       "cache_write": 1.25,
       "unit": "per_million_tokens",
       "source": "openrouter.ai/meta/muse-spark-open"
+    },
+    "muse-ember": {
+      "provider": "meta",
+      "input": 0.1,
+      "output": 0.5,
+      "cache_read": 0.004,
+      "cache_write": 0.125,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/meta/muse-ember"
     },
     "_comment_nvidia": "=== NVIDIA Models ===",
     "nemotron-3-nano-30b-a3b": {

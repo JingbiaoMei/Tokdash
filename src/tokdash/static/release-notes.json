@@ -1,6 +1,45 @@
 {
-  "current": "2.7.1",
+  "current": "2.7.3",
   "releases": [
+    {
+      "version": "2.7.3",
+      "date": "2026-11-16",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "Pricing DB 2.0.42 adds claude-fable-5.2-fast, claude-mythos-5.2, claude-mythos-5.2-fast, ernie-light-dt-1.0-intl, gemini-4-carbon and gemini-4-hydrogen, and claude-fable-5.2 now takes its rates from Anthropic's pricing page. The fable-5.2 and mythos-5.2 short names resolve to them."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "Claude Sonnet 5.5 cache reads are now priced at $0.10 per million tokens, matching Anthropic's pricing page. Previously they were counted at $0.20, which overstated cache cost."
+          ]
+        }
+      ]
+    },
+
+    {
+      "version": "2.7.2",
+      "date": "2026-11-10",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "Pricing DB 2.0.41 adds nine models: gpt-6.1-terra, gpt-6.1-terra-pro, kimi-k3.1-pro, gemini-omni-1.1-flash, gemini-omni-1.2-flash, glm-5.3-flashx-legal, hy4, claude-fable-5.2, and muse-ember. Existing model rates are unchanged."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "Gemini 4 Argon used through Antigravity ACP now receives the same cost estimate as standalone Argon and appears under the same model. Previously stored $0.00 entries are corrected automatically during normal sync.",
+            "The terminal dashboard keeps Overview activity captions and Speed hour-detail rows visible when status text changes height. Activity captions also retain their final line instead of being clipped by padding.",
+            "The ZCode sessions table now shows its newest-first sort arrow as soon as it opens."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.7.1",
       "date": "2026-10-25",

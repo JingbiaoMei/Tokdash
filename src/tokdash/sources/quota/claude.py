@@ -38,6 +38,15 @@ CLAUDE_USAGE_USER_AGENT = f"claude-cli/{CLAUDE_CODE_UA_VERSION} (external, cli) 
 # are still worth having, so those statuses get one retry at the plain URL. 429 is kept out
 # on purpose: retrying a rate-limited endpoint doubles the traffic it just asked us to cut.
 _RESET_FLAG_REJECTED = frozenset({400, 404, 405, 422})
+# A 403 whose error `type` is "forbidden" ("Request not allowed") is Anthropic refusing the
+# network the request came from, not the token: on 2026-11-21 one live token got it on a
+# direct connection and a 200 through a proxy, a minute apart. It is not one of the API's
+# documented error types -- a token problem is `authentication_error` (401) or
+# `permission_error` (403) -- so it cannot be mistaken for one, and telling the user to open
+# Claude Code to refresh a sign-in that works sends them the wrong way.
+_NETWORK_BLOCKED_ERROR_TYPES = frozenset({"forbidden"})
+# Enough for any JSON error body; a proxy's HTML error page is cut short and parses as none.
+_ERROR_BODY_LIMIT = 4096
 RESET_CREDITS_BUCKET = "reset_credits"
 # A grant holds a handful of resets. Anything past this is junk, and rejecting it keeps the
 # total's `float()` from overflowing: `json.loads` builds arbitrarily long integers, and an
@@ -733,7 +742,7 @@ def _fetch_usage(token: str, *, opener, timeout: float) -> dict[str, Any]:
     """GET the usage body with the reset flag, falling back once to the plain URL.
 
     5xx keeps its retry-once-after-200ms rule at each URL; anything else propagates for
-    the caller to map (``401``/``403`` to ``stale_token``, the rest to ``fetch_error``).
+    the caller to map to a status (see `_http_error_status`).
     """
     headers = {
         "Authorization": f"Bearer {token}",
@@ -760,6 +769,40 @@ def _fetch_usage(token: str, *, opener, timeout: float) -> dict[str, Any]:
         if exc.code not in _RESET_FLAG_REJECTED:
             raise
     return get(CLAUDE_USAGE_URL)
+
+
+def _anthropic_error(exc: HTTPError) -> tuple[str, str]:
+    """The ``(type, message)`` of an Anthropic error body, or empty strings without one.
+
+    A body that cannot be read or is not Anthropic's ``{"error": {...}}`` shape is simply
+    absent: the status code still decides the outcome, so a bad body never fails the poll.
+    """
+    try:
+        payload = json.loads(exc.read(_ERROR_BODY_LIMIT).decode("utf-8", "replace"))
+    except Exception:
+        return "", ""
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if not isinstance(error, dict):
+        return "", ""
+    return str(error.get("type") or "").strip().lower(), str(error.get("message") or "").strip()[:200]
+
+
+def _http_error_status(exc: HTTPError) -> tuple[str, str]:
+    """Status row and stored error for a failed usage request.
+
+    401/403 is the sign-in (``stale_token``), except the network refusal described at
+    `_NETWORK_BLOCKED_ERROR_TYPES`, which is ``network_blocked``: the card then names the
+    network instead of telling the user to refresh a sign-in that works. Anything else is
+    ``fetch_error``. The error keeps Anthropic's own message when the body has one.
+    """
+    error_type, message = _anthropic_error(exc)
+    if exc.code == 403 and error_type in _NETWORK_BLOCKED_ERROR_TYPES:
+        status = "network_blocked"
+    elif exc.code in {401, 403}:
+        status = "stale_token"
+    else:
+        status = "fetch_error"
+    return status, f"HTTP {exc.code}: {message or exc.reason}"
 
 
 def _profile_snapshots(
@@ -793,8 +836,8 @@ def _profile_snapshots(
     try:
         payload = _fetch_usage(token, opener=opener, timeout=timeout)
     except HTTPError as exc:
-        status = "stale_token" if exc.code in {401, 403} else "fetch_error"
-        return [_status_snapshot(status, captured_at, {**meta, "error": f"HTTP {exc.code}: {exc.reason}"}, profile)]
+        status, error = _http_error_status(exc)
+        return [_status_snapshot(status, captured_at, {**meta, "error": error}, profile)]
     except Exception as exc:
         return [_status_snapshot("fetch_error", captured_at, {**meta, "error": str(exc)}, profile)]
     if not isinstance(payload, dict):

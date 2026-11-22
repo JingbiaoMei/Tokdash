@@ -7691,6 +7691,8 @@
         consumptionUnitDay: '% of window consumed per day',
         consumptionUnitHour: '% of window consumed per hour',
         quotaStaleToken: 'Sign-in token expired — open {app} once to refresh it. Tokdash never refreshes tokens itself.',
+        quotaNetworkBlocked: 'The {app} quota API refused requests from this network (HTTP 403), usually a region block. Your sign-in is fine; if you use a proxy, the Tokdash service needs it too.',
+        quotaResetAfterReading: 'reset {time} · reading taken before the reset',
         quotaProviderIssue: 'Unable to refresh quota ({status}). Last checked {time}.',
         quotaUpdatedAgo: 'Updated {time}',
         quotaRemainingPct: '{pct}% left',
@@ -8482,6 +8484,8 @@
         consumptionUnitDay: '每天消耗的窗口百分比',
         consumptionUnitHour: '每小时消耗的窗口百分比',
         quotaStaleToken: '登录令牌已过期 — 请打开一次 {app} 以刷新它。Tokdash 不会自动刷新令牌。',
+        quotaNetworkBlocked: '{app} 的额度接口拒绝了来自当前网络的请求（HTTP 403），通常是地区限制，与登录无关。如果你通过代理访问，Tokdash 服务也需要使用该代理。',
+        quotaResetAfterReading: '已于 {time} 重置 · 该读数早于此次重置',
         quotaProviderIssue: '无法刷新额度（{status}）。上次检查时间：{time}。',
         quotaUpdatedAgo: '更新于 {time}',
         quotaRemainingPct: '剩余 {pct}%',
@@ -9274,6 +9278,8 @@
         consumptionUnitDay: 'ウィンドウ消費率（1 日あたり %）',
         consumptionUnitHour: 'ウィンドウ消費率（1 時間あたり %）',
         quotaStaleToken: 'サインイントークンの有効期限が切れました — {app} を一度開いて更新してください。Tokdash 自身はトークンを更新しません。',
+        quotaNetworkBlocked: '{app} のクォータ API がこのネットワークからのリクエストを拒否しました（HTTP 403）。通常は地域制限によるもので、サインインは問題ありません。プロキシ経由で接続している場合は、Tokdash サービスにも同じプロキシを設定してください。',
+        quotaResetAfterReading: '{time} にリセット済み · この値はリセット前のものです',
         quotaProviderIssue: 'クォータを更新できません（{status}）。最終確認: {time}。',
         quotaUpdatedAgo: '更新: {time}',
         quotaRemainingPct: '残り {pct}%',
@@ -10066,6 +10072,8 @@
         consumptionUnitDay: '1일당 창 소비 비율(%)',
         consumptionUnitHour: '1시간당 창 소비 비율(%)',
         quotaStaleToken: '로그인 토큰 만료 — {app}을(를) 한 번 열어 갱신하세요. Tokdash는 토큰을 자체적으로 갱신하지 않습니다.',
+        quotaNetworkBlocked: '{app} 할당량 API가 현재 네트워크의 요청을 거부했습니다(HTTP 403). 보통 지역 제한 때문이며 로그인에는 문제가 없습니다. 프록시를 통해 접속한다면 Tokdash 서비스에도 같은 프록시를 설정하세요.',
+        quotaResetAfterReading: '{time}에 리셋됨 · 이 값은 리셋 이전 기록입니다',
         quotaProviderIssue: '쿼터를 새로고침할 수 없음 ({status}). 마지막 확인: {time}.',
         quotaUpdatedAgo: '{time}에 업데이트됨',
         quotaRemainingPct: '{pct}% 남음',
@@ -10858,6 +10866,8 @@
         consumptionUnitDay: '% de la ventana consumido por día',
         consumptionUnitHour: '% de la ventana consumido por hora',
         quotaStaleToken: 'Token de sesión caducado — abre {app} una vez para renovarlo. Tokdash nunca renueva tokens por sí mismo.',
+        quotaNetworkBlocked: 'La API de cuota de {app} rechazó las solicitudes desde esta red (HTTP 403), normalmente por un bloqueo regional. Tu sesión está bien; si usas un proxy, el servicio de Tokdash también lo necesita.',
+        quotaResetAfterReading: 'se reinició {time} · esta lectura es anterior al reinicio',
         quotaProviderIssue: 'No se pudo actualizar la cuota ({status}). Última comprobación: {time}.',
         quotaUpdatedAgo: 'Actualizado {time}',
         quotaRemainingPct: 'queda {pct}%',
@@ -11650,6 +11660,8 @@
         consumptionUnitDay: '% da janela consumido por dia',
         consumptionUnitHour: '% da janela consumido por hora',
         quotaStaleToken: 'Token de login expirado — abra {app} uma vez para renová-lo. O Tokdash nunca renova tokens por conta própria.',
+        quotaNetworkBlocked: 'A API de cota do {app} recusou as solicitações desta rede (HTTP 403), geralmente por bloqueio regional. Seu login está ok; se você usa um proxy, o serviço do Tokdash também precisa dele.',
+        quotaResetAfterReading: 'reiniciou {time} · esta leitura é anterior ao reinício',
         quotaProviderIssue: 'Não foi possível atualizar a cota ({status}). Última verificação: {time}.',
         quotaUpdatedAgo: 'Atualizado {time}',
         quotaRemainingPct: 'resta {pct}%',
@@ -19233,6 +19245,20 @@
       return formatResetCountdownFromSeconds(Math.floor(resetsAtNum - Date.now() / 1000));
     }
 
+    // Whether a bar's reading was taken before its window's reset and that reset has since
+    // passed. The window it measured is over, so its percentage is history, not what is left
+    // now. A provider whose polls keep failing keeps showing that last reading under its
+    // error, and "resets soon · Oct 31" three weeks later read as a live meter. Only that
+    // case changes: a bucket without a capture time, or one captured after its reset (the
+    // API can report a reset that already passed), keeps the countdown, whose tiers are
+    // shared with the companion apps (see `formatResetCountdownFromSeconds`).
+    function quotaReadingPredatesReset(bucket, nowSeconds) {
+      const resetsAt = Number(bucket?.resets_at);
+      const capturedAt = Number(bucket?.captured_at);
+      if (!resetsAt || !capturedAt || !Number.isFinite(resetsAt) || !Number.isFinite(capturedAt)) return false;
+      return capturedAt < resetsAt && resetsAt <= nowSeconds;
+    }
+
     function quotaProviderLabel(provider) {
       if (provider === 'codex') return 'Codex';
       if (provider === 'claude') return 'Claude Code';
@@ -19562,9 +19588,12 @@
       }
       const unlimited = bucket?.unlimited === true;
       const remaining = unlimited ? 100 : quotaRemainingPercent(bucket);
+      // A reading from before a reset that has since passed stays visible (it is the last
+      // thing known) but loses the remaining-quota colours, which would claim it is current.
+      const outdated = quotaReadingPredatesReset(bucket, Date.now() / 1000);
       const pct = document.createElement('span');
       pct.className = 'mono font-extrabold';
-      pct.style.color = remaining === null ? 'var(--color-muted)' : quotaRemainingColor(remaining);
+      pct.style.color = remaining === null || outdated ? 'var(--color-muted)' : quotaRemainingColor(remaining);
       pct.textContent = unlimited
         ? t('quotaUnlimited')
         : remaining === null ? '—' : t('quotaRemainingPct').replace('{pct}', remaining.toFixed(1));
@@ -19577,7 +19606,9 @@
       const fill = document.createElement('div');
       fill.className = 'h-full rounded-full';
       fill.style.width = `${remaining === null ? 0 : remaining}%`;
-      fill.style.background = remaining === null ? 'var(--color-primary)' : quotaRemainingColor(remaining);
+      fill.style.background = remaining === null
+        ? 'var(--color-primary)'
+        : outdated ? 'var(--color-muted)' : quotaRemainingColor(remaining);
       bar.appendChild(fill);
 
       const sub = document.createElement('div');
@@ -19588,7 +19619,11 @@
       // already covers "last updated".
       const resetAbs = formatEpochSeconds(bucket.resets_at);
       const countdown = formatResetCountdown(bucket.resets_at);
-      sub.textContent = countdown ? `${countdown} · ${resetAbs}` : `reset ${resetAbs}`;
+      if (outdated) {
+        sub.textContent = t('quotaResetAfterReading').replace('{time}', resetAbs);
+      } else {
+        sub.textContent = countdown ? `${countdown} · ${resetAbs}` : `reset ${resetAbs}`;
+      }
 
       row.appendChild(top);
       row.appendChild(bar);
@@ -19990,11 +20025,17 @@
       if (!detail || detail === 'ok') return;
       const box = document.createElement('div');
       box.className = 'text-xs mt-3 p-2 rounded';
-      if (detail === 'stale_token') {
+      // Both name something the user has to fix outside Tokdash, so both get the amber call
+      // to action. They must not share copy: a refused network (`network_blocked`, a 403
+      // from Anthropic's edge) has a sign-in that works, and "open Claude Code to refresh
+      // it" was the advice that sent people looking at the wrong thing.
+      const actionKey = detail === 'stale_token' ? 'quotaStaleToken'
+        : detail === 'network_blocked' ? 'quotaNetworkBlocked' : null;
+      if (actionKey) {
         box.style.background = 'color-mix(in srgb, #D97706 16%, transparent)';
         box.style.color = '#D97706';
         box.style.fontWeight = '600';
-        box.textContent = t('quotaStaleToken').replace('{app}', quotaProviderLabel(providerKey));
+        box.textContent = t(actionKey).replace('{app}', quotaProviderLabel(providerKey));
       } else {
         box.style.color = 'var(--color-muted)';
         box.textContent = t('quotaProviderIssue')

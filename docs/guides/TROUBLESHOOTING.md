@@ -89,6 +89,26 @@ tokdash quota consent --enabled off
 
 These consent commands save to `config.json` and apply immediately to the running server. For credential scanning semantics and quota configuration, see [Quota tracking internals](../reference/QUOTA.md#consent-semantics).
 
+## Claude quota: "refused requests from this network"
+
+**Symptom:** The Claude Code quota card says its quota API refused requests from this network (HTTP 403) and its bars stop updating, while Claude Code itself works.
+
+**Cause:** Anthropic answered the poll with `403 {"error": {"type": "forbidden", "message": "Request not allowed"}}`, which it sends to a network it does not serve. The sign-in is fine. This usually means your terminal reaches Anthropic through a proxy but the Tokdash background service does not: a systemd or launchd service does not read your shell profile, and WSL2's `autoProxy` sets `HTTPS_PROXY` in terminal sessions only. On Linux and WSL2, Python takes its proxy from those environment variables alone; on macOS and Windows it also reads the system proxy settings.
+
+**Fix (Linux / WSL2, systemd):** give the service the proxy with a drop-in. `tokdash setup` and `tokdash update` leave drop-ins alone:
+
+```bash
+mkdir -p ~/.config/systemd/user/tokdash.service.d
+cat > ~/.config/systemd/user/tokdash.service.d/proxy.conf <<'EOF'
+[Service]
+Environment=HTTPS_PROXY=http://127.0.0.1:7890
+Environment=NO_PROXY=localhost,127.0.0.1,::1
+EOF
+systemctl --user daemon-reload && systemctl --user restart tokdash
+```
+
+Replace `http://127.0.0.1:7890` with your proxy's address (`echo $HTTPS_PROXY` in a terminal where Claude Code works). The next poll, or the dashboard's **Refresh** button, fills the card again. `tokdash uninstall` does not remove the drop-in; delete the `tokdash.service.d` directory yourself.
+
 ## WSL2 localhost binding
 
 **Symptom:** Dashboard is accessible from WSL2 but not from Windows browser.

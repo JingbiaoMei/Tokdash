@@ -6,6 +6,7 @@ Claude, Codex, Grok, Kimi, MiniMax, and ZAI quota APIs.
 from __future__ import annotations
 
 import base64
+import io
 import json
 from pathlib import Path
 from urllib.error import HTTPError
@@ -1788,6 +1789,58 @@ def test_claude_api_does_not_retry_plain_url_for_auth_or_rate_limit(monkeypatch,
 
     assert urls == [claude.CLAUDE_USAGE_URL_WITH_RESETS]
     assert [(s.bucket, s.status) for s in snapshots] == [("api", status)]
+
+
+def _anthropic_http_error(url, code, reason, body):
+    return HTTPError(url, code, reason, {}, io.BytesIO(body if isinstance(body, bytes) else json.dumps(body).encode()))
+
+
+@pytest.mark.parametrize(
+    ("code", "body", "status", "error"),
+    [
+        # The network, not the sign-in: the body Anthropic sends a request from a network it
+        # refuses, captured 2026-11-21 on a direct connection whose token worked by proxy.
+        (
+            403,
+            {"error": {"type": "forbidden", "message": "Request not allowed"}},
+            "network_blocked",
+            "HTTP 403: Request not allowed",
+        ),
+        # The documented token failures still ask the user to sign in again.
+        (
+            403,
+            {"type": "error", "error": {"type": "permission_error", "message": "OAuth token does not meet scope requirement user:profile"}},
+            "stale_token",
+            "HTTP 403: OAuth token does not meet scope requirement user:profile",
+        ),
+        (
+            401,
+            {"type": "error", "error": {"type": "authentication_error", "message": "OAuth token has expired."}},
+            "stale_token",
+            "HTTP 401: OAuth token has expired.",
+        ),
+        # A 401 is the sign-in whatever its body says.
+        (401, {"error": {"type": "forbidden", "message": "Request not allowed"}}, "stale_token", "HTTP 401: Request not allowed"),
+        # A body that is not Anthropic's shape leaves the status code to decide, as before.
+        (403, b"<html><body>403 Forbidden</body></html>", "stale_token", "HTTP 403: Forbidden"),
+        (403, {"error": "forbidden"}, "stale_token", "HTTP 403: Forbidden"),
+        (500, {"error": {"type": "api_error", "message": "Internal server error"}}, "fetch_error", "HTTP 500: Internal server error"),
+    ],
+)
+def test_claude_api_403_from_a_refused_network_is_not_an_expired_sign_in(monkeypatch, tmp_path, code, body, status, error):
+    _claude_install(tmp_path, monkeypatch)
+    monkeypatch.setattr(claude.time, "sleep", lambda _seconds: None)
+    urls = []
+
+    def opener(req, timeout=15):
+        urls.append(req.full_url)
+        raise _anthropic_http_error(req.full_url, code, "Forbidden" if code == 403 else "nope", body)
+
+    snapshots = claude.collect_claude_api_snapshots(opener=opener, now=_RESETS_NOW)
+
+    assert [(s.bucket, s.status, s.raw["error"]) for s in snapshots] == [("api", status, error)]
+    # A refused network is not the reset flag either, so it costs no second URL.
+    assert set(urls) == {claude.CLAUDE_USAGE_URL_WITH_RESETS}
 
 
 def test_claude_api_reset_row_is_unprefixed_for_a_sibling_install(monkeypatch, tmp_path):

@@ -7,6 +7,19 @@
   [CHANGELOG.md](https://github.com/JingbiaoMei/Tokdash/blob/main/docs/development/CHANGELOG.md)，本页面在每节末尾附上对应的 PR。
 - 未收录的版本表示尚未翻译，应用内同样回落英文。
 
+## 2.7.4 - 2026-11-22
+
+### 新增
+
+- 定价数据库升级到 2.0.43，新增八个模型：gpt-6.2-sol、gpt-6.2-sol-pro、gpt-6.2-astra、gpt-6.2-astra-pro、gemini-4-neon、qwen4-max、hy4-flash 和 pixtral-large-2502。既有模型的价格保持不变。
+
+### 修复
+
+- 当 Anthropic 拒绝来自当前网络的 Claude 额度请求时，额度卡片现在会如实说明，并确认登录状态正常。此前会误报登录令牌已过期。如果你的终端通过代理访问 Anthropic，Tokdash 服务也需要使用同一个代理，设置方法见故障排查指南。
+- 如果某个额度条的读数早于其窗口的重置时间，现在会以灰色显示并注明该读数早于重置，而不再在旧日期旁显示“即将重置”。
+
+相关 PR：#293、#294
+
 ## 2.7.3 - 2026-11-16
 
 ### 新增

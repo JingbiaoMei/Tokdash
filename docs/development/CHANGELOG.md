@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.7.4 - 2026-11-22
+
+### Added
+
+- Pricing DB 2.0.43 adds eight models: `gpt-6.2-sol`, `gpt-6.2-sol-pro`, `gpt-6.2-astra`, `gpt-6.2-astra-pro`, `gemini-4-neon`, `qwen4-max`, `hy4-flash` and `pixtral-large-2502`. Existing model rates are unchanged. (#293)
+
+### Fixed
+
+- A Claude quota poll that Anthropic refuses because of the network it came from (`403` with error type `forbidden`, "Request not allowed") is now `network_blocked`, with its own notice: the sign-in is fine, and if the terminal reaches Anthropic through a proxy, the Tokdash service needs it too. It used to be `stale_token`, so the card told the user to open Claude Code to refresh a sign-in that worked. The systemd service never read the shell's `HTTPS_PROXY`, so every poll went out directly and was refused. Other 401/403 responses stay `stale_token`, and the stored error now keeps Anthropic's message instead of the bare HTTP reason. The troubleshooting guide shows a systemd drop-in that gives the service a proxy, and the companion contract lists the new status, which both companions already treat as a failure. (#294)
+- A quota bar whose reading was taken before its window reset, with that reset now past, is drawn muted and reads "reset <time> · reading taken before the reset" instead of "resets soon" beside the old reset date. A provider whose polls kept failing kept its last good reading under the error, so a weekly bar read "41% left · resets soon · Oct 31" on Nov 21. A bucket without a capture time, or one captured after its reset, keeps the countdown. (#294)
+
 ## 2.7.3 - 2026-11-16
 
 ### Added

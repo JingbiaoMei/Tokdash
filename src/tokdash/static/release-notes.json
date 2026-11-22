@@ -1,6 +1,25 @@
 {
-  "current": "2.7.3",
+  "current": "2.7.4",
   "releases": [
+    {
+      "version": "2.7.4",
+      "date": "2026-11-22",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "Pricing DB 2.0.43 adds eight models: gpt-6.2-sol, gpt-6.2-sol-pro, gpt-6.2-astra, gpt-6.2-astra-pro, gemini-4-neon, qwen4-max, hy4-flash and pixtral-large-2502. Existing model rates are unchanged."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "When Anthropic refuses Claude quota requests from your network, the quota card now says so and confirms your sign-in is fine. Previously it said the sign-in token had expired. If your terminal reaches Anthropic through a proxy, the Tokdash service needs that proxy too; the troubleshooting guide shows how to set it.",
+            "A quota bar whose reading was taken before its window reset is now greyed out and labelled as older than the reset, instead of showing \"resets soon\" beside an old date."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.7.3",
       "date": "2026-11-16",

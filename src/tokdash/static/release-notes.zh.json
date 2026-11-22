@@ -3,6 +3,15 @@
   "source": "release-notes.json",
   "comment": "简体中文更新日志。项与 release-notes.json 按下标一一对齐；未翻译的版本回落英文。",
   "releases": {
+    "2.7.4": {
+      "added": [
+        "定价数据库升级到 2.0.43，新增八个模型：gpt-6.2-sol、gpt-6.2-sol-pro、gpt-6.2-astra、gpt-6.2-astra-pro、gemini-4-neon、qwen4-max、hy4-flash 和 pixtral-large-2502。既有模型的价格保持不变。"
+      ],
+      "fixed": [
+        "当 Anthropic 拒绝来自当前网络的 Claude 额度请求时，额度卡片现在会如实说明，并确认登录状态正常。此前会误报登录令牌已过期。如果你的终端通过代理访问 Anthropic，Tokdash 服务也需要使用同一个代理，设置方法见故障排查指南。",
+        "如果某个额度条的读数早于其窗口的重置时间，现在会以灰色显示并注明该读数早于重置，而不再在旧日期旁显示“即将重置”。"
+      ]
+    },
     "2.7.3": {
       "added": [
         "定价数据库升级到 2.0.42，新增 claude-fable-5.2-fast、claude-mythos-5.2、claude-mythos-5.2-fast、ernie-light-dt-1.0-intl、gemini-4-carbon 和 gemini-4-hydrogen；claude-fable-5.2 的价格改为以 Anthropic 官方定价页为准。fable-5.2、mythos-5.2 等简写也会正确计价。"

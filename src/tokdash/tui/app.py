@@ -3986,6 +3986,16 @@ class TokdashApp(App):
             # and the next look at Speed re-reads it (or re-subscribes); a stream
             # kept open behind another view only paints a pane nobody sees.
             self._stop_speed_follow()
+        # The pane being shown has no geometry until its first layout, and every
+        # fit this switch sets off -- the strip below, a read that lands at once
+        # -- can run before that: it skips the pane, finds the frame the pane
+        # being LEFT was fitted to, and settles. The pane then lands at whatever
+        # height it had (CSS 1fr on a first visit, an old fitted height after a
+        # resize behind it) under the footer, and with no read in flight no tick
+        # looks again. macOS CI met it on Speed's first visit. So the fit is also
+        # armed for the layouts that show the pane, with a fresh settle allowance.
+        self._fit_rearms = 0
+        self._refit_once_laid_out(self._fit_panes)
         self._update_status()
 
     # ------------------------------------------------------------ painting --

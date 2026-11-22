@@ -303,3 +303,39 @@ def test_a_page_squeezed_onto_short_rows_keeps_its_last_section_inside(api):
         assert "Token activity" in visible(app, "#ov-activity")
 
     run(api, body, size=WIDE)
+
+
+# --------------------------------------------------------------------- R7-F6 --
+# A pane is measured only once it has geometry, and a pane that is just being
+# shown has none yet: every fit the switch itself sets off runs before the pane's
+# first layout, skips it, and finds the frame it measured last time -- the pane
+# being left, still wearing its own fitted rows. The fit calls that settled, the
+# layout then lands with the new pane at whatever height it last had, and with
+# no read in flight there is no status tick to look again. macOS CI met it on a
+# first visit to Speed (CSS ``1fr``, two rows under a two-row footer); a resize
+# behind the pane gets there every time, with the pane's old fitted height.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("pane", ["speed", "stats", "quota"])
+def test_a_pane_shown_after_the_frame_moved_behind_it_is_fitted_to_the_frame(api, pane):
+    """Fit a pane, shrink the terminal while it is hidden, show it again."""
+
+    async def body(app, pilot):
+        await _settled(app, pilot)
+        app.action_show_pane(pane)
+        await _settled(app, pilot, pane)
+        await settle(pilot, 3)
+        app.action_show_pane("overview")
+        await settle(pilot, 3)
+        await pilot.resize_terminal(120, 30)
+        await settle(pilot, 4)
+
+        app.action_show_pane(pane)
+        await settle(pilot, 4)
+        box = app.query_one(f"#pane-{pane}")
+        strip = app.query_one("#status")
+        assert box.region.bottom <= strip.region.y, (
+            f"#pane-{pane} {box.region} runs under the footer {strip.region}")
+
+    run(api, body, size=WIDE)

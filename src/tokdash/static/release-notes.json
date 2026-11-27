@@ -1,6 +1,28 @@
 {
-  "current": "2.7.4",
+  "current": "2.7.5",
   "releases": [
+    {
+      "version": "2.7.5",
+      "date": "2026-11-28",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "MiniMax Code sessions now appear on the Sessions tab, named by the prompt you typed and grouped by project. Its session count and agent time on the Overview tools table are filled in instead of showing \"—\".",
+            "Pricing DB 2.0.44 adds mimo-v2.6-flash-mopd. Existing model rates are unchanged."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "Agent time now counts each session's first turn, timed from the prompt that started it. It used to count as zero, so a one-turn session showed \"—\". Totals for longer sessions barely change. Stored Codex, Claude Code, Kimi and DeepSeek Harness sessions are re-read once after updating, which can make the first refresh slower.",
+            "Hermes work done on a later day of a session now counts toward that day's agent time.",
+            "Antigravity CLI sessions whose steps carry no timestamp of their own now appear on the Sessions tab.",
+            "In the terminal dashboard, a pane shown after the window was resized fits the window again. The Speed and Stats panes could run under the status line and hide their last row."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.7.4",
       "date": "2026-11-22",

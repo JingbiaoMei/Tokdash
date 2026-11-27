@@ -767,3 +767,87 @@ def test_api_sessions_detects_source_updates_before_ttl(monkeypatch, tmp_path, w
     finally:
         conn.close()
         api._clear_cache()
+
+
+def test_active_time_comes_from_the_messages_not_the_aggregate_turn(tmp_path, monkeypatch):
+    """Hermes bills one aggregate turn per model, which alone measures nothing;
+    its assistant and tool messages carry the per-step timing."""
+    home = _home(tmp_path)
+    t0 = 1_790_000_000  # seconds, as Hermes writes them
+    _write_db(
+        home,
+        [_row("s-msg", "deepseek-chat", "deepseek", t0, 100, 10, 0, 0)],
+        messages=[
+            (1, "s-msg", "user", "hi", t0),
+            (2, "s-msg", "assistant", "on it", t0 + 3),
+            (3, "s-msg", "tool", "ok", t0 + 10),
+            (4, "s-msg", "assistant", "done", t0 + 20),
+        ],
+    )
+    _patch_env(monkeypatch, home)
+
+    row = get_sessions_data("hermes", "all")["sessions"][0]
+
+    assert row["token_events"] == 1
+    assert row["active_ms"] == 20_000
+
+
+def test_a_group_stamped_at_its_first_message_is_timed_from_the_prompt(tmp_path, monkeypatch):
+    """The aggregate turn sits at the group's first_seen, after the prompt that
+    started it; the stretch between them is the first turn's work."""
+    home = _home(tmp_path)
+    t0 = 1_790_000_000
+    _write_db(
+        home,
+        [_row("s-anchor", "deepseek-chat", "deepseek", t0, 100, 10, 0, 0)],
+        messages=[
+            (1, "s-anchor", "user", "hi", t0),
+            (2, "s-anchor", "assistant", "on it", t0 + 3),
+            (3, "s-anchor", "assistant", "done", t0 + 8),
+        ],
+        usage_rows=[
+            _usage_row("s-anchor", "deepseek-chat", "deepseek",
+                       input_tokens=100, output_tokens=10, first_seen=t0 + 3),
+        ],
+    )
+    _patch_env(monkeypatch, home)
+
+    row = get_sessions_data("hermes", "all")["sessions"][0]
+
+    # Prompt -> first reply (3 s) -> last reply (5 s); without the anchor, 5 s.
+    assert row["active_ms"] == 8_000
+
+
+def test_a_later_days_work_counts_on_that_day(tmp_path, monkeypatch):
+    """The session's only turn is on the first day; the work two days later is
+    activity events alone, and must count in that day's window, not only in a
+    range that also holds the turn."""
+    home = _home(tmp_path)
+    day1 = int(datetime(2026, 6, 1, 12, 0).timestamp())  # local noon, as windows are local days
+    day3 = int(datetime(2026, 6, 3, 12, 0).timestamp())
+    _write_db(
+        home,
+        [_row("s-long", "deepseek-chat", "deepseek", day1, 100, 10, 0, 0)],
+        messages=[
+            (1, "s-long", "user", "start", day1),
+            (2, "s-long", "assistant", "on it", day1 + 60),
+            (3, "s-long", "user", "again", day3),
+            (4, "s-long", "assistant", "step", day3 + 30),
+            (5, "s-long", "tool", "ok", day3 + 90),
+        ],
+    )
+    _patch_env(monkeypatch, home)
+
+    whole = get_sessions_data("hermes", "custom", "2026-06-01", "2026-06-03")
+    day_one = get_sessions_data("hermes", "custom", "2026-06-01", "2026-06-01")
+    day_three = get_sessions_data("hermes", "custom", "2026-06-03", "2026-06-03")
+    overview = sessions.get_active_time_data("custom", "2026-06-03", "2026-06-03")
+
+    # The reply after the two-day pause counts up to the cap (5 min), as any
+    # gap does, then 60 s to the tool result.
+    assert day_three["sessions"] == []  # no token turn that day, so nothing to list
+    assert day_three["summary"]["active_ms"] == 360_000
+    assert overview["by_tool"]["hermes"]["active_ms"] == 360_000
+    assert day_one["summary"]["active_ms"] + day_three["summary"]["active_ms"] == (
+        whole["summary"]["active_ms"]
+    )

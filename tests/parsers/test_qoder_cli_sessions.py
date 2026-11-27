@@ -757,3 +757,21 @@ def test_window_table_reaches_both_views(monkeypatch, tmp_path):
     assert tokens == 90000  # int(round(0.5 * 180000))
     assert sessions._parse_qoder_cli_session_file.cache_info().misses > misses_before
     assert _entry_sums(_live_entries())[0] == tokens
+
+
+def test_one_request_session_is_timed_from_its_prompt(monkeypatch, tmp_path):
+    """The transcript's user record (not a tool result) anchors the first request."""
+    root = tmp_path / "qoder-root"
+    _transcript(root, PROJ_SEG, SID_A, [
+        {"type": "user", "timestamp": _iso(T_TODAY - 3_000),
+         "message": {"role": "user", "content": "hi"}},
+        {"type": "user", "timestamp": _iso(T_TODAY - 1_000),
+         "message": {"role": "user", "content": [{"type": "tool_result", "content": "ok"}]}},
+        _transcript_rec("r1", T_TODAY, inp=100, outp=10),
+    ])
+    _setup(monkeypatch, tmp_path)
+
+    row = get_sessions_data("qoder_cli", "all")["sessions"][0]
+
+    assert row["token_events"] == 1
+    assert row["active_ms"] == 3_000

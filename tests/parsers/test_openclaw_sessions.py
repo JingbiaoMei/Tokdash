@@ -1262,3 +1262,18 @@ def test_openclaw_source_never_imports_sessions():
         if isinstance(node, ast.Import):
             for alias in node.names:
                 assert "sessions" not in alias.name, alias.name
+
+
+def test_one_turn_session_runs_from_prompt_to_the_appended_reply(monkeypatch, tmp_path):
+    """The inner stamp is the call's start (Overview's instant); the entry stamp
+    is when the finished reply was appended, which is where its work ended."""
+    a = _sessions_dir(tmp_path, "alpha")
+    reply = _asst("m1", T_TODAY + 5, inp=100, out=10)
+    reply["timestamp"] = T_TODAY + 3400
+    _write_jsonl(a / "s1.jsonl", [_hdr("s1"), _user("u1", T_TODAY, "hi"), reply])
+    _pricing(monkeypatch, tmp_path)
+
+    row = get_sessions_data("openclaw", "all")["sessions"][0]
+
+    assert row["active_ms"] == 3400
+    assert row["started_at"] == sessions._ms_to_iso(T_TODAY + 5)

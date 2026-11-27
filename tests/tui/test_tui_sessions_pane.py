@@ -258,7 +258,7 @@ def test_the_tool_chips_are_the_filter_the_pane_is_scrolled_with(api):
         assert not app.query_one("#sn-tool-all", Button).has_class("-selected")
         # The head and the chip agree about what is in force; the strip underneath
         # is left to talk about the rows, not to repeat it.
-        assert "1 of 20 session tools" in visible(app, "#sn-scope")
+        assert "1 of 21 session tools" in visible(app, "#sn-scope")
         # The rows' own caption, under the table, says what the rows are.
         assert "sorted by" in visible(app, "#sn-meta")
         assert not app.query_one("#sn-note", Static).display

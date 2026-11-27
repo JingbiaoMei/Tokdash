@@ -331,7 +331,7 @@ _session_source_versions_lock = threading.Lock()
 _SESSION_TREE_SOURCES = frozenset({
     "codex", "claude", "pi_agent", "omp", "kimi", "dsh", "reasonix",
     "grok", "workbuddy", "qwen_code", "openclaw", "qoder_cli", "cline",
-    "antigravity_cli",
+    "antigravity_cli", "minimax",
 })
 
 

@@ -485,3 +485,21 @@ def test_registration_smoke(monkeypatch, tmp_path):
     assert "workbuddy" in sessions.TOOL_LABELS
     raw = _raw_sessions_for_tool("workbuddy")
     assert raw == {}
+
+
+def test_one_turn_session_is_timed_from_its_prompt(monkeypatch, tmp_path):
+    root = tmp_path / "wb"
+    (root / "projects").mkdir(parents=True)
+    _write_transcript(root, "slug-a", "wb-one", [
+        {"type": "message", "role": "user", "id": "u1",
+         "timestamp": T_A - 40_000, "sessionId": "wb-one", "cwd": "/work/demo-proj"},
+        _sid(_assistant_row_with_cwd("m1", T_A, "wb-model",
+                                     _raw_usage(1000, 100, 400, 600, credit=1.0),
+                                     "/work/demo-proj"), "wb-one"),
+    ])
+    _setup(monkeypatch, tmp_path, root)
+
+    row = get_sessions_data("workbuddy", "all")["sessions"][0]
+
+    assert row["token_events"] == 1
+    assert row["active_ms"] == 40_000

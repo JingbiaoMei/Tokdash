@@ -568,3 +568,24 @@ def test_cache_invalidation(monkeypatch, tmp_path):
     assert info4.misses == info3.misses  # no message file re-read
     assert raw["s-cold"]["display_name"] == "Cold title"
     assert raw["s-cold"]["project"] == "cold-proj"
+
+
+def test_each_stream_is_timed_from_its_own_prompt(monkeypatch, tmp_path):
+    """Main and subagent files anchor their own first turns; a tool result
+    (also role "user") is not a prompt."""
+    data_dir = _setup(monkeypatch, tmp_path)
+    _write_session(data_dir, "s-anchor", [
+        _user("msg_q1", T_A - 3000),
+        _assistant("msg_r1", T_A, model="gpt-5", input_tokens=10, output_tokens=1),
+    ])
+    _write_session(data_dir, "s-anchor", [
+        _user("msg_q2", T_A + 5000),
+        {"role": "user", "id": "msg_tr", "ts": T_A + 5500,
+         "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]},
+        _assistant("msg_r2", T_A + 6000, model="gpt-5", input_tokens=10, output_tokens=1),
+    ], agent_id="agent_beta")
+    _sig_cache.clear()
+
+    row = next(s for s in get_sessions_data("cline", "all")["sessions"] if s["session_id"] == "s-anchor")
+
+    assert row["active_ms_sum"] == 3000 + 1000

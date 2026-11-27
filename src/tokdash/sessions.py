@@ -47,6 +47,7 @@ from .sources.coding_tools import (
     CodexCompactionTracker,
     HermesParser,
     KimiParser,
+    MiniMaxCodeParser,
     QoderIdeParser,
     WorkBuddyParser,
     ZCodeSnapshotError,
@@ -65,6 +66,7 @@ from .sources.coding_tools import (
     hermes_group_id,
     hermes_group_timestamp_ms,
     hermes_model_usage_groups,
+    hermes_timestamp_ms,
     hermes_price_candidates,
     hermes_sorted_usage_groups,
     hermes_usage_parts,
@@ -104,7 +106,7 @@ from .usage_store import (
 )
 
 
-SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "omp", "mimo", "kimi", "dsh", "reasonix", "zcode", "kilocode", "grok", "hermes", "antigravity_cli", "cline", "workbuddy", "qoder", "qwen_code", "openclaw", "qoder_cli")
+SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "omp", "mimo", "kimi", "dsh", "reasonix", "zcode", "kilocode", "grok", "hermes", "antigravity_cli", "cline", "workbuddy", "qoder", "qwen_code", "openclaw", "qoder_cli", "minimax")
 logger = logging.getLogger(__name__)
 TOOL_LABELS = {
     "codex": "Codex",
@@ -127,6 +129,7 @@ TOOL_LABELS = {
     "qwen_code": "Qwen Code",
     "openclaw": "OpenClaw",
     "qoder_cli": "Qoder CLI",
+    "minimax": "MiniMax Code",
 }
 
 _PRICING_DB = PricingDatabase()
@@ -143,18 +146,22 @@ _SESSION_FILE_PARSER_VERSIONS = {
     # 3: response-owned speed measurements from the shared usage reader.
     # 4: a compaction request no token_count carries is its own turn (issue #222).
     # 5: stream compressed archives with the same fallback session identity.
-    "_parse_codex_session_file": 5,
+    # 6: turns carry _prompt_ms, so a session's first turn is timed from its prompt.
+    "_parse_codex_session_file": 6,
     # 2: turns carry _stream_id so subagents are timed separately from the main agent.
     # 3: streaming snapshots collapse per claude_usage_supersedes rather than
     #    keeping the first write, for role-bearing rows too; stored v2 turns
     #    kept the partial, and its cache split.
-    "_parse_claude_session_file": 3,
+    # 4: turns carry _prompt_ms, so each stream's first turn is timed from its prompt.
+    "_parse_claude_session_file": 4,
     # 2: turns carry _stream_id so concurrent agents are timed separately.
     # 3: usage.record turns carry _speed, the paired step.end decode window, so
     #    stored turns can answer Output tok/s without re-reading the log.
-    "_parse_kimi_session_file": 3,
+    # 4: turns carry _prompt_ms, so each agent's first turn is timed from its prompt.
+    "_parse_kimi_session_file": 4,
     # 2: clean-stream speed measurements from the shared usage fold.
-    "_parse_dsh_session_file": 2,
+    # 3: turns carry _prompt_ms, so a session's first turn is timed from its prompt.
+    "_parse_dsh_session_file": 3,
     # 4: turns carry _work_ms, so active time is the measured step duration
     #    rather than the capped gap to the next turn. 3 moved the timestamp to
     #    the end of that work; 2 stamped its start. None shipped; rows rebuild.
@@ -509,7 +516,11 @@ def reload_pricing_db() -> None:
     # happens at merge time through qoder_cli_merged_entry in the aggregate);
     # it is on the list for the second reason only.
     _parse_qoder_cli_session_file.cache_clear()
+    _qoder_cli_prompt_times.cache_clear()
     _load_qoder_cli_sessions.cache_clear()
+    _parse_minimax_session_file.cache_clear()
+    _load_minimax_sessions.cache_clear()
+    _minimax_session_meta.cache_clear()
     # New rates change every token in the assembly token, so the entries were
     # already unreachable; dropping them frees the budget they were holding.
     _SESSION_ASSEMBLY.clear()
@@ -757,6 +768,47 @@ def _clip_intervals(
     return clipped
 
 
+def _stamp_prompt_anchors(
+    turns: Iterable[Dict[str, Any]],
+    prompts: Iterable[tuple[Any, Optional[int]]],
+) -> None:
+    """Stamp ``_prompt_ms`` on each turn a user prompt directly started.
+
+    ``prompts`` are ``(stream_id, prompt_ms)`` pairs, matched against each
+    turn's ``_stream_id`` (None for a single-stream log), so a subagent's first
+    turn is anchored by its own prompt and never by the main agent's. A turn
+    takes the latest prompt after the previous turn of its stream; a turn with
+    no prompt since the one before it is a continuation and gets nothing.
+
+    Every such turn is stamped, not only the first, because a session can be
+    assembled from several files and windowed after parsing: which turn ends
+    up first in its stream is not known here. _session_active_intervals reads
+    the anchor of each stream's earliest turn only.
+    """
+    by_stream: Dict[Any, list[int]] = {}
+    for stream_id, prompt_ms in prompts:
+        if prompt_ms:
+            by_stream.setdefault(stream_id, []).append(int(prompt_ms))
+    if not by_stream:
+        return
+    turns_by_stream: Dict[Any, list[Dict[str, Any]]] = {}
+    for turn in turns:
+        turns_by_stream.setdefault(turn.get("_stream_id"), []).append(turn)
+    for stream_id, stream_turns in turns_by_stream.items():
+        stream_prompts = sorted(by_stream.get(stream_id, ()))
+        if not stream_prompts:
+            continue
+        index = 0
+        for turn in sorted(stream_turns, key=lambda item: int(item.get("timestamp_ms", 0) or 0)):
+            ts_ms = int(turn.get("timestamp_ms", 0) or 0)
+            latest: Optional[int] = None
+            while index < len(stream_prompts) and stream_prompts[index] < ts_ms:
+                latest = stream_prompts[index]
+                index += 1
+            if latest is not None:
+                turn["_prompt_ms"] = latest
+
+
 def _session_active_intervals(
     raw: Dict[str, Any],
     cap_ms: int,
@@ -772,22 +824,50 @@ def _session_active_intervals(
     work leading into the first in-window event started before the window opened,
     so filtering events first would silently drop it (a 23:59-00:01 stretch would
     report nothing for the new day).
+
+    A stream's first turn has no event before it, so the gap rule alone cannot
+    time it and a one-turn session would read zero. When the parser stamped
+    that turn's ``_prompt_ms`` (the user prompt that started it, see
+    _stamp_prompt_anchors), the prompt stands in as the preceding event, capped
+    like any other gap. A turn's event instant is its ``_done_ms`` when the
+    source stamps turns at their start and records the finish separately.
     """
     streams: Dict[Any, list[tuple[int, Optional[int]]]] = {}
+    # Per stream, the earliest turn's (timestamp, _prompt_ms): the prompt that
+    # started a stream's first turn is the only one consumed below.
+    first_turns: Dict[Any, tuple[int, Optional[int]]] = {}
     for turn in raw.get("turns", []):
         # _work_ms is how long this turn's own work took, when the source
         # measured it (Reasonix and ZCode do). Turns without one keep the
         # capped-gap heuristic, which is all a completion-instant log can
         # support.
         work_ms = turn.get("_work_ms")
-        streams.setdefault(turn.get("_stream_id"), []).append(
-            (int(turn.get("timestamp_ms", 0) or 0), None if work_ms is None else int(work_ms or 0))
+        stream_id = turn.get("_stream_id")
+        ts_ms = int(turn.get("timestamp_ms", 0) or 0)
+        # The gap rule reads each event as the instant its work finished. A
+        # source that stamps turns at their start (OpenCode, MiniMax) supplies
+        # the finish separately as _done_ms; timestamp_ms stays the start so
+        # the turn buckets on the same day as its Overview entry.
+        done_ms = _to_int(turn.get("_done_ms"))
+        prompt_ms = turn.get("_prompt_ms")
+        if done_ms > ts_ms:
+            # The turn's own start is a lower bound on when its work began, so
+            # it anchors a first turn that no logged prompt preceded.
+            if prompt_ms is None:
+                prompt_ms = ts_ms
+            ts_ms = done_ms
+        streams.setdefault(stream_id, []).append(
+            (ts_ms, None if work_ms is None else int(work_ms or 0))
         )
-    # Activity events: turns that produced no billable tokens still did
-    # work (tool-only or error turns). ZCode sets _activity_events as
-    # (timestamp_ms, work_ms or None) pairs; no other tool sets it, so
-    # this is a no-op elsewhere. (The bare name _activity is taken by
-    # Codex for unrelated per-file metadata.)
+        first = first_turns.get(stream_id)
+        if first is None or ts_ms < first[0] or (ts_ms == first[0] and first[1] is None):
+            first_turns[stream_id] = (ts_ms, None if prompt_ms is None else int(prompt_ms))
+    # Activity events: moments the agent was working that are not token
+    # turns, as (timestamp_ms, work_ms or None) pairs. ZCode sets them for
+    # turns that billed nothing (tool-only or error turns); Hermes, whose
+    # turns are per-model aggregates, for its assistant and tool messages.
+    # No other tool sets them. (The bare name _activity is taken by Codex
+    # for unrelated per-file metadata.)
     for raw_ts, raw_work in raw.get("_activity_events") or []:
         streams.setdefault(None, []).append(
             (int(raw_ts or 0), None if raw_work is None else int(raw_work or 0))
@@ -812,15 +892,45 @@ def _session_active_intervals(
         # for the stamps to land in.
         streams.setdefault(None, [])
     intervals: list[tuple[int, int]] = []
-    for stamps in streams.values():
+    for stream_id, stamps in streams.items():
         if prior_event_ms is not None:
             prior_work = None if prior_work_ms is None else int(prior_work_ms)
             stamps = [(int(prior_event_ms), prior_work), *stamps]
+        else:
+            # No event precedes the stream's first turn, so the gap rule has
+            # nothing to measure it from and a one-turn stream would read zero.
+            # The prompt that started that turn is where its work began. Only
+            # when it precedes every stamp in the stream: a later prompt is
+            # mid-stream, and anchoring there would invent work.
+            first = first_turns.get(stream_id)
+            if first is not None and first[1] is not None and stamps and first[1] < min(
+                stamp for stamp, _ in stamps
+            ):
+                stamps = [(first[1], None), *stamps]
         if next_event_ms is not None:
             next_work = None if next_work_ms is None else int(next_work_ms)
             stamps = [*stamps, (int(next_event_ms), next_work)]
         intervals.extend(_measured_intervals(stamps, cap_ms))
     return _clip_intervals(intervals, since_ms, until_ms)
+
+
+def _activity_only_intervals(
+    raw: Dict[str, Any], since_ms: Optional[int], until_ms: Optional[int]
+) -> list[tuple[int, int]]:
+    """Work in the window from a session none of whose token turns is in it.
+
+    ZCode precomputes these as ``_activity_intervals`` (its loader windows at
+    the source). Hermes bills per-model aggregates stamped at each group's
+    first message, so a session's later days carry activity events but no
+    turn: they are measured from the whole history and clipped to the window,
+    exactly as a listed session's would be, so per-day totals add up to the
+    range's.
+    """
+    if "_activity_intervals" in raw:
+        return list(raw.get("_activity_intervals") or [])
+    if raw.get("_activity_events"):
+        return _session_active_intervals(raw, active_gap_cap_ms(), since_ms, until_ms)
+    return []
 
 
 def _merged_interval_ms(intervals: Iterable[tuple[int, int]], *, presorted: bool = False) -> int:
@@ -1177,6 +1287,8 @@ def _public_turns(turns: Iterable[Dict[str, Any]]) -> list[Dict[str, Any]]:
             # The source-specific normalization is applied in get_session_detail.
             row['turn_key'] = key if '/' not in key and '\\' not in key else None
         row["stream_id"] = row.pop("_stream_id", "main")
+        row.pop("_prompt_ms", None)
+        row.pop("_done_ms", None)
         row.pop("_tool", None)
         row.pop("_bill", None)
         row.pop("_bills", None)
@@ -1787,6 +1899,7 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
     thread_name = ""
     is_review_session = False
     turns = []
+    prompts: list[tuple[Any, Optional[int]]] = []
     association = CodexResponseAssociation() if timing_enabled() else None
     pending_speed = []
     turn_index = 0
@@ -1934,6 +2047,15 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
                     specificity="mcp",
                 )
 
+            if (obj_type == "event_msg" and payload_type in {"task_started", "user_message"}) or (
+                obj_type == "response_item" and payload_type == "message" and payload.get("role") == "user"
+            ):
+                # Where a turn's work began: task_started opens it, and the user
+                # message (an event in some builds, a response item in others)
+                # follows within milliseconds.
+                prompts.append((None, _parse_iso_to_ms(obj.get("timestamp"))))
+                continue
+
             if obj_type != "event_msg" or payload.get("type") != "token_count":
                 continue
 
@@ -2063,6 +2185,7 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
 
     if not turns and not activity["is_primary"]:
         return None
+    _stamp_prompt_anchors(turns, prompts)
 
     if first_model_seen:
         # Turns written before the file's first model signal (a fork's replayed
@@ -2208,6 +2331,14 @@ def get_codex_activity_insights() -> dict[str, Any]:
     return build_activity_insights(store.query_session_activity_records("codex"))
 
 
+def _claude_is_tool_result(message: Dict[str, Any]) -> bool:
+    """A user-role message that only returns tool output, which is not a prompt."""
+    content = message.get("content")
+    if not isinstance(content, list) or not content:
+        return False
+    return all(isinstance(block, dict) and block.get("type") == "tool_result" for block in content)
+
+
 @_cached_session_parser()
 def _parse_claude_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple = ()) -> Optional[Dict[str, Any]]:
     session_path = Path(path_str)
@@ -2220,6 +2351,7 @@ def _parse_claude_session_file(path_str: str, _mtime_ns: int, _size: int, _prici
     ai_title = ""
     agent_name = ""
     turns = []
+    prompts: list[tuple[Any, Optional[int]]] = []
     # One assistant turn is rewritten once per streamed content block, every
     # write sharing the message id and carrying cumulative usage. Which write is
     # authoritative is claude_usage_supersedes' call, shared with
@@ -2259,6 +2391,14 @@ def _parse_claude_session_file(path_str: str, _mtime_ns: int, _size: int, _prici
 
             message = obj.get("message") if isinstance(obj.get("message"), dict) else {}
             role = message.get("role")
+            if obj_type == "user" and role == "user" and not _claude_is_tool_result(message):
+                # A prompt, not a tool result (also role "user"): where the work of
+                # the turn it starts began. Same stream key as the turns below.
+                prompts.append((
+                    str(obj.get("agentId") or "").strip() or "main",
+                    _parse_iso_to_ms(obj.get("timestamp")),
+                ))
+                continue
             is_top_level_assistant = role is None and obj_type == "assistant"
             if role != "assistant" and not is_top_level_assistant:
                 continue
@@ -2327,6 +2467,7 @@ def _parse_claude_session_file(path_str: str, _mtime_ns: int, _size: int, _prici
 
     if not turns:
         return None
+    _stamp_prompt_anchors(turns, prompts)
 
     return {
         "tool": "claude",
@@ -2529,6 +2670,7 @@ def _raw_boundary_event_ms(
     extra_clause: str = "",
     exclude_ids: Collection[str] = (),
     message_table: str = "message",
+    prompts_out: Optional[Dict[str, int]] = None,
 ) -> Dict[str, int]:
     """The same lookup for loaders that cannot filter roles in SQL.
 
@@ -2577,7 +2719,15 @@ def _raw_boundary_event_ms(
                     data = json.loads(data_json)
                 except Exception:
                     continue
-                if not isinstance(data, dict) or data.get("role") != "assistant":
+                if not isinstance(data, dict):
+                    continue
+                role = data.get("role")
+                if role != "assistant":
+                    # The nearest user row passed on the way out is the prompt
+                    # of the window's first turn (the legacy table only; v2
+                    # reads its prompts unwindowed in SQL).
+                    if role == "user" and prompts_out is not None:
+                        prompts_out.setdefault(key, int(created_ms))
                     continue
             found[key] = int(created_ms)
             pending.discard(key)
@@ -2598,8 +2748,14 @@ def _attach_window_context(
     extra_clause: str = "",
     exclude_ids: Collection[str] = (),
     message_table: str = "message",
+    prompts_out: Optional[Dict[str, int]] = None,
 ) -> None:
-    """Hand the summarizer the events just outside the window it asked for."""
+    """Hand the summarizer the events just outside the window it asked for.
+
+    ``prompts_out`` (raw path only) also collects each session's nearest user
+    row before the window: the windowed query never returns it, and without
+    JSON1 it is only found by the same walk.
+    """
     for key, bound_ms, before in (
         ("_prior_event_ms", since_ms, True),
         ("_next_event_ms", until_ms, False),
@@ -2621,6 +2777,7 @@ def _attach_window_context(
                 extra_clause=extra_clause,
                 exclude_ids=exclude_ids,
                 message_table=message_table,
+                prompts_out=prompts_out if before else None,
             )
         for session_id, session in sessions.items():
             event_ms = boundary.get(str(session_id))
@@ -2723,6 +2880,7 @@ def _append_opencode_turn(
     billing_rule: str = "input-plus-cache-write",
     speed: Optional[dict] = None,
     message_id: Any = None,
+    completed_ms: Any = None,
 ) -> None:
     fresh_input = int(fresh_input or 0)
     cache_write = int(cache_write or 0)
@@ -2789,6 +2947,46 @@ def _append_opencode_turn(
         raw["turns"][-1]["_event_key"] = str(message_id)
     if speed is not None:
         raw["turns"][-1]["_speed"] = speed
+    # The row is stamped when the message was created; time.completed is when
+    # its work finished, which is the instant active time measures to.
+    done_ms = _to_int(completed_ms)
+    if done_ms > int(created_ms or 0):
+        raw["turns"][-1]["_done_ms"] = done_ms
+
+
+def _opencode_prompt_times(
+    conn: sqlite3.Connection, message_table: str, *, json_ok: bool, extra_clause: str = ""
+) -> Optional[Dict[str, list[int]]]:
+    """User-message creation times per session, or None when SQL cannot pick them.
+
+    The v2 table keeps the role in a plain column; the legacy table needs JSON1,
+    so the raw loader (which exists for builds without it) collects them from
+    the rows it already decodes instead.
+    """
+    if message_table == "session_message":
+        clause = "m.type = 'user'"
+    elif json_ok:
+        clause = "json_valid(m.data) AND json_extract(m.data, '$.role') = 'user'"
+    else:
+        return None
+    if extra_clause:
+        clause = f"{clause} AND {extra_clause}"
+    times: Dict[str, list[int]] = {}
+    for session_id, created_ms in conn.execute(
+        f"SELECT m.session_id, m.time_created FROM {message_table} m WHERE {clause}"
+    ):
+        if created_ms:
+            times.setdefault(str(session_id), []).append(int(created_ms))
+    return times
+
+
+def _stamp_opencode_prompts(
+    sessions: Dict[str, Dict[str, Any]], prompt_times: Dict[str, list[int]]
+) -> None:
+    for session_id, raw in sessions.items():
+        times = prompt_times.get(str(session_id))
+        if times:
+            _stamp_prompt_anchors(raw["turns"], [(None, ms) for ms in times])
 
 
 def _load_opencode_sessions_scalar(
@@ -2834,7 +3032,7 @@ def _load_opencode_sessions_scalar(
               json_extract(m.data, '$.path.root'),
               json_extract(m.data, '$.cost'),
               {"json_extract(m.data, '$.time.created')" if timing_enabled() else 'NULL'},
-              {"json_extract(m.data, '$.time.completed')" if timing_enabled() else 'NULL'},
+              json_extract(m.data, '$.time.completed'),
               {"json_extract(m.data, '$.error')" if timing_enabled() else 'NULL'},
               {"json_extract(m.data, '$.finish')" if timing_enabled() else 'NULL'}
             FROM {message_table} m
@@ -2892,7 +3090,11 @@ def _load_opencode_sessions_scalar(
                 speed=request_window_timing(output_tokens, reasoning_tokens, request_created, request_completed, request_error, request_finish) if timing_enabled() else None,
                 recorded_cost=recorded_cost if use_recorded_cost else None,
                 billing_rule=billing_rule,
+                completed_ms=request_completed,
             )
+        _stamp_opencode_prompts(
+            sessions, _opencode_prompt_times(conn, message_table, json_ok=True) or {}
+        )
         _attach_window_context(
             conn, sessions, since_ms, until_ms, role_filtered=True, message_table=message_table
         )
@@ -2949,6 +3151,9 @@ def _load_opencode_sessions_raw_json(
             args,
         )
         turn_index_by_session: Dict[str, int] = {}
+        # The legacy table is read unfiltered here, so its user rows arrive in
+        # this same pass; v2 filters to assistant rows and asks separately.
+        prompt_times = _opencode_prompt_times(conn, message_table, json_ok=False) or {}
         for message_id, session_id, directory, title, slug, worktree, created_ms, data_json in cur.fetchall():
             try:
                 data = json.loads(data_json)
@@ -2959,6 +3164,10 @@ def _load_opencode_sessions_raw_json(
             if not isinstance(data, dict):
                 continue
 
+            if not is_v2 and data.get("role") == "user":
+                if created_ms:
+                    prompt_times.setdefault(str(session_id), []).append(int(created_ms))
+                continue
             if not is_v2 and data.get("role") != "assistant":
                 continue
 
@@ -2992,10 +3201,23 @@ def _load_opencode_sessions_raw_json(
                 speed=native_message_timing(data) if timing_enabled() else None,
                 recorded_cost=data.get("cost") if use_recorded_cost else None,
                 billing_rule=billing_rule,
+                completed_ms=(data.get("time") or {}).get("completed")
+                if isinstance(data.get("time"), dict)
+                else None,
             )
+        edge_prompts: Dict[str, int] = {}
         _attach_window_context(
-            conn, sessions, since_ms, until_ms, role_filtered=False, message_table=message_table
+            conn,
+            sessions,
+            since_ms,
+            until_ms,
+            role_filtered=False,
+            message_table=message_table,
+            prompts_out=edge_prompts,
         )
+        for session_id, prompt_ms in edge_prompts.items():
+            prompt_times.setdefault(session_id, []).append(prompt_ms)
+        _stamp_opencode_prompts(sessions, prompt_times)
     finally:
         conn.close()
 
@@ -3062,6 +3284,8 @@ def _parse_pi_family_session_file(
     current_model = ""
     current_provider = ""
     turns: list[Dict[str, Any]] = []
+    prompts: list[tuple[Any, Optional[int]]] = []
+    call_starts: list[tuple[Dict[str, Any], int]] = []
     seen_ids: set[str] = set()
     turn_index = 0
 
@@ -3120,8 +3344,11 @@ def _parse_pi_family_session_file(
                 continue
 
             message = obj.get("message") if isinstance(obj.get("message"), dict) else {}
-            if message.get("role") == "user" and not first_user_preview:
-                first_user_preview = _message_text_preview(message)
+            if message.get("role") == "user":
+                if not first_user_preview:
+                    first_user_preview = _message_text_preview(message)
+                # The envelope stamp, the same clock the assistant turns use.
+                prompts.append((None, _parse_iso_to_ms(obj.get("timestamp"))))
                 continue
             if message.get("role") != "assistant":
                 continue
@@ -3197,10 +3424,20 @@ def _parse_pi_family_session_file(
                     turn['_speed'] = omp_message_timing(message)
             elif tool == "pi_agent":
                 turn["_event_key"] = pi_forks.event_identity(obj)
+            # The entry is stamped when the finished message was appended; the
+            # message's own timestamp is when the call started. Kept aside as the
+            # fallback anchor for a turn no user message preceded (a session
+            # opened by an injected custom_message, for one).
+            call_start_ms = _to_int(message.get("timestamp"))
+            if 0 < call_start_ms < timestamp_ms:
+                call_starts.append((turn, call_start_ms))
             turns.append(turn)
 
     if not turns:
         return None
+    _stamp_prompt_anchors(turns, prompts)
+    for turn, call_start_ms in call_starts:
+        turn.setdefault("_prompt_ms", call_start_ms)
 
     project = _project_from_repo_or_path(None, cwd or None)
     return {
@@ -3356,6 +3593,46 @@ def _hermes_user_preview(conn: sqlite3.Connection, session_id: str) -> str:
     return _message_text_preview({"role": "user", "content": row[0]})
 
 
+def _hermes_message_times(conn: sqlite3.Connection) -> Dict[str, tuple[list[int], list[int]]]:
+    """``{session_id: (prompt instants, assistant/tool instants)}`` from messages.
+
+    Hermes bills per model group, so its turns are one or two aggregates per
+    session and their gaps say nothing about how long the agent worked. The
+    messages table is per message: assistant and tool rows are the events the
+    gap rule needs, user rows the prompts that start them. {} when the table
+    or its columns are missing, which leaves active time as it was.
+    """
+    times: Dict[str, tuple[list[int], list[int]]] = {}
+    try:
+        rows = conn.execute("SELECT session_id, role, timestamp FROM messages").fetchall()
+    except sqlite3.Error:
+        return times
+    for session_id, role, stamp in rows:
+        ms = hermes_timestamp_ms(stamp)
+        if ms <= 0:
+            continue
+        prompts, events = times.setdefault(str(session_id), ([], []))
+        if role == "user":
+            prompts.append(ms)
+        elif role in ("assistant", "tool"):
+            events.append(ms)
+    return times
+
+
+def _attach_hermes_timing(
+    raw: Dict[str, Any], timing: Optional[tuple[list[int], list[int]]]
+) -> None:
+    if not timing:
+        return
+    prompts, events = timing
+    if events:
+        raw["_activity_events"] = [(ms, None) for ms in sorted(events)]
+    # The aggregate turns hold no per-message stamp, so the earliest event the
+    # anchor has to precede is an activity event as often as a turn; the check
+    # in _session_active_intervals covers both.
+    _stamp_prompt_anchors(raw["turns"], [(None, ms) for ms in prompts])
+
+
 @lru_cache(maxsize=8)
 def _load_hermes_sessions(signature: tuple[tuple[str, int, int], ...], _pricing_sig: tuple = ()) -> Dict[str, Dict[str, Any]]:
     sessions: Dict[str, Dict[str, Any]] = {}
@@ -3404,6 +3681,7 @@ def _load_hermes_sessions(signature: tuple[tuple[str, int, int], ...], _pricing_
                 rows = cur.fetchall()
                 # Shared with HermesParser: the same groups on both sides.
                 usage = hermes_model_usage_groups(conn)
+                message_times = _hermes_message_times(conn)
             except (OSError, sqlite3.Error):
                 # Corrupt/foreign DB: the parser skips it per-DB, so the
                 # harness does too (parity), and the remaining DBs still serve.
@@ -3553,6 +3831,7 @@ def _load_hermes_sessions(signature: tuple[tuple[str, int, int], ...], _pricing_
                         if title:
                             raw["display_name"] = title
                             raw["_display_name_explicit"] = True
+                        _attach_hermes_timing(raw, message_times.get(sid))
                         sessions[sid] = raw
                     except (ValueError, TypeError, OverflowError):
                         continue
@@ -3580,6 +3859,7 @@ def _load_hermes_sessions(signature: tuple[tuple[str, int, int], ...], _pricing_
                         if title:
                             raw["display_name"] = title
                             raw["_display_name_explicit"] = True
+                        _attach_hermes_timing(raw, message_times.get(orphan_sid))
                         sessions[orphan_sid] = raw
         finally:
             conn.close()
@@ -3687,6 +3967,7 @@ def _load_antigravity_sessions(
     for path_str, _mtime, _size in signature:
         db_path = Path(path_str)
         rows = None
+        step_times: Dict[int, int] = {}
         # The parser's dual opener (Reconciliation rule 6): RO first, plain
         # connect only if recovery needs a writable connection. A DB that
         # fails both contributes nothing to Overview and Sessions alike.
@@ -3699,6 +3980,7 @@ def _load_antigravity_sessions(
                 rows = conn.execute(
                     "SELECT idx, data FROM gen_metadata ORDER BY idx"
                 ).fetchall()
+                step_times = AntigravityCLIParser._step_times(conn)
                 break
             except (sqlite3.Error, OSError):
                 pass
@@ -3717,6 +3999,16 @@ def _load_antigravity_sessions(
                 decoded = AntigravityCLIParser._decode_row(data)
                 if decoded is None:
                     continue
+                if not decoded.get("timestamp"):
+                    # The parser's own fallback: agy 1.2.x writes no 1.9.4, so the
+                    # row is dated from the steps it references. Without it the
+                    # turn sat at epoch 0, outside every window, while Overview
+                    # counted the same row on its real day.
+                    referenced = [
+                        step_times[ref] for ref in decoded.get("stepRefs") or [] if ref in step_times
+                    ]
+                    if referenced:
+                        decoded["timestamp"] = max(referenced)
                 input_t = _to_int(decoded.get("input"))
                 output_t = _to_int(decoded.get("output"))
                 cache_r = _to_int(decoded.get("cacheRead"))
@@ -3752,6 +4044,10 @@ def _load_antigravity_sessions(
                 continue
         if not turns:
             continue
+        if step_times:
+            # The conversation's first step is the user's input; it precedes the
+            # first generation, which references the steps after it.
+            _stamp_prompt_anchors(turns, [(None, min(step_times.values()))])
         raw: Dict[str, Any] = {
             "tool": "antigravity_cli",
             "session_id": sid,
@@ -3968,6 +4264,8 @@ def _parse_kimi_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing
     cwd = ""
     first_user_preview = ""
     turns: list[Dict[str, Any]] = []
+    # One agent per wire file, so every prompt here belongs to this file's stream.
+    prompts: list[tuple[Any, Optional[int]]] = []
     seen_keys: set[str] = set()
     turn_index = 0
 
@@ -4009,6 +4307,7 @@ def _parse_kimi_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing
             if obj_type == "turn.prompt":
                 if not first_user_preview:
                     first_user_preview = _message_text_preview({"content": obj.get("input")})
+                prompts.append((stream_id, _to_int(obj.get("time")) or None))
                 continue
 
             if obj_type == "usage.record":
@@ -4040,6 +4339,12 @@ def _parse_kimi_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing
                     if not first_user_preview:
                         payload = message.get("payload") if isinstance(message.get("payload"), dict) else {}
                         first_user_preview = _message_text_preview({"content": payload.get("user_input")})
+                    try:
+                        begin_s = float(obj.get("timestamp"))
+                    except (TypeError, ValueError):
+                        begin_s = None
+                    if begin_s is not None and math.isfinite(begin_s) and begin_s > 0:
+                        prompts.append((stream_id, int(begin_s * 1000)))
                     continue
                 if message_type != "StatusUpdate":
                     continue
@@ -4108,6 +4413,7 @@ def _parse_kimi_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing
 
     if not turns:
         return None
+    _stamp_prompt_anchors(turns, prompts)
 
     project = _project_from_repo_or_path(None, cwd or None)
     if project == "unknown":
@@ -4244,7 +4550,7 @@ def _load_mimo_sessions_scalar(
               json_extract(m.data, '$.path.root'),
               json_extract(m.data, '$.cost'),
               {"json_extract(m.data, '$.time.created')" if timing_enabled() else 'NULL'},
-              {"json_extract(m.data, '$.time.completed')" if timing_enabled() else 'NULL'},
+              json_extract(m.data, '$.time.completed'),
               {"json_extract(m.data, '$.error')" if timing_enabled() else 'NULL'},
               {"json_extract(m.data, '$.finish')" if timing_enabled() else 'NULL'},
               {"json_extract(m.data, '$.agent')" if timing_enabled() else 'NULL'},
@@ -4304,7 +4610,14 @@ def _load_mimo_sessions_scalar(
                 speed=request_window_timing(output_tokens, reasoning_tokens, request_created, request_completed, request_error, request_finish,
                     ensemble=request_agent == 'max' or request_mode == 'max') if timing_enabled() else None,
                 recorded_cost=recorded_cost,
+                completed_ms=request_completed,
             )
+        # Imported rows stay out of the prompts too: an imported prompt could
+        # otherwise anchor a native session's first turn.
+        _stamp_opencode_prompts(
+            sessions,
+            _opencode_prompt_times(conn, "message", json_ok=True, extra_clause=import_clause) or {},
+        )
         _attach_window_context(conn, sessions, since_ms, until_ms, role_filtered=True, extra_clause=import_clause)
     finally:
         conn.close()
@@ -4355,6 +4668,7 @@ def _load_mimo_sessions_raw_json(
         # still produce a turn (the token parser bills it — parity, rule 3 of
         # docs/local/20260825_sessions_logging_harness/SPEC_kilocode.md).
         turn_index_by_session: Dict[str, int] = {}
+        prompt_times: Dict[str, list[int]] = {}
         for message_id, session_id, directory, title, slug, worktree, created_ms, data_json in cur.fetchall():
             if imported_ids and str(message_id) in imported_ids:
                 continue
@@ -4363,6 +4677,12 @@ def _load_mimo_sessions_raw_json(
             except Exception:
                 continue
 
+            if not isinstance(data, dict):
+                continue
+            if data.get("role") == "user":
+                if created_ms:
+                    prompt_times.setdefault(str(session_id), []).append(int(created_ms))
+                continue
             if data.get("role") != "assistant":
                 continue
 
@@ -4394,10 +4714,23 @@ def _load_mimo_sessions_raw_json(
                 slug=slug,
                 speed=native_message_timing(data, source="mimo") if timing_enabled() else None,
                 recorded_cost=data.get("cost"),
+                completed_ms=(data.get("time") or {}).get("completed")
+                if isinstance(data.get("time"), dict)
+                else None,
             )
+        edge_prompts: Dict[str, int] = {}
         _attach_window_context(
-            conn, sessions, since_ms, until_ms, role_filtered=False, exclude_ids=imported_ids
+            conn,
+            sessions,
+            since_ms,
+            until_ms,
+            role_filtered=False,
+            exclude_ids=imported_ids,
+            prompts_out=edge_prompts,
         )
+        for session_id, prompt_ms in edge_prompts.items():
+            prompt_times.setdefault(session_id, []).append(prompt_ms)
+        _stamp_opencode_prompts(sessions, prompt_times)
     finally:
         conn.close()
 
@@ -4533,12 +4866,15 @@ def _parse_dsh_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_
 
     title = ""
     first_user_preview = ""
+    prompts: list[tuple[Any, Optional[int]]] = []
     for event in decoded.events:
         data = event.get("data") if isinstance(event.get("data"), dict) else {}
         if event.get("type") == "session/title":
             title = _clean_display_name(data.get("title")) or title
-        elif event.get("type") == "user/message" and not first_user_preview:
-            first_user_preview = _message_text_preview(data)
+        elif event.get("type") == "user/message":
+            if not first_user_preview:
+                first_user_preview = _message_text_preview(data)
+            prompts.append((None, _to_int(event.get("time")) or None))
 
     turns: list[Dict[str, Any]] = []
     turn_index = 0
@@ -4574,6 +4910,7 @@ def _parse_dsh_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_
 
     if not turns:
         return None
+    _stamp_prompt_anchors(turns, prompts)
 
     project = _project_from_repo_or_path(None, cwd or None)
     return {
@@ -4710,6 +5047,10 @@ def _load_grok_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig
             bill=bill,
         )
         turn["_event_key"] = row["entry_id"]
+        # Grok logs how long the turn had been running when this inference
+        # finished, which places the prompt that started it exactly.
+        if row.get("turn_start_ms"):
+            turn["_prompt_ms"] = int(row["turn_start_ms"])
         raw["turns"].append(turn)
 
     summaries = _grok_summaries()
@@ -4964,6 +5305,7 @@ def _parse_workbuddy_session_file(path_str: str, _mtime_ns: int, _size: int, _pr
     project = "unknown"
     ai_title = ""
     turns = []
+    prompts: list[tuple[Any, Optional[int]]] = []
     seen_call_ids: set = set()
     # Throwaway parser per file parse (one env read + list build, amortized
     # by the per-file lru_cache), so WORKBUDDY_DATA_DIR changes and test
@@ -5005,6 +5347,10 @@ def _parse_workbuddy_session_file(path_str: str, _mtime_ns: int, _size: int, _pr
                 continue
             entry = parser._entry_from_row(record, seen_call_ids)
             if entry is None:
+                # A user message is a prompt unless it billed (some builds put
+                # usage on any row type, and those are calls, not prompts).
+                if record.get("type") == "message" and record.get("role") == "user":
+                    prompts.append((None, _to_int(record.get("timestamp")) or None))
                 continue
             model = str(entry.get("model") or "unknown")
             fresh = int(entry.get("input", 0) or 0)
@@ -5039,6 +5385,7 @@ def _parse_workbuddy_session_file(path_str: str, _mtime_ns: int, _size: int, _pr
 
     if not turns:
         return None
+    _stamp_prompt_anchors(turns, prompts)
 
     return {
         "tool": "workbuddy",
@@ -5146,6 +5493,7 @@ def _parse_qwen_code_session_file(
             turn["_speed"] = row["_speed"]
         turn['_event_key'] = entry_id or _entry_key(dict(row,source='qwen_code'))
         turns.append(turn)
+    _stamp_prompt_anchors(turns, [(None, ms) for ms in meta.get("prompts") or ()])
     return turns, meta
 
 
@@ -5238,6 +5586,280 @@ def _qwen_code_sessions() -> Dict[str, Dict[str, Any]]:
 
 
 # ======================================================================
+# minimax sessions
+# ======================================================================
+# MiniMax Code (mcode) keeps one dated directory per session: an append-only
+# messages.jsonl beside a manifest.json that names the session. Turns are
+# MiniMaxCodeParser's own assistant rows (_entry_from_row), folded across
+# files by message_id the way its _parse_all folds them, so the Sessions tab
+# and Overview price and date the same calls.
+#
+# Timing. Each row is appended when its message completes, but an assistant
+# row's message.timestamp is stamped when the call *started* (the user row
+# before it is typically ~100 ms earlier). The turn keeps that start, so it
+# buckets on the same day as its Overview entry, and carries the finish as
+# _done_ms: the toolResult row that follows it (stamped as the tool returns),
+# or, for the transcript's final row, the file's mtime -- the moment that row
+# was appended. A final answer followed by another prompt has no recorded
+# finish and falls back to the gap rule.
+
+# The harness writes the session's cwd into its system prompt and nowhere
+# else on disk; llm-call.json is the request capture that carries it.
+_MINIMAX_WORKDIR_RE = re.compile(r"working directory: ([^\r\n]+)")
+# Beside each transcript: the session id is the manifest's, the project comes
+# from the captured system prompt. Either can change without a transcript
+# append, so both are part of the source signature.
+_MINIMAX_META_FILES = ("manifest.json", "llm-call.json")
+
+
+def _minimax_session_signatures() -> tuple[tuple[str, int, int], ...]:
+    """MiniMaxCodeParser._file_signatures' transcripts, each followed by the
+    metadata files of its session dir that exist."""
+    signatures: list[tuple[str, int, int]] = []
+    for path in clientpaths.minimax_code_session_files():
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        signatures.append((str(path), int(st.st_mtime_ns), int(st.st_size)))
+        for name in _MINIMAX_META_FILES:
+            meta_path = path.parent / name
+            try:
+                meta_st = meta_path.stat()
+            except OSError:
+                continue
+            signatures.append((str(meta_path), int(meta_st.st_mtime_ns), int(meta_st.st_size)))
+    return tuple(signatures)
+
+
+@lru_cache(maxsize=1024)
+def _minimax_session_meta(session_dir: str, _meta_sig: tuple = ()) -> Dict[str, str]:
+    """Session id (manifest) and cwd (system prompt) from beside the transcript.
+
+    Keyed on the metadata files' signature, so a rewrite is picked up without a
+    transcript append; callers copy the result rather than mutate it.
+    """
+    directory = Path(session_dir)
+    session_id = ""
+    try:
+        manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        manifest = None
+    if isinstance(manifest, dict):
+        session_id = str(manifest.get("sessionId") or "").strip()
+    cwd = ""
+    # Search the decoded prompt: in the raw JSON a Windows path's backslashes
+    # are escaped, and a pattern stopping at them would read "C:".
+    try:
+        capture = json.loads((directory / "llm-call.json").read_text(encoding="utf-8", errors="replace"))
+    except (OSError, ValueError):
+        capture = None
+    system_prompt = capture.get("systemPrompt") if isinstance(capture, dict) else None
+    if isinstance(system_prompt, str):
+        match = _MINIMAX_WORKDIR_RE.search(system_prompt)
+        if match:
+            cwd = match.group(1).strip()
+    return {"session_id": session_id or directory.name, "cwd": cwd}
+
+
+def _minimax_prompt_text(message: Dict[str, Any]) -> str:
+    """The user's own words: ``canonicalTextRange`` over the joined text blocks.
+
+    The harness prepends system reminders to the prompt's text and records
+    where the typed prompt sits inside it; without the range the preview
+    would be the reminder.
+    """
+    content = message.get("content")
+    texts = (
+        [block.get("text") for block in content if isinstance(block, dict) and block.get("type") == "text"]
+        if isinstance(content, list)
+        else []
+    )
+    joined = "".join(text for text in texts if isinstance(text, str))
+    span = message.get("canonicalTextRange")
+    if isinstance(span, dict):
+        start, end = _to_int(span.get("startOffset")), _to_int(span.get("endOffset"))
+        # mcode is a Node app, so the offsets index UTF-16 code units: an
+        # emoji counts twice. Identical to code points for BMP-only text.
+        # surrogatepass: JSON.stringify writes a string cut mid-emoji as a
+        # lone surrogate escape, which json.loads keeps and the strict codec
+        # refuses; the decode below then drops the stray half.
+        units = joined.encode("utf-16-le", "surrogatepass")
+        if 0 <= start < end <= len(units) // 2:
+            return units[2 * start : 2 * end].decode("utf-16-le", errors="ignore").strip()
+    return _message_text_preview(message)
+
+
+@_cached_session_parser()
+def _parse_minimax_session_file(
+    path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple = ()
+) -> Optional[tuple[list[Dict[str, Any]], Dict[str, str]]]:
+    """One messages.jsonl -> (turns, meta). Raises _SessionFileUnavailable on
+    open failure so a locked file is retried rather than cached empty."""
+    session_path = Path(path_str)
+    parser = MiniMaxCodeParser(_PRICING_DB)
+    # Overview's pass already warns once when the buckets stop being disjoint;
+    # a second warning per transcript here would only repeat it.
+    parser._drift_warned = True
+    turns: list[Dict[str, Any]] = []
+    prompts: list[tuple[Any, Optional[int]]] = []
+    preview = ""
+    # The newest assistant turn, until the row after it says when it finished.
+    pending: Optional[Dict[str, Any]] = None
+    try:
+        handle = session_path.open("r", encoding="utf-8")
+    except OSError as exc:
+        raise _SessionFileUnavailable(path_str) from exc
+    with handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(record, dict):
+                continue
+            message = record.get("message")
+            if not isinstance(message, dict):
+                continue
+            role = message.get("role")
+            stamp = _to_int(message.get("timestamp"))
+            if pending is not None:
+                if role == "toolResult" and stamp > pending["timestamp_ms"]:
+                    pending["_done_ms"] = stamp
+                pending = None
+            if role == "user":
+                if stamp > 0:
+                    prompts.append((None, stamp))
+                if not preview:
+                    preview = _minimax_prompt_text(message)
+                continue
+            if role != "assistant":
+                continue
+            entry = parser._entry_from_row(record)
+            if entry is None:
+                continue
+            input_t = int(entry["input"])
+            cache_w = int(entry["cacheWrite"])
+            turn = _build_turn(
+                turn_index=len(turns) + 1,
+                timestamp_ms=int(entry["timestamp"]),
+                model=str(entry["model"]),
+                tokens_in=input_t + cache_w,
+                tokens_cache=int(entry["cacheRead"]),
+                tokens_out=int(entry["output"]),
+                tokens_reasoning=0,
+                bill=_billing_record(
+                    str(entry["model"]),
+                    "split-cache-write",
+                    input_tokens=input_t,
+                    output_tokens=int(entry["output"]),
+                    cache_read=int(entry["cacheRead"]),
+                    cache_write=cache_w,
+                ),
+            )
+            if entry["entry_id"]:
+                turn["_event_key"] = entry["entry_id"]
+            turns.append(turn)
+            pending = turn
+    if pending is not None:
+        # The transcript ends on this call, so the file was last written when
+        # it finished. Bounded by the idle cap: a later touch of the file (a
+        # copy, a sync) must not stretch the call by hours.
+        finished_ms = int(_mtime_ns) // 1_000_000
+        if 0 < finished_ms - pending["timestamp_ms"] <= active_gap_cap_ms():
+            pending["_done_ms"] = finished_ms
+    if not turns:
+        return None
+    _stamp_prompt_anchors(turns, prompts)
+    return turns, {"preview": preview}
+
+
+@_cached_session_aggregate()
+def _load_minimax_sessions(
+    signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = ()
+) -> Dict[str, Dict[str, Any]]:
+    # One winner per message_id across every transcript, earliest timestamp,
+    # ties to the first file in sorted-path order: MiniMaxCodeParser._parse_all's
+    # fold, so a copied fork row is owned by the same session on both surfaces.
+    winners: Dict[str, tuple] = {}
+    anonymous: list[tuple] = []
+    transient_miss = False
+    transcripts: list[tuple[str, int, int]] = []
+    meta_sigs: Dict[str, list[tuple[str, int, int]]] = {}
+    for entry in signature:
+        entry_path = Path(entry[0])
+        if entry_path.name in _MINIMAX_META_FILES:
+            meta_sigs.setdefault(str(entry_path.parent), []).append(tuple(entry))
+        else:
+            transcripts.append(entry)
+    for path_str, mtime_ns, size in transcripts:
+        try:
+            parsed = _parse_session_file(
+                _parse_minimax_session_file, path_str, mtime_ns, size, pricing_sig
+            )
+        except _SessionFileUnavailable:
+            transient_miss = True
+            continue
+        if not parsed:
+            continue
+        turns, file_meta = parsed
+        session_dir = str(Path(path_str).parent)
+        # One dict per transcript: the grouping below keys a file by its
+        # meta's identity.
+        meta = {
+            **_minimax_session_meta(session_dir, tuple(meta_sigs.get(session_dir, ()))),
+            "preview": file_meta.get("preview") or "",
+        }
+        for turn in turns:
+            pair = (turn, meta)
+            event_key = str(turn.get("_event_key") or "")
+            if not event_key:
+                anonymous.append(pair)
+                continue
+            prev = winners.get(event_key)
+            if prev is None or int(turn["timestamp_ms"]) < int(prev[0]["timestamp_ms"]):
+                winners[event_key] = pair
+
+    per_file: Dict[str, Dict[int, Dict[str, Any]]] = {}
+    for turn, meta in list(winners.values()) + anonymous:
+        session_id = str(meta.get("session_id") or "unknown")
+        files = per_file.setdefault(session_id, {})
+        file_raw = files.get(id(meta))
+        if file_raw is None:
+            project = _project_from_repo_or_path(None, meta.get("cwd") or None)
+            preview = _clean_display_name(meta.get("preview"))
+            file_raw = files[id(meta)] = {
+                "tool": "minimax",
+                "session_id": session_id,
+                "display_name": preview or _fallback_display_name(session_id, project),
+                "project": project,
+                "turns": [],
+            }
+        file_raw["turns"].append(turn)
+
+    sessions: Dict[str, Dict[str, Any]] = {}
+    for session_id, files in per_file.items():
+        raw: Optional[Dict[str, Any]] = None
+        for file_raw in files.values():
+            file_raw["turns"].sort(key=lambda item: int(item.get("timestamp_ms", 0) or 0))
+            for turn_index, turn in enumerate(file_raw["turns"], start=1):
+                turn["turn_index"] = turn_index
+            raw = file_raw if raw is None else _merge_raw_session(raw, file_raw)
+        if raw is not None:
+            sessions[session_id] = raw
+    if transient_miss:
+        raise _PartialSessionView(sessions)
+    return sessions
+
+
+def _minimax_sessions() -> Dict[str, Dict[str, Any]]:
+    return _load_minimax_sessions(_minimax_session_signatures(), _pricing_signature())
+
+
+# ======================================================================
 # openclaw sessions
 # ======================================================================
 # OpenClaw is the odd one: it shares Overview's parse through the source's own
@@ -5302,6 +5924,9 @@ def build_openclaw_sessions(
         entry_id = str(row.get("entry_id") or "")
         if entry_id:
             turn["_event_key"] = entry_id
+        done_ms = _to_int(row.get("done_ms"))
+        if done_ms > turn["timestamp_ms"]:
+            turn["_done_ms"] = done_ms
         per_session.setdefault(str(meta.get("session_id") or ""), []).append(
             (turn, meta)
         )
@@ -5341,12 +5966,18 @@ def build_openclaw_sessions(
                 per_file[id(meta)] = file_raw
             file_raw["turns"].append(turn)
         raw: Optional[Dict[str, Any]] = None
-        for file_raw in per_file.values():
+        metas = {id(meta): meta for _, meta in pairs}
+        for meta_id, file_raw in per_file.items():
             file_raw["turns"].sort(
                 key=lambda item: int(item.get("timestamp_ms", 0) or 0)
             )
             for turn_index, turn in enumerate(file_raw["turns"], start=1):
                 turn["turn_index"] = turn_index
+            # A file's prompts time only that file's turns.
+            _stamp_prompt_anchors(
+                file_raw["turns"],
+                [(None, ms) for ms in metas[meta_id].get("prompts") or ()],
+            )
             raw = file_raw if raw is None else _merge_raw_session(raw, file_raw)
         if raw is not None:
             sessions[session_id] = raw
@@ -5448,6 +6079,49 @@ def _parse_qoder_cli_session_file(
         return qoder_cli_file_candidates(Path(path_str), window, dict(windows_sig))
     except OSError as exc:
         raise _SessionFileUnavailable(path_str) from exc
+
+
+@_cached_session_parser()
+def _qoder_cli_prompt_times(path_str: str, _mtime_ns: int, _size: int) -> tuple[str, tuple[int, ...]]:
+    """(session id, prompt instants) for one stream file.
+
+    Separate from the candidate builder, which keeps billing records only: a
+    transcript's ``user`` records (tool results excluded) and a segment's
+    ``turn.started`` events are where each turn's work began. The session id
+    is derived from the path exactly as the candidates derive it.
+    """
+    path = Path(path_str)
+    is_segment = "segments" in path.parts
+    session_id = path.parent.parent.name if is_segment else path.stem
+    marker = '"turn.started"' if is_segment else '"user"'
+    times: list[int] = []
+    try:
+        handle = open(path, "r", encoding="utf-8", errors="replace")
+    except OSError as exc:
+        raise _SessionFileUnavailable(path_str) from exc
+    with handle:
+        for line in handle:
+            if marker not in line:
+                continue
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(obj, dict):
+                continue
+            if is_segment:
+                if obj.get("type") == "turn.started":
+                    stamp = _parse_iso_to_ms(obj.get("ts"))
+                else:
+                    continue
+            else:
+                message = obj.get("message") if isinstance(obj.get("message"), dict) else {}
+                if obj.get("type") != "user" or _claude_is_tool_result(message):
+                    continue
+                stamp = _parse_iso_to_ms(obj.get("timestamp"))
+            if stamp:
+                times.append(int(stamp))
+    return session_id, tuple(times)
 
 
 @_cached_session_aggregate()
@@ -5555,11 +6229,20 @@ def _load_qoder_cli_sessions(
             _PRICING_DB, "qoder_cli", rid, None, scand, effective_rate
         ))
 
+    prompts_by_session: Dict[str, list[tuple[Any, Optional[int]]]] = {}
+    for path_str, mtime_ns, size in file_sig:
+        found = _qoder_cli_prompt_times(path_str, mtime_ns, size)
+        if found is None:
+            continue
+        prompt_session, times = found
+        prompts_by_session.setdefault(prompt_session, []).extend((None, ms) for ms in times)
+
     sessions: Dict[str, Dict[str, Any]] = {}
     for session_id, turns in per_session.items():
         turns.sort(key=lambda item: int(item.get("timestamp_ms", 0) or 0))
         for turn_index, turn in enumerate(turns, start=1):
             turn["turn_index"] = turn_index
+        _stamp_prompt_anchors(turns, prompts_by_session.get(session_id, ()))
         sessions[session_id] = {
             "tool": "qoder_cli",
             "session_id": session_id,
@@ -6304,7 +6987,10 @@ def _parse_cline_message_file(
     session with no assistant model call; classify so the warning is
     true in the first case and silent in the second.
     """
-    rows = parse_cline_message_file(path_str, unavailable=_SessionFileUnavailable)
+    prompts: list[int] = []
+    rows = parse_cline_message_file(
+        path_str, unavailable=_SessionFileUnavailable, prompts_out=prompts
+    )
     if not rows and _size > 0:
         try:
             with open(path_str, "r", encoding="utf-8") as f:
@@ -6321,8 +7007,12 @@ def _parse_cline_message_file(
         if stem.startswith("agent_") and stem.endswith(".messages")
         else None
     )
+    # The file's prompts ride on each of its rows: the global fold below can
+    # move a row's ownership between files, but a prompt only ever times the
+    # stream of the file it was written in.
+    prompt_times = tuple(prompts)
     return [
-        {**row, "_session_dir": path.parent.name, "_stream_id": stream_id}
+        {**row, "_session_dir": path.parent.name, "_stream_id": stream_id, "_prompts": prompt_times}
         for row in rows
     ]
 
@@ -6454,6 +7144,12 @@ def _load_cline_sessions(
         spec_by_dir.setdefault(d, []).append((row["ts"], stream_id, row))
     for d, stream_id, row in anonymous:
         spec_by_dir.setdefault(d, []).append((row["ts"], stream_id, row))
+    # directory -> (stream, prompt) pairs from the files its turns came from.
+    prompts_by_dir: Dict[str, set[tuple[Optional[str], int]]] = {}
+    for d, stream_id, row in [*by_id.values(), *anonymous]:
+        prompts_by_dir.setdefault(d, set()).update(
+            (stream_id or None, ms) for ms in row.get("_prompts") or ()
+        )
     if not spec_by_dir:
         if transient_miss:
             raise _PartialSessionView({})
@@ -6492,6 +7188,7 @@ def _load_cline_sessions(
             if stream_id:
                 turn["_stream_id"] = stream_id
             turns.append(turn)
+        _stamp_prompt_anchors(turns, prompts_by_dir.get(session_dir, ()))
 
         info = meta.get(session_dir) or {}
         title = info.get("title")
@@ -6553,6 +7250,8 @@ def session_source_signature(tool: str) -> tuple:
         return workbuddy_file_signatures(clientpaths.workbuddy_roots())
     if tool == "qwen_code":
         return qwen_file_signatures(clientpaths.qwen_runtime_base())
+    if tool == "minimax":
+        return _minimax_session_signatures()
     if tool == "qoder_cli":
         roots = clientpaths.qoder_cli_roots()
         return (qoder_cli_file_signatures(roots), qoder_cli_runtime_signature(roots))
@@ -6641,6 +7340,8 @@ def _raw_sessions_for_tool(
             return _qoder_sessions(since_ms=since_ms, until_ms=until_ms)
         if key == "qwen_code":
             return _qwen_code_sessions()
+        if key == "minimax":
+            return _minimax_sessions()
         if key == "openclaw":
             return _openclaw_sessions()
         if key == "qoder_cli":
@@ -6951,10 +7652,11 @@ def get_sessions_data(
             active_intervals.extend(summary.pop("_active_intervals", []))
             sessions.append(summary)
         else:
-            # Activity-only session (ZCode: no token turns in the window,
-            # but measured work from zero-token or boundary turns): nothing
-            # to list, but the work still counts in the tool's active time.
-            act = raw.get("_activity_intervals") or []
+            # Activity-only session (no token turns in the window, but
+            # measured work: ZCode's zero-token or boundary turns, a Hermes
+            # session's later days): nothing to list, but the work still
+            # counts in the tool's active time.
+            act = _activity_only_intervals(raw, since_ms, until_ms)
             active_intervals.extend(act)
             activity_agent_ms += sum(end - start for start, end in act)
 
@@ -6980,8 +7682,9 @@ def get_sessions_data(
             + activity_agent_ms,
             "span_ms": sum(int(row.get("span_ms", 0) or 0) for row in sessions),
             "active_gap_cap_ms": active_gap_cap_ms(),
-            # Inter-event gaps cannot separate a short pause from work, long single
-            # operations are truncated at the cap, and a lone event measures nothing.
+            # Inter-event gaps cannot separate a short pause from work, and long
+            # single operations are truncated at the cap. A stream's first event is
+            # timed from its prompt where the source logs one (_prompt_ms).
             "active_time_estimated": True,
             "active_time_method": "capped-inter-event-gap",
         },
@@ -7018,9 +7721,10 @@ def _active_time_window(
                 intervals.extend(summary.get("_active_intervals", []))
                 agent_ms += int(summary.get("active_ms_sum", 0) or 0)
             else:
-                # Activity-only session (ZCode): no token events to
-                # summarize, but the measured work still counts.
-                act = raw.get("_activity_intervals") or []
+                # Activity-only session (ZCode, a Hermes session's later
+                # days): no token events to summarize, but the measured work
+                # still counts.
+                act = _activity_only_intervals(raw, since_ms, until_ms)
                 intervals.extend(act)
                 agent_ms += sum(end - start for start, end in act)
         return intervals, agent_ms, session_count

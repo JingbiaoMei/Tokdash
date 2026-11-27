@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.7.5 - 2026-11-28
+
+### Added
+
+- MiniMax Code has a Sessions panel, so its session count and agent time on the Overview tools table are filled in instead of reading "—". It reads the transcripts the Overview reads: one turn per billed call, with the same `message_id` fold, and forked rows belong to the earliest session directory. A session is keyed by its manifest `sessionId`, named by the prompt the user typed (`canonicalTextRange`, read as the UTF-16 offsets a Node app writes), and filed under the working directory from `llm-call.json`. A call is timed to the next tool result, and the last call to the transcript's modification time when that is within the idle cap. (#299)
+- Pricing DB 2.0.44 adds `mimo-v2.6-flash-mopd`. Existing model rates are unchanged. (#298)
+
+### Fixed
+
+- Agent time now counts a session's first turn. It is the sum of capped gaps between a session's token events, so the first event had nothing before it to measure from: every first turn counted as zero, and every one-turn session read "—". Each stream's earliest turn is now timed from the prompt that started it, where the log records one: Claude Code (per subagent stream, tool results excluded), Codex, Kimi, DeepSeek Harness, Pi, omp, OpenCode, Kilo Code, Mimo, Antigravity CLI, Cline, OpenClaw, Qoder CLI, Grok, Hermes, WorkBuddy and Qwen Code. Sources that stamp a call when it starts (OpenCode, Kilo Code, Mimo, OpenClaw) are timed to its finish. On a local corpus, Claude Code, Codex and Kimi totals moved by under 1%, since only each session's first turn changes. Stored Codex, Claude Code, Kimi and DeepSeek Harness sessions are reparsed once after the update. (#299)
+- Hermes bills per-model totals stamped at each group's first message, so a later day of work in the same session counted no agent time. Its per-message rows now count as activity too, and a day that holds that activity but none of the session's billed turns still counts it, so per-day agent time adds up to the range's. (#299)
+- Antigravity CLI steps without a timestamp of their own fall back to the step-ref stamp, as the Overview parser does, instead of dropping the session from the Sessions tab. (#299)
+- In `tokdash tui`, a pane shown after the terminal changed size while it was hidden is fitted to the frame again. Speed and Stats could run under the status strip, which covered their last row. (#297)
+
+### Changed
+
+- Companion CI builds its arm64 macOS job on `macos-15`, because GitHub retired the `macos-14` image. (#296)
+
 ## 2.7.4 - 2026-11-22
 
 ### Added

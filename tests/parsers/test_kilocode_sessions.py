@@ -497,3 +497,38 @@ def test_cache_invalidates_on_a_write_that_only_moves_the_wal(monkeypatch, tmp_p
         assert len(_kilocode_sessions()["ses_a"]["turns"]) == 2
     finally:
         conn.close()
+
+
+def test_one_turn_session_runs_from_prompt_to_completion(monkeypatch, tmp_path):
+    """Rows are stamped at creation; time.completed is the finish, and the user
+    row before the reply is where the work began (shared OpenCode loader)."""
+    _patch_env(monkeypatch, tmp_path)
+    reply = _assistant(input=10, output=4, cache={"read": 0, "write": 0})
+    reply["time"] = {"created": BASE + 2_600, "completed": BASE + 7_400}
+    _make_db(
+        _kilo_root(tmp_path) / "kilo.db",
+        projects=[_proj()],
+        sess=[_sess("ses_one")],
+        messages=[
+            _msg("u1", "ses_one", BASE, _user()),
+            _msg("m1", "ses_one", BASE + 2_600, reply),
+        ],
+    )
+    row = get_sessions_data("kilocode", "all")["sessions"][0]
+    assert row["token_events"] == 1
+    assert row["active_ms"] == 7_400
+    # The turn keeps its creation stamp, the instant Overview buckets on.
+    assert row["started_at"] == sessions._ms_to_iso(BASE + 2_600)
+
+
+def test_reply_without_a_stored_prompt_is_timed_from_its_creation(monkeypatch, tmp_path):
+    _patch_env(monkeypatch, tmp_path)
+    reply = _assistant(input=10, output=4, cache={"read": 0, "write": 0})
+    reply["time"] = {"created": BASE, "completed": BASE + 4_000}
+    _make_db(
+        _kilo_root(tmp_path) / "kilo.db",
+        projects=[_proj()],
+        sess=[_sess("ses_lone")],
+        messages=[_msg("m1", "ses_lone", BASE, reply)],
+    )
+    assert get_sessions_data("kilocode", "all")["sessions"][0]["active_ms"] == 4_000

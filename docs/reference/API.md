@@ -1025,8 +1025,12 @@ separate from `/api/usage` because it reads every supported session source.
 | `timestamp` | string | ISO 8601 time the payload was computed |
 
 Both figures are estimates: each gap between a stream's token events counts up to
-the idle cap, so a short pause reads the same as work, one long operation is
-truncated at the cap, and a session with a single event measures zero. The same
+the idle cap, so a short pause reads the same as work and one long operation is
+truncated at the cap. Nothing precedes a stream's first event, so it is timed
+from the user prompt that started it, capped the same way, wherever the source
+logs that prompt; a source that logs none still measures a one-event session as
+zero. Sources that stamp a turn when its call started (OpenCode, Kilo Code, Mimo,
+OpenClaw, MiniMax Code) are timed to the instant the call finished. The same
 fields appear per tool in `/api/sessions` under `summary`, and per session in
 `sessions[]`, where the union is over that session's agent streams only.
 

@@ -488,3 +488,21 @@ def test_frame_loss_is_reported_once_across_both_surfaces(_isolated_dsh_home, ca
 
     assert _overview_tokens_in() == _sessions_tokens_in() == 400
     assert len(_dsh_warnings(caplog, "frames-lost")) == 1
+
+
+def test_one_turn_session_is_timed_from_its_prompt(_isolated_dsh_home):
+    """The user/message that started the turn anchors it, so a lone turn is not zero."""
+    home = _isolated_dsh_home
+    _write_session(
+        home,
+        "session-one",
+        [
+            _header("session-one"),
+            {"type": "user/message", "seq": 1, "time": DAY1_MS - 2500,
+             "data": {"content": [{"type": "text", "text": "hi"}], "source": {"kind": "user"}}},
+            _assistant_message(2, 1, 1, {"inputTokens": 100, "outputTokens": 12}, DAY1_MS),
+        ],
+    )
+    row = get_sessions_data("dsh", "all")["sessions"][0]
+    assert row["token_events"] == 1
+    assert row["active_ms"] == 2500

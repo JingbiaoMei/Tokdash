@@ -376,7 +376,7 @@ def test_the_parsers_that_gained_timing_declare_a_version_bump():
     from tokdash.sessions import _SESSION_FILE_PARSER_VERSIONS
     from tokdash.sources.coding_tools import KimiParser, OmpParser
 
-    assert _SESSION_FILE_PARSER_VERSIONS["_parse_kimi_session_file"] == 3
+    assert _SESSION_FILE_PARSER_VERSIONS["_parse_kimi_session_file"] == 4
     assert KimiParser.persistent_parser_version == 4
     assert OmpParser.persistent_parser_version == 3
     assert KimiParser._tracks_output_speed is True

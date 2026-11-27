@@ -16,7 +16,12 @@ from pathlib import Path
 
 import pytest
 
-from test_antigravity_cli_parser import _create_antigravity_db, _encode_gen_metadata_blob
+from test_antigravity_cli_parser import (
+    _create_antigravity_db,
+    _encode_gen_metadata_blob,
+    _encode_gen_metadata_blob_without_timestamp,
+    _encode_step_metadata,
+)
 
 from tokdash import clientpaths
 from tokdash import sessions
@@ -611,3 +616,30 @@ def test_api_surface(monkeypatch, tmp_path):
     assert "timestamp" in turns[0] and "timestamp_ms" not in turns[0]
     with pytest.raises(FileNotFoundError):
         get_session_detail("antigravity_cli", "does-not-exist")
+
+
+def test_rows_without_a_timestamp_are_dated_from_their_steps(monkeypatch, tmp_path):
+    """agy 1.2.x writes no 1.9.4 stamp. The session turn takes the parser's
+    step-time date (it sat at epoch 0, outside every window, before), and the
+    conversation's first step -- the user's input -- anchors the first turn."""
+    conv_dir, _summaries = _patch_antigravity(monkeypatch, tmp_path)
+    db_path = conv_dir / "conv-steps.db"
+    _create_antigravity_db(db_path, [
+        (0, _encode_gen_metadata_blob_without_timestamp(
+            model=MODEL_A, input_tokens=13_542, output_tokens=466, step_refs=[2])),
+    ])
+    conn = sqlite3.connect(str(db_path))
+    with conn:
+        conn.execute("CREATE TABLE steps(idx INTEGER, metadata BLOB)")
+        conn.executemany("INSERT INTO steps VALUES (?, ?)", [
+            (0, sqlite3.Binary(_encode_step_metadata(1_790_399_154, 700_000_000))),
+            (2, sqlite3.Binary(_encode_step_metadata(1_790_399_157, 764_000_000))),
+        ])
+    conn.close()
+
+    row = get_sessions_data("antigravity_cli", "all")["sessions"][0]
+
+    assert row["started_at"] == sessions._ms_to_iso(1_790_399_157_764)
+    assert row["active_ms"] == 1_790_399_157_764 - 1_790_399_154_700
+    entries = coding_tools.AntigravityCLIParser(PricingDatabase()).collect(None, None)
+    assert [e["timestamp"] for e in entries] == [1_790_399_157_764]

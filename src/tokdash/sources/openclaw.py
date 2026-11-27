@@ -414,6 +414,9 @@ def _parse_corpus(files: list[str], signature: tuple) -> SessionCorpus:
             "cwd": "",
             "agent": _agent_from_path(filepath),
             "preview": "",
+            # User-prompt instants (inner stamp, as rows use): the Sessions
+            # harness times a session's first turn from the one before it.
+            "prompts": [],
         }
         try:
             # One collection mode, deliberately: always through the raising
@@ -445,6 +448,15 @@ def _parse_corpus(files: list[str], signature: tuple) -> SessionCorpus:
             if role == "user":
                 if not file_meta["preview"]:
                     file_meta["preview"] = _user_preview(message)[:_PREVIEW_MAX_CHARS]
+                # Not _resolve_usage_datetime: its file-mtime fallback is no
+                # prompt instant, and would stat the file per message.
+                prompt_dt = _parse_message_datetime(message.get("timestamp")) or _parse_message_datetime(
+                    entry.get("timestamp")
+                )
+                if prompt_dt is not None:
+                    if prompt_dt.tzinfo is None:
+                        prompt_dt = prompt_dt.replace(tzinfo=timezone.utc)
+                    file_meta["prompts"].append(int(prompt_dt.timestamp() * 1000))
                 continue
             if role != "assistant":
                 continue
@@ -476,6 +488,13 @@ def _parse_corpus(files: list[str], signature: tuple) -> SessionCorpus:
 
             model = f"{provider}/{model_id}" if provider not in (None, "", "unknown") else str(model_id)
 
+            # msg_dt is the inner stamp, written when the reply started; the
+            # entry's own stamp is when the finished message was appended.
+            # Active time measures to the finish; Overview keeps msg_dt.
+            done_dt = _parse_message_datetime(entry.get("timestamp"))
+            if done_dt is not None and done_dt.tzinfo is None:
+                done_dt = done_dt.replace(tzinfo=timezone.utc)
+
             out.append(
                 {
                     "msg_dt": msg_dt,
@@ -487,6 +506,7 @@ def _parse_corpus(files: list[str], signature: tuple) -> SessionCorpus:
                     "payload_cost": _usage_cost_from_payload(usage),
                     "entry_id": f"openclaw:{entry_id}" if entry_id else f"openclaw:{filepath}:{len(out)}",
                     "file": filepath,
+                    "done_ms": int(done_dt.timestamp() * 1000) if done_dt is not None else None,
                 }
             )
 

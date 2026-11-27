@@ -546,20 +546,33 @@ def test_a_user_row_after_the_window_is_not_a_token_event(tmp_path):
         assert _summarize_session(loaded, since_ms=since, until_ms=until)["active_ms"] == 0
 
 
-def test_a_user_row_before_the_window_is_not_a_token_event(tmp_path):
-    """Nothing precedes the window but a user turn, so nothing leads into it."""
+@pytest.mark.parametrize("tool", ["opencode", "mimo"])
+def test_a_user_row_before_the_window_is_a_prompt_not_a_token_event(tmp_path, tool):
+    """Only a user turn precedes the window: it is the prompt, not a token event.
+
+    Neither loader may report it as the event leading into the window, but both
+    time the first turn from it, clipped at the window's start. The windowed
+    query never returns that row, so the loader without JSON1 has to pick it up
+    on its walk outwards from the edge.
+    """
     since, until = 1_000_000, 2_000_000
     db_path = _opencode_db(
         tmp_path / "user-before.db",
         [(since - 1_000, "user"), (since + 30_000, "assistant")],
     )
 
-    scalar, raw = _both_loaders(db_path, since, until)
+    if tool == "opencode":
+        scalar, raw = _both_loaders(db_path, since, until)
+    else:
+        scalar, raw = (
+            loader(db_path, since_ms=since, until_ms=until)["s1"]
+            for loader in (sessions._load_mimo_sessions_scalar, sessions._load_mimo_sessions_raw_json)
+        )
 
     assert "_prior_event_ms" not in scalar
     assert "_prior_event_ms" not in raw
     for loaded in (scalar, raw):
-        assert _summarize_session(loaded, since_ms=since, until_ms=until)["active_ms"] == 0
+        assert _summarize_session(loaded, since_ms=since, until_ms=until)["active_ms"] == 30_000
 
 
 def test_a_user_row_does_not_shadow_the_token_event_behind_it(tmp_path):
@@ -608,3 +621,109 @@ def test_zcode_activity_events_and_boundary_work():
     intervals = _session_active_intervals(raw, 5 * MINUTE, None, None)
     assert (BASE_MS + MINUTE, BASE_MS + 2 * MINUTE) in intervals
     assert (BASE_MS + MINUTE, BASE_MS + 5 * MINUTE) in intervals
+
+
+# --- first-turn anchors (_prompt_ms) and start-stamped turns (_done_ms) -------
+
+
+def test_prompt_anchor_times_a_one_turn_session():
+    """Nothing precedes a lone turn; the prompt that started it does."""
+    raw = _raw("s", [30_000])
+    raw["turns"][0]["_prompt_ms"] = BASE_MS
+
+    assert _session_active_intervals(raw, 5 * MINUTE) == [(BASE_MS, BASE_MS + 30_000)]
+    assert _summarize_session(raw)["active_ms"] == 30_000
+
+
+def test_prompt_anchor_is_capped_like_any_gap():
+    raw = _raw("s", [HOUR])
+    raw["turns"][0]["_prompt_ms"] = BASE_MS
+
+    assert _session_active_intervals(raw, 5 * MINUTE) == [
+        (BASE_MS + HOUR - 5 * MINUTE, BASE_MS + HOUR)
+    ]
+
+
+def test_only_the_first_turns_prompt_is_read():
+    """Later turns keep the capped gap from the turn before them."""
+    raw = _raw("s", [MINUTE, 20 * MINUTE])
+    raw["turns"][0]["_prompt_ms"] = BASE_MS
+    raw["turns"][1]["_prompt_ms"] = BASE_MS + 19 * MINUTE
+
+    assert _session_active_intervals(raw, 5 * MINUTE) == [
+        (BASE_MS, BASE_MS + MINUTE),
+        (BASE_MS + 15 * MINUTE, BASE_MS + 20 * MINUTE),
+    ]
+
+
+def test_prompt_after_an_earlier_event_is_not_an_anchor():
+    """An activity event before the prompt makes the prompt mid-stream."""
+    raw = _raw("s", [MINUTE])
+    raw["turns"][0]["_prompt_ms"] = BASE_MS + 30_000
+    raw["_activity_events"] = [(BASE_MS, None)]
+
+    assert _session_active_intervals(raw, 5 * MINUTE) == [(BASE_MS, BASE_MS + MINUTE)]
+
+
+def test_boundary_event_wins_over_the_prompt_anchor():
+    raw = _raw("s", [MINUTE])
+    raw["turns"][0]["_prompt_ms"] = BASE_MS
+    raw["_prior_event_ms"] = BASE_MS - MINUTE
+
+    assert _session_active_intervals(raw, 5 * MINUTE) == [(BASE_MS - MINUTE, BASE_MS + MINUTE)]
+
+
+def test_each_stream_is_anchored_by_its_own_prompt():
+    raw = _raw("s", [2 * MINUTE, 10 * MINUTE])
+    raw["turns"][0].update(_stream_id="main", _prompt_ms=BASE_MS)
+    raw["turns"][1].update(_stream_id="agent-1", _prompt_ms=BASE_MS + 9 * MINUTE)
+
+    assert sorted(_session_active_intervals(raw, 5 * MINUTE)) == [
+        (BASE_MS, BASE_MS + 2 * MINUTE),
+        (BASE_MS + 9 * MINUTE, BASE_MS + 10 * MINUTE),
+    ]
+
+
+def test_done_ms_is_the_event_instant_of_a_start_stamped_turn():
+    raw = _raw("s", [0])
+    raw["turns"][0].update(_done_ms=BASE_MS + 40_000, _prompt_ms=BASE_MS - 2_000)
+
+    assert _session_active_intervals(raw, 5 * MINUTE) == [(BASE_MS - 2_000, BASE_MS + 40_000)]
+    # The turn keeps its start for display and day bucketing.
+    assert _summarize_session(raw)["started_at"] == sessions._ms_to_iso(BASE_MS)
+
+
+def test_start_stamped_turn_without_a_prompt_is_timed_from_its_own_start():
+    raw = _raw("s", [0])
+    raw["turns"][0]["_done_ms"] = BASE_MS + 40_000
+
+    assert _session_active_intervals(raw, 5 * MINUTE) == [(BASE_MS, BASE_MS + 40_000)]
+
+
+def test_stamp_prompt_anchors_takes_the_latest_prompt_per_stream():
+    turns = [
+        {"timestamp_ms": 10, "_stream_id": "main"},
+        {"timestamp_ms": 11, "_stream_id": "main"},
+        {"timestamp_ms": 20, "_stream_id": "main"},
+        {"timestamp_ms": 15, "_stream_id": "sub"},
+    ]
+    sessions._stamp_prompt_anchors(
+        turns, [("main", 5), ("main", 8), ("sub", 12), ("main", 18), ("main", None)]
+    )
+
+    assert [turn.get("_prompt_ms") for turn in turns] == [8, None, 18, 12]
+
+
+def test_stamp_prompt_anchors_ignores_a_prompt_at_the_turn_instant():
+    turns = [{"timestamp_ms": 10}]
+    sessions._stamp_prompt_anchors(turns, [(None, 10)])
+
+    assert "_prompt_ms" not in turns[0]
+
+
+def test_public_turns_hide_the_timing_fields():
+    turn = dict(_turn(0), _prompt_ms=BASE_MS - 1, _done_ms=BASE_MS + 1)
+
+    public = sessions._public_turns([turn])[0]
+
+    assert "_prompt_ms" not in public and "_done_ms" not in public

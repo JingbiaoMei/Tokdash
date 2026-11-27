@@ -10,6 +10,7 @@ UUID with the same outer id.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -437,3 +438,29 @@ def test_parity_with_usage_parser(monkeypatch, tmp_path):
     assert totals3["cache"] == parser3["cacheRead"]
     assert totals3["output"] == parser3["output"]
     assert totals3["cost"] == pytest.approx(parser3["cost"], abs=1e-12)
+
+
+def test_one_turn_session_is_timed_from_its_prompt(monkeypatch, tmp_path):
+    """The user message before the turn anchors it (same clock: envelope stamps)."""
+    home = _fresh_home(tmp_path)
+    _home_env(monkeypatch, home)
+    _write_session_file(home, "one.jsonl", S1, "2026-08-22T10:00:00.000Z", [
+        _user_line("2026-08-22T10:00:01.000Z"),
+        _assistant_line("a1", "2026-08-22T10:00:04.500Z", _usage(100, 20)),
+    ])
+    row = get_sessions_data("omp", "all")["sessions"][0]
+    assert row["token_events"] == 1
+    assert row["active_ms"] == 3500
+
+
+def test_turn_with_no_user_prompt_is_timed_from_its_call_start(monkeypatch, tmp_path):
+    """A session opened by an injected message has no user row; the message's own
+    timestamp (the call's start) still anchors the envelope's finish."""
+    home = _fresh_home(tmp_path)
+    _home_env(monkeypatch, home)
+    start_ms = int(datetime(2026, 8, 22, 10, 0, 2, tzinfo=timezone.utc).timestamp() * 1000)
+    line = json.loads(_assistant_line("a1", "2026-08-22T10:00:15.000Z", _usage(100, 20)))
+    line["message"]["timestamp"] = start_ms
+    _write_session_file(home, "inj.jsonl", S2, "2026-08-22T10:00:00.000Z", [json.dumps(line)])
+    row = get_sessions_data("omp", "all")["sessions"][0]
+    assert row["active_ms"] == 13_000

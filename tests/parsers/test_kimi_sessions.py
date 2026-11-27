@@ -560,3 +560,33 @@ def test_legacy_kimi_sessions_are_a_single_stream(_isolated_kimi_roots):
 
     session = get_sessions_data("kimi", "all")["sessions"][0]
     assert session["active_ms"] == session["active_ms_sum"] == 60_000
+
+
+def test_each_agent_is_timed_from_its_own_prompt(_isolated_kimi_roots):
+    """turn.prompt anchors each wire file's first turn; main and subagent files
+    are separate streams with their own prompts."""
+    code_root, _legacy_root = _isolated_kimi_roots
+    _write_code_session(code_root, [
+        {"type": "turn.prompt", "agentId": "main", "time": CODE_TS_MS - 4_000, "input": "hi"},
+        _usage_record(100, 10, 0, 0, ts_ms=CODE_TS_MS),
+    ], agent="main")
+    _write_code_session(code_root, [
+        {"type": "turn.prompt", "agentId": "agent-2", "time": CODE_TS_MS + 1_000, "input": "sub"},
+        _usage_record(50, 5, 0, 0, ts_ms=CODE_TS_MS + 3_000),
+    ], agent="agent-2")
+
+    row = get_sessions_data("kimi", "all")["sessions"][0]
+
+    assert row["active_ms_sum"] == 4_000 + 2_000
+
+
+def test_legacy_turn_begin_anchors_the_first_turn(_isolated_kimi_roots):
+    _code_root, legacy_root = _isolated_kimi_roots
+    _write_legacy_session(legacy_root, [
+        {"timestamp": LEGACY_TS_S - 3, "message": {"type": "TurnBegin", "payload": {"user_input": "hi"}}},
+        _status_update(100, 10, 0, 0, "m1"),
+    ])
+
+    row = get_sessions_data("kimi", "all")["sessions"][0]
+
+    assert row["active_ms"] == 3_000

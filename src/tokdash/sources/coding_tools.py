@@ -1052,7 +1052,9 @@ def cline_message_file_signatures(data_dir: Path) -> tuple:
 
 
 def parse_cline_message_file(
-    path_str: str, unavailable: Optional[type[Exception]] = None
+    path_str: str,
+    unavailable: Optional[type[Exception]] = None,
+    prompts_out: Optional[List[int]] = None,
 ) -> List[Dict[str, Any]]:
     """Assistant model-call rows from one .messages.json file.
 
@@ -1063,6 +1065,10 @@ def parse_cline_message_file(
     failure (lock/AV/indexer) also yields [] unless ``unavailable`` gives
     an exception class, in which case it is raised so the caller can
     retry the file instead of memoizing an empty parse.
+
+    ``prompts_out``, when given, collects the ``ts`` of every user prompt in
+    the same pass (tool results, also role "user", are not prompts). The
+    Sessions harness times a stream's first turn from it.
     """
     try:
         with open(path_str, "r", encoding="utf-8") as f:
@@ -1079,7 +1085,18 @@ def parse_cline_message_file(
 
     out: List[Dict[str, Any]] = []
     for msg in messages:
-        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+        if not isinstance(msg, dict):
+            continue
+        if prompts_out is not None and msg.get("role") == "user":
+            content = msg.get("content")
+            tool_result_only = isinstance(content, list) and bool(content) and all(
+                isinstance(block, dict) and block.get("type") == "tool_result" for block in content
+            )
+            prompt_ts = BaseParser._i(msg.get("ts"))
+            if prompt_ts > 0 and not tool_result_only:
+                prompts_out.append(prompt_ts)
+            continue
+        if msg.get("role") != "assistant":
             continue
         metrics = msg.get("metrics")
         if not isinstance(metrics, dict):
@@ -2755,7 +2772,9 @@ def iter_grok_usage_rows(log_path: Path) -> Iterator[Dict[str, Any]]:
     global entry_id first-wins dedupe.
 
     Yields one dict per surviving row: sid, pid, loop_index, model,
-    timestamp_ms, input_tokens, cache_read, output, entry_id.
+    timestamp_ms, input_tokens, cache_read, output, entry_id, and
+    turn_start_ms (the row's timestamp less ``elapsed_since_turn_start_ms``,
+    or None when the row does not carry it).
     """
     model_by_pid: Dict[Any, str] = {}
     seen: set = set()
@@ -2804,7 +2823,9 @@ def iter_grok_usage_rows(log_path: Path) -> Iterator[Dict[str, Any]]:
                 if entry_id in seen:
                     continue
                 seen.add(entry_id)
+                elapsed = GrokParser._int(ctx.get("elapsed_since_turn_start_ms"))
                 yield {
+                    "turn_start_ms": timestamp - elapsed if 0 < elapsed < timestamp else None,
                     "sid": row.get("sid"),
                     "pid": pid,
                     "loop_index": loop_index,
@@ -7005,13 +7026,15 @@ def qwen_session_file(
     path: str, unavailable: Optional[type] = None, *, tail_slice: bool = False
 ) -> Tuple[List[Tuple[str, Dict[str, Any]]], Dict[str, Any]]:
     """One chat file -> (rows, meta) with rows = [(entry_id, row), ...] and
-    meta = {"session_id", "cwd", "preview"}.
+    meta = {"session_id", "cwd", "preview", "prompts"}.
 
     meta carries what the rows cannot: user records are not billable, so a
     rows-only reader cannot produce a display name, and per-file session
     identity is what the Sessions harness groups forked history by.
     session_id falls back to the file stem (the file name is the session id);
-    preview is the first type == "user" record's text.
+    preview is the first type == "user" record's text; prompts are every
+    such record's epoch-ms stamp (tool results are their own record type),
+    which the Sessions harness times a session's first turn from.
 
     ``unavailable`` is the caller's exception class (the
     parse_cline_message_file shape): this module must never name a
@@ -7028,12 +7051,13 @@ def qwen_session_file(
     session_id = ""
     cwd = ""
     preview = ""
+    prompts: List[int] = []
     try:
         handle = open(path, "r", encoding="utf-8")
     except OSError as exc:
         if unavailable is not None:
             raise unavailable(path) from exc
-        return [], {"session_id": Path(path).stem, "cwd": "", "preview": ""}
+        return [], {"session_id": Path(path).stem, "cwd": "", "preview": "", "prompts": []}
     try:
         with handle:
             for line in handle:
@@ -7054,8 +7078,19 @@ def qwen_session_file(
                     rec_cwd = rec.get("cwd")
                     if isinstance(rec_cwd, str) and rec_cwd.strip():
                         cwd = rec_cwd.strip()
-                if not preview and rec.get("type") == "user":
-                    preview = _qwen_user_text(rec)
+                if rec.get("type") == "user":
+                    if not preview:
+                        preview = _qwen_user_text(rec)
+                    ts_str = rec.get("timestamp")
+                    if isinstance(ts_str, str) and ts_str:
+                        try:
+                            prompt_dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                        except ValueError:
+                            prompt_dt = None
+                        if prompt_dt is not None:
+                            if prompt_dt.tzinfo is None:
+                                prompt_dt = prompt_dt.replace(tzinfo=timezone.utc)
+                            prompts.append(int(prompt_dt.timestamp() * 1000))
                 row_tuple = qwen_row_from_record(rec)
                 if association is not None:
                     association.observe(rec, row_tuple[1] if row_tuple else None)
@@ -7072,6 +7107,7 @@ def qwen_session_file(
         "session_id": session_id or Path(path).stem,
         "cwd": cwd,
         "preview": preview,
+        "prompts": prompts,
     }
 
 

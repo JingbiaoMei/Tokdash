@@ -44,7 +44,7 @@ function usageReportSpeedBasisLabel(value) { return value || '—'; }
 def test_all_explorer_columns_align_and_do_not_offer_incomparable_ranking():
     section = SRC[SRC.index("<!-- Sessions Tab -->"):SRC.index("<!-- Stats Tab -->")]
     tables = re.findall(r'<table[^>]*data-panel="[^"]+">(.*?)</table>', section, re.S)
-    assert len(tables) == 21
+    assert len(tables) == 22
     for table in tables:
         header = table[table.index("<thead>"):table.index("</thead>")]
         assert header.count('data-i18n="sessionSpeedColRate"') == 1

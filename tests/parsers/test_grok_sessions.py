@@ -304,3 +304,17 @@ def test_duplicate_entry_id_counted_once(_isolated_grok_home):
     raw = _grok_sessions()
     assert len(raw["s1"]["turns"]) == 1
     assert len(GrokParser(PricingDatabase()).collect(None, None)) == 1
+
+
+def test_turn_start_comes_from_elapsed_since_turn_start(_isolated_grok_home):
+    """inference_done says how long its turn had run; that places the prompt,
+    so a one-inference session is not zero."""
+    home = _isolated_grok_home
+    row = _infer(101, "2026-07-24T15:42:19.104Z", 15584, 245, sid="sess-1")
+    row["ctx"]["elapsed_since_turn_start_ms"] = 4940
+    _write_log(home.parent, [_model_event(101, "grok-4.5"), row])
+
+    session = get_sessions_data("grok", "all")["sessions"][0]
+
+    assert session["token_events"] == 1
+    assert session["active_ms"] == 4940

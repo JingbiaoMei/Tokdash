@@ -674,3 +674,20 @@ def test_reload_pricing_db_clears_qwen_caches(monkeypatch, tmp_path):
     misses_before = sessions._parse_qwen_code_session_file.cache_info().misses
     get_sessions_data("qwen_code", "all")
     assert sessions._parse_qwen_code_session_file.cache_info().misses > misses_before
+
+
+def test_one_turn_session_is_timed_from_its_prompt(monkeypatch, tmp_path):
+    """A user record anchors the turn after it; a tool_result record does not."""
+    base = tmp_path / "qwen-root"
+    tool_result = _rec("tr1", T_TODAY - 500, rtype="tool_result", model=None, session_id="s9")
+    _write_chat(base, "proj-a", "s9", [
+        _user_rec("question", T_TODAY - 6_000, session_id="s9"),
+        tool_result,
+        _rec("a1", T_TODAY, usage=_usage(), session_id="s9"),
+    ])
+    _setup(monkeypatch, tmp_path)
+
+    row = get_sessions_data("qwen_code", "all")["sessions"][0]
+
+    assert row["token_events"] == 1
+    assert row["active_ms"] == 6_000

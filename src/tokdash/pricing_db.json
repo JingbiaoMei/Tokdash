@@ -1,6 +1,6 @@
 {
-  "version": "2.0.43",
-  "lastUpdated": "2026-11-20T06:54:01Z",
+  "version": "2.0.44",
+  "lastUpdated": "2026-11-27T07:57:48Z",
   "note": "Comprehensive pricing database with all Moonshot, MiniMax, GLM, and OpenAI models from OpenRouter. Cache pricing estimated at 10% of input for cache_read, 100% of input for cache_write.",
   "aliases": {
     "Qwen/Qwen3.8-Flash-Next": "qwen3.8-flash",
@@ -2076,6 +2076,15 @@
       "cache_write": 4.35,
       "unit": "per_million_tokens",
       "source": "openrouter.ai/xiaomi/mimo-v2.6-pro-ultraspeed"
+    },
+    "mimo-v2.6-flash-mopd": {
+      "provider": "xiaomi",
+      "input": 0.35,
+      "output": 0.7,
+      "cache_read": 0.035,
+      "cache_write": 0.35,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/xiaomi/mimo-v2.6-flash-mopd"
     },
     "_comment_qwen": "=== Qwen Models ===",
     "qwen-2.5-72b-instruct": {
